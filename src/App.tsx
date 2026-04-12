@@ -573,7 +573,7 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed, badge, badgeStyl
   </button>
 );
 
-const UserDashboard = ({ student, setStudents, userRole, categories, setCategories, projects, students, checkTimeOverlap, selectedRecords, setSelectedRecords, handleDeleteSelected, setView, setSelectedProjectId, isDarkMode }: any) => {
+const UserDashboard = ({ student, setStudents, userRole, categories, setCategories, projects, students, checkTimeOverlap, selectedRecords, setSelectedRecords, handleDeleteSelected, setView, setSelectedProjectId, selectedStudentId, setSelectedStudentId, isDarkMode }: any) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
   const studentProjectIds = student 
@@ -1952,6 +1952,10 @@ const App = () => {
     });
   };
 
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+
   const handleDeleteProject = async (projectId: string) => {
     if (!projectId) {
       toast.error('Error: ID de proyecto no encontrado');
@@ -2022,9 +2026,6 @@ const App = () => {
   };
 
   const [view, setView] = useState('dashboard');
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
   
   const handleNavigate = (projectId: string, taskId?: string) => {
@@ -3582,6 +3583,8 @@ const App = () => {
                 handleDeleteSelected={handleDeleteSelected}
                 setView={setView}
                 setSelectedProjectId={setSelectedProjectId}
+                selectedStudentId={selectedStudentId}
+                setSelectedStudentId={setSelectedStudentId}
                 isDarkMode={isDarkMode}
               />
             )
