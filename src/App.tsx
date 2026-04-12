@@ -827,16 +827,21 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
 
   const handleEditTask = (record: any) => {
     setEditingRecordId(record.id);
-    setForm({
+    setSelectedStudentId(record.studentId);
+    setActivityForm({
       date: record.date || getCDMXDateString(),
       startTime: record.startTime || '09:00',
       endTime: record.endTime || '13:00',
+      hours: record.hours || 0,
+      isManualHours: !record.startTime || !record.endTime,
+      status: record.status || 'A',
       categoryId: record.categoryId || '',
       projectId: record.projectId || '',
       description: record.description || '',
       evidenceLink: record.evidenceLink || '',
+      selectedStudentIds: [record.studentId],
+      studentStatuses: { [record.studentId]: record.status || 'A' }
     });
-    setShowNewCat(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -3108,7 +3113,7 @@ const App = () => {
                 <select className="flex-1 p-4 border border-slate-200 rounded-2xl bg-white text-slate-900 text-sm font-bold" value={activityForm.projectId || ''} onChange={e => setActivityForm({...activityForm, projectId: e.target.value})}>
                   <option value="">General / Sin especificar</option>
                   {(() => {
-                     const sId = activityForm.selectedStudentIds[0] || student?.id;
+                     const sId = activityForm.selectedStudentIds[0] || selectedStudentId;
                      const student = getStudentData(sId);
                      if (!student) return null;
                      return Array.from(new Set(student.projectIds || [])).map((pid: string) => {
@@ -3158,8 +3163,9 @@ const App = () => {
           {activityForm.categoryId && !isGroup && (
             <div className="space-y-2">
               <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Alumno</label>
-              <select className="w-full p-4 border border-slate-200 rounded-2xl bg-white text-slate-900 text-sm font-bold" value={activityForm.selectedStudentIds[0] || student?.id || ''} onChange={e => {
+              <select className="w-full p-4 border border-slate-200 rounded-2xl bg-white text-slate-900 text-sm font-bold" value={activityForm.selectedStudentIds[0] || selectedStudentId || ''} onChange={e => {
                 setActivityForm({...activityForm, selectedStudentIds: [e.target.value]});
+                setSelectedStudentId(e.target.value);
               }}>
                 <option value="">Seleccionar Alumno</option>
                 {students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
