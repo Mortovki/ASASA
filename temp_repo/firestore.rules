@@ -1,0 +1,184 @@
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: /users/{uid}
+// Document ID: Firebase Auth UID
+// Fields:
+//   - uid: string (required) - User's unique identifier
+//   - email: string (required) - User's email address
+//   - firstName: string (required)
+//   - lastNamePaterno: string (required)
+//   - lastNameMaterno: string (required)
+//   - phone: string (required)
+//   - studentId: string (required)
+//   - career: string (required)
+//   - role: string (required, enum: ['admin', 'user'])
+//   - status: string (required)
+//   - brigadePeriod: string (required)
+//   - createdAt: timestamp (required)
+//
+// Collection: /projects/{projectId}
+// Document ID: Project ID
+// Fields:
+//   - id: string (required)
+//   - name: string (required)
+//   - createdAt: timestamp (required)
+//   - createdBy: string (required)
+//
+// Collection: /projects/{projectId}/tasks/{taskId}
+// Document ID: Task ID
+// Fields:
+//   - id: string (required)
+//   - projectId: string (required)
+//   - title: string (required)
+//   - status: string (required, enum: ['pending_approval', 'todo', 'working_on_it', 'waiting_review', 'stuck', 'done', 'rejected'])
+//   - priority: number (required, enum: [1, 2, 3, 4, 5])
+//   - type: string (required, enum: ['feature', 'bug', 'quality', 'security', 'operations'])
+//   - createdAt: timestamp (required)
+//   - createdBy: string (required)
+//
+// ===============================================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() &&
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+         (request.auth.token.email == "mortovki@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function hasOnlyAllowedFields(allowedFields) {
+      return request.resource.data.keys().hasOnly(allowedFields);
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // Users Collection
+    match /users/{uid} {
+      function isValidUser(data) {
+        return data.uid is string &&
+               data.email is string && isValidEmail(data.email) &&
+               data.firstName is string && data.firstName.size() > 0 && data.firstName.size() < 100 &&
+               data.role in ['admin', 'user'] &&
+               data.status is string;
+      }
+
+      allow read: if isAuthenticated();
+      
+      allow create: if isAuthenticated() && 
+                      isValidUser(request.resource.data) && 
+                      (isOwner(uid) && request.resource.data.role == 'user' || isAdmin());
+                      
+      allow update: if isAuthenticated() && 
+                      isValidUser(request.resource.data) && 
+                      (isOwner(uid) && request.resource.data.role == resource.data.role || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // Public Profiles Collection
+    match /public_profiles/{uid} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(uid) || isAdmin();
+      allow update: if isOwner(uid) || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Projects Collection
+    match /projects/{projectId} {
+      function isValidProject(data) {
+        return data.id is string && 
+               data.name is string && data.name.size() > 0 && data.name.size() < 200;
+      }
+
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() && isValidProject(request.resource.data);
+      allow update: if isAdmin() && isValidProject(request.resource.data);
+      allow delete: if isAdmin();
+
+      // Tasks Subcollection
+      match /tasks/{taskId} {
+        function isValidTask(data) {
+          return data.projectId is string &&
+                 data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
+                 data.status in ['pending_approval', 'todo', 'working_on_it', 'waiting_review', 'stuck', 'done', 'rejected'] &&
+                 data.priority in [1, 2, 3, 4, 5];
+        }
+
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && (isValidTask(request.resource.data) || isAdmin());
+        allow update: if isAuthenticated() && (isAdmin() || isValidTask(request.resource.data));
+        allow delete: if isAdmin();
+
+        match /notes/{noteId} {
+          allow read, write: if isAuthenticated();
+        }
+        match /activity/{activityId} {
+          allow read, write: if isAuthenticated();
+        }
+      }
+
+      // Resources Subcollection
+      match /resources/{resourceId} {
+        allow read: if isAuthenticated();
+        allow write: if isAuthenticated();
+      }
+
+      // Deleted Tasks
+      match /deletedTasks/{taskId} {
+        allow read, write: if isAdmin();
+      }
+    }
+
+    // Stages
+    match /stages/{stageId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Sprints, Categories, etc.
+    match /sprints/{sprintId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    match /categories/{categoryId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+    // Notifications
+    match /users/{uid}/notifications/{notifId} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow update: if isOwner(uid) || isAdmin();
+      allow create: if isAuthenticated();
+      allow delete: if isOwner(uid) || isAdmin();
+    }
+
+    // Test Connection
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

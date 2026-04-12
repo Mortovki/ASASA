@@ -1,0 +1,252 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastNamePaterno": { "type": "string" },
+        "lastNameMaterno": { "type": "string" },
+        "phone": { "type": "string" },
+        "studentId": { "type": "string" },
+        "career": { "type": "string" },
+        "position": { "type": "string", "description": "Descriptive role or title" },
+        "color": { "type": "string" },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "level": { "type": "number", "minimum": 1, "maximum": 3 }
+            },
+            "required": ["id", "level"]
+          },
+          "description": "List of user skills with proficiency levels"
+        },
+        "brigadePeriod": { "type": "string" },
+        "status": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "notificationPreferences": {
+          "type": "object",
+          "description": "User notification preferences"
+        }
+      },
+      "required": ["uid", "email", "firstName", "lastNamePaterno", "lastNameMaterno", "phone", "studentId", "career", "role", "createdAt", "brigadePeriod", "status"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Project information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "color": { "type": "string" },
+        "description": { "type": "string", "description": "Descripción breve del proyecto (máx 160 caracteres)" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "stages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "color": { "type": "string" },
+              "startDate": { "type": "string", "format": "date-time" },
+              "endDate": { "type": "string", "format": "date-time" },
+              "description": { "type": "string" },
+              "order": { "type": "number" }
+            }
+          }
+        },
+        "currentStageIndex": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Sprint": {
+      "title": "Sprint",
+      "description": "Sprint or iteration information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "name": { "type": "string" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "stageId": { "type": "string" }
+      },
+      "required": ["id", "projectId", "name", "startDate", "endDate"]
+    },
+    "ProjectResource": {
+      "title": "ProjectResource",
+      "description": "External resource link for a project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "url": { "type": "string" },
+        "type": { "type": "string", "enum": ["drive", "docs", "sheets", "canva", "onedrive", "figma", "notion", "youtube", "github", "link"] },
+        "icon": { "type": "string" },
+        "addedBy": { "type": "string" },
+        "addedByName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "lastAccessed": { "type": "string", "format": "date-time" },
+        "order": { "type": "number" }
+      },
+      "required": ["id", "name", "url", "type", "addedBy", "addedByName", "createdAt", "order"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Category information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "icon": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Task information within a project",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending_approval", "todo", "working_on_it", "waiting_review", "stuck", "done", "rejected"] },
+        "priority": { "type": "number", "enum": [1, 2, 3, 4, 5] },
+        "effort": { "type": "number" },
+        "type": { "type": "string", "enum": ["feature", "bug", "quality", "security", "operations"] },
+        "assignedTo": { "type": "string" },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "phase": { "type": "string" },
+        "stageId": { "type": "string" },
+        "epic": { "type": "string" },
+        "estimatedSP": { "type": "number" },
+        "categoryId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" },
+        "deletedAt": { "type": "string", "format": "date-time" },
+        "deletedBy": { "type": "string" },
+        "lastMovedFrom": { "type": "string" },
+        "lastMovedAt": { "type": "string", "format": "date-time" },
+        "lastMovedBy": { "type": "string" },
+        "dependencies": { "type": "array", "items": { "type": "string" } },
+        "isCritical": { "type": "boolean" },
+        "slack": { "type": "number" },
+        "earlyStart": { "type": "number" },
+        "earlyFinish": { "type": "number" },
+        "lateStart": { "type": "number" },
+        "lateFinish": { "type": "number" }
+      },
+      "required": ["id", "projectId", "title", "status", "priority", "type", "createdAt", "createdBy"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Log of activities for a task",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["status_change", "field_update", "comment_added", "task_deleted", "task_restored"] },
+        "field": { "type": "string" },
+        "oldValue": { "type": "any" },
+        "newValue": { "type": "any" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "type", "authorUid", "authorName", "createdAt"]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "Note for a task",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "content": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "tag": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "editedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "content", "authorUid", "authorName", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notification",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string", "enum": ["task_approved", "task_rejected", "task_assigned", "task_status_changed", "task_stuck", "task_overdue", "task_near_deadline", "approval_pending", "critical_path_updated", "critical_task_delayed", "slack_warning", "note_added", "note_mention", "task_deleted", "task_restored"] },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "projectId": { "type": "string" },
+        "projectName": { "type": "string" },
+        "taskId": { "type": "string" },
+        "taskTitle": { "type": "string" },
+        "triggeredBy": { "type": "string" },
+        "triggeredByName": { "type": "string" },
+        "read": { "type": "boolean" },
+        "readAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "actionUrl": { "type": "string" },
+        "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] }
+      },
+      "required": ["id", "type", "title", "message", "triggeredBy", "triggeredByName", "read", "createdAt", "priority"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "Collection of user profiles"
+    },
+    "/projects/{projectId}": {
+      "schema": "Project",
+      "description": "Collection of projects"
+    },
+    "/sprints/{sprintId}": {
+      "schema": "Sprint",
+      "description": "Collection of sprints"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Collection of categories"
+    },
+    "/projects/{projectId}/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Collection of tasks for a project"
+    },
+    "/projects/{projectId}/resources/{resourceId}": {
+      "schema": "ProjectResource",
+      "description": "Collection of external resources for a project"
+    },
+    "/projects/{projectId}/deletedTasks/{taskId}": {
+      "schema": "Task",
+      "description": "Collection of soft-deleted tasks for a project"
+    },
+    "/projects/{projectId}/tasks/{taskId}/notes/{noteId}": {
+      "schema": "Note",
+      "description": "Collection of notes for a task"
+    },
+    "/projects/{projectId}/tasks/{taskId}/activity/{activityId}": {
+      "schema": "ActivityLog",
+      "description": "Collection of activity logs for a task"
+    },
+    "/users/{uid}/notifications/{notifId}": {
+      "schema": "Notification",
+      "description": "Collection of user notifications"
+    }
+  }
+}
