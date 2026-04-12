@@ -827,21 +827,16 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
 
   const handleEditTask = (record: any) => {
     setEditingRecordId(record.id);
-    setSelectedStudentId(record.studentId);
-    setActivityForm({
+    setForm({
       date: record.date || getCDMXDateString(),
       startTime: record.startTime || '09:00',
       endTime: record.endTime || '13:00',
-      hours: record.hours || 0,
-      isManualHours: !record.startTime || !record.endTime,
-      status: record.status || 'A',
       categoryId: record.categoryId || '',
-      projectId: record.projectId || '',
+      projectId: record.projectId || studentProjectIds[0] || '',
       description: record.description || '',
       evidenceLink: record.evidenceLink || '',
-      selectedStudentIds: [record.studentId],
-      studentStatuses: { [record.studentId]: record.status || 'A' }
     });
+    setShowNewCat(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
