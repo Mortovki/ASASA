@@ -755,37 +755,56 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
     };
 
     try {
-      const existingStudent = students.find((s: any) => s.id === student?.id) || student;
-      const existingRecords = existingStudent?.records || [];
-      const editIndex = editingRecordId ? existingRecords.findIndex((r: any) => r.id === editingRecordId) : -1;
-      const updatedRecords = editIndex !== -1
-        ? existingRecords.map((r: any) => r.id === editingRecordId ? newRecord : r)
-        : [...existingRecords, newRecord];
+      if (editingRecordId) {
+        const updatedStudents = students.map((s: any) => s.id === student?.id ? { 
+          ...s, 
+          records: (s.records || []).map((r: any) => r.id === editingRecordId ? newRecord : r) 
+        } : s);
+        setStudents(updatedStudents);
+        
+        let studentToUpdate = updatedStudents.find((s: any) => s.id === student?.id);
+        if (!studentToUpdate && student?.id) {
+          studentToUpdate = {
+            ...student,
+            records: (student.records || []).map((r: any) => r.id === editingRecordId ? newRecord : r)
+          };
+        }
 
-      const updatedStudents = students.map((s: any) => s.id === student?.id ? { ...s, records: updatedRecords } : s);
-      setStudents(updatedStudents);
+        if (studentToUpdate) {
+          const dataToSave = {
+            ...studentToUpdate,
+            uid: student?.id,
+            role: studentToUpdate.role || 'user',
+            createdAt: studentToUpdate.createdAt || new Date().toISOString()
+          };
+          await setDoc(doc(db, 'users', student?.id), dataToSave, { merge: true });
+        }
+        toast.dismiss(loadingToast);
+        showSuccessToast("Registro actualizado exitosamente");
+      } else {
+        const updatedStudents = students.map((s: any) => s.id === student?.id ? { ...s, records: [...(s.records || []), newRecord] } : s);
+        setStudents(updatedStudents);
 
-      if (userProfile?.uid === student?.id) {
-        setUserProfile((prev: any) => prev ? { ...prev, records: updatedRecords } : prev);
+        let studentToUpdate = updatedStudents.find((s: any) => s.id === student?.id);
+        if (!studentToUpdate && student?.id) {
+          studentToUpdate = {
+            ...student,
+            records: [...(student.records || []), newRecord]
+          };
+        }
+
+        if (studentToUpdate) {
+          const dataToSave = {
+            ...studentToUpdate,
+            uid: student?.id,
+            role: studentToUpdate.role || 'user',
+            createdAt: studentToUpdate.createdAt || new Date().toISOString()
+          };
+          await setDoc(doc(db, 'users', student?.id), dataToSave, { merge: true });
+        }
+        toast.dismiss(loadingToast);
+        showSuccessToast("Registro enviado para revisión exitosamente");
       }
-
-      let studentToUpdate = updatedStudents.find((s: any) => s.id === student?.id);
-      if (!studentToUpdate && existingStudent?.id) {
-        studentToUpdate = { ...existingStudent, records: updatedRecords };
-      }
-
-      if (studentToUpdate) {
-        const dataToSave = {
-          ...studentToUpdate,
-          uid: student?.id,
-          role: studentToUpdate.role || 'user',
-          createdAt: studentToUpdate.createdAt || new Date().toISOString()
-        };
-        await setDoc(doc(db, 'users', student?.id), dataToSave, { merge: true });
-      }
-
-      toast.dismiss(loadingToast);
-      showSuccessToast(editingRecordId ? "Registro actualizado exitosamente" : "Registro enviado para revisión exitosamente");
 
       setForm({
         date: getCDMXDateString(),
