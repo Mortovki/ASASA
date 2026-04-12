@@ -2024,7 +2024,6 @@ const App = () => {
   const [view, setView] = useState('dashboard');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
   
   const handleNavigate = (projectId: string, taskId?: string) => {
@@ -2049,6 +2048,7 @@ const App = () => {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null); // To identify the logged-in user
   const [calendarMode, setCalendarMode] = useState('grid');
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
