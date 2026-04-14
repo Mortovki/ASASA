@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Maximize, ZoomIn, ZoomOut, AlertTriangle, CheckCircle2, Clock, List, LayoutGrid, Activity, Trash2 } from 'lucide-react';
 import TaskSidePanel from './TaskSidePanel';
 import { computeCriticalPath } from '../utils/criticalPath';
@@ -335,7 +336,7 @@ const GanttView = ({
                       {permissions?.canDeleteTask && (
                         <button
                           onClick={(e) => handleDeleteTask(task.id, e)}
-                          className={`opacity-0 group-hover:opacity-100 p-1.5 rounded-lg transition-all ${isDarkMode ? 'text-gray-500 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'}`}
+                          className={`opacity-100 lg:opacity-0 lg:group-hover:opacity-100 p-1.5 rounded-lg transition-all ${isDarkMode ? 'text-gray-500 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'}`}
                           title="Eliminar tarea"
                         >
                           <Trash2 size={14} />

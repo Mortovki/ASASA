@@ -90,7 +90,7 @@ export const StageManagementView: React.FC<StageManagementViewProps> = ({ projec
 
       {/* Contenido Principal */}
       <div className="flex-1 overflow-y-auto p-8">
-        <AnimatePresence mode="wait">
+        <AnimatePresence>
           {viewMode === 'pipeline' ? (
             <motion.div
               key="pipeline-view"

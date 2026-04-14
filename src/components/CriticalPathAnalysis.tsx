@@ -184,7 +184,7 @@ export const CriticalPathAnalysis: React.FC<CriticalPathAnalysisProps> = ({ task
 
         {/* View Content */}
         <div className="lg:col-span-3 relative">
-          <AnimatePresence mode="wait">
+          <AnimatePresence>
             {activeView === 'network' && (
               <motion.div 
                 key="network" 

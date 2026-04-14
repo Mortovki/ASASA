@@ -13,17 +13,23 @@ export async function createNotification(
   const ref = collection(db, 'users', recipientUid, 'notifications');
   
   // Evitar duplicados en las últimas 24 horas
-  const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const q = query(
-    ref,
-    where('type', '==', data.type),
-    where('taskId', '==', data.taskId),
-    where('createdAt', '>', oneDayAgo)
-  );
-  
-  const snapshot = await getDocs(q);
-  if (!snapshot.empty) {
-    return; // Ya existe una notificación similar reciente
+  try {
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const q = query(
+      ref,
+      where('type', '==', data.type),
+      where('taskId', '==', data.taskId),
+      where('createdAt', '>', oneDayAgo)
+    );
+    
+    const snapshot = await getDocs(q);
+    if (!snapshot.empty) {
+      return; // Ya existe una notificación similar reciente
+    }
+  } catch (error) {
+    // Si no tenemos permiso para leer (ej: un usuario notificando a un admin), 
+    // simplemente procedemos con la creación sin el check de duplicados.
+    console.warn("No se pudo verificar duplicados de notificación (permisos insuficientes), procediendo...");
   }
 
   await addDoc(ref, {
@@ -36,7 +42,7 @@ export async function createNotification(
 }
 
 export async function getProjectAdmins(projectId: string) {
-  const usersRef = collection(db, 'users');
+  const usersRef = collection(db, 'public_profiles');
   const q = query(usersRef, where('role', 'in', ['admin', 'coordinator']));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(d => ({ uid: d.id, ...d.data() }));

@@ -72,7 +72,7 @@ export const ProfileSkillMap: React.FC<ProfileSkillMapProps> = ({
 
       {/* Main Content Area */}
       <div className="flex-1 relative overflow-hidden flex flex-col p-6">
-        <AnimatePresence mode="wait">
+        <AnimatePresence>
           <motion.div
             key={activeView}
             initial={{ opacity: 0, y: 10 }}

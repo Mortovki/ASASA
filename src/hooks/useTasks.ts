@@ -95,8 +95,13 @@ export const useTasks = (projectId: string | null, userRole: string = 'user') =>
     if (!tasks || tasks.length === 0 || !auth.currentUser) return;
 
     const checkDeadlines = async () => {
+      const isAtLeastCoordinator = userRole === 'admin' || userRole === 'coordinator';
+      
       for (const task of tasks) {
         if (task.status === 'done' || task.status === 'rejected' || !task.endDate || !task.assignedTo) continue;
+        
+        // Only trigger notifications if the current user is the assignee or an admin/coordinator
+        if (task.assignedTo !== auth.currentUser?.uid && !isAtLeastCoordinator) continue;
         
         const daysLeft = differenceInCalendarDays(new Date(task.endDate), new Date());
         

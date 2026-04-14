@@ -257,9 +257,9 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                 </div>
               </div>
 
-              {isMobile && (
+              {isMobile && userRole === 'admin' && (
                 <button 
-                  onClick={() => userRole === 'admin' && setActiveTab('stages')}
+                  onClick={() => setActiveTab('stages')}
                   className={`p-1.5 transition-colors ${isDarkMode ? 'text-gray-500 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
                 >
                   <Settings2 size={18} />
@@ -327,13 +327,15 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                   </div>
                 </div>
               )}
-              <button 
-                onClick={() => userRole === 'admin' && setActiveTab('stages')}
-                className={`p-1.5 sm:p-2 transition-colors ${isDarkMode ? 'text-gray-500 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
-                title="Configuración de Etapas"
-              >
-                <Settings2 size={18} />
-              </button>
+              {userRole === 'admin' && (
+                <button 
+                  onClick={() => setActiveTab('stages')}
+                  className={`p-1.5 sm:p-2 transition-colors ${isDarkMode ? 'text-gray-500 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
+                  title="Configuración de Etapas"
+                >
+                  <Settings2 size={18} />
+                </button>
+              )}
             </div>
           )}
         </div>

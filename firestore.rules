@@ -58,15 +58,23 @@ service cloud.firestore {
     
     function isAdmin() {
       return isAuthenticated() &&
-        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
-         request.auth.token.email == "luisedgar.gutierrez17@gmail.com");
+        (request.auth.token.email == "luisedgar.gutierrez17@gmail.com" ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
     }
 
     function isCoordinator() {
       return isAuthenticated() &&
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordinator');
+    }
+
+    function isAtLeastCoordinator() {
+      return isAuthenticated() && (
+        request.auth.token.email == "luisedgar.gutierrez17@gmail.com" ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'coordinator'])
+      );
     }
 
     function isValidEmail(email) {
@@ -91,21 +99,70 @@ service cloud.firestore {
                data.status is string;
       }
 
-      allow read: if isOwner(uid) || isAdmin() || isCoordinator() || (isAuthenticated() && resource.data.email == request.auth.token.email) || (isAuthenticated() && resource.data.role in ['admin', 'coordinator']);
+      allow read: if isOwner(uid) || isAtLeastCoordinator();
       
       allow create: if isAuthenticated() && 
                       (isAdmin() || (isValidUser(request.resource.data) && isOwner(uid) && request.resource.data.role == 'user'));
                       
       allow update: if isAuthenticated() && 
-                      (isAdmin() || (isValidUser(request.resource.data) && isOwner(uid) && request.resource.data.role == resource.data.role));
+                      (isAdmin() || (
+                        isOwner(uid) && 
+                        isValidUser(request.resource.data) && 
+                        request.resource.data.role == resource.data.role &&
+                        // REQUERIMIENTO: Nadie puede actualizar horasTotales desde el cliente
+                        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['horasTotales'])
+                      ));
       allow delete: if isAdmin();
+    }
+
+    // Sesiones Collection (REQUERIMIENTO 3)
+    match /sesiones/{sesionId} {
+      function isValidSession(data) {
+        return data.userId is string &&
+               data.projectId is string &&
+               data.horasCalculadas is number &&
+               data.estado in ['pendiente', 'aprobado', 'rechazado', 'disputado'];
+      }
+
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAtLeastCoordinator());
+      
+      allow create: if isAuthenticated() && 
+                      request.resource.data.userId == request.auth.uid &&
+                      request.resource.data.estado == 'pendiente' &&
+                      isValidSession(request.resource.data);
+                      
+      allow update: if isAuthenticated() && (
+                      // El usuario puede editar sus propias sesiones
+                      (request.auth.uid == resource.data.userId && 
+                       request.resource.data.userId == resource.data.userId && (
+                        // Caso A: Regresar a pendiente para corregir (permite editar campos)
+                        (request.resource.data.estado == 'pendiente' && isValidSession(request.resource.data)) ||
+                        // Caso B: Solo marcar como leída la notificación de rechazo (sin cambiar estado)
+                        (resource.data.estado == 'rechazado' && 
+                         request.resource.data.estado == 'rechazado' &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acknowledgedRejection'])) ||
+                        // Caso C: Disputar una sesión rechazada
+                        (resource.data.estado == 'rechazado' &&
+                         request.resource.data.estado == 'disputado' &&
+                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'disputeReason', 'disputeDate']))
+                      )) ||
+                      // Solo admin/coordinador puede cambiar el estado (aprobado/rechazado)
+                      (isAtLeastCoordinator() && isValidSession(request.resource.data))
+                    );
+      allow delete: if isAtLeastCoordinator() || (isAuthenticated() && request.auth.uid == resource.data.userId);
+    }
+
+    // Logs Auditoría (REQUERIMIENTO 3)
+    match /logs_auditoria/{logId} {
+      allow read: if isAtLeastCoordinator();
+      allow write: if false; // Solo backend/Admin SDK
     }
 
     // Public Profiles Collection
     match /public_profiles/{uid} {
       allow read: if isAuthenticated();
-      allow create: if isOwner(uid) || isAdmin();
-      allow update: if isOwner(uid) || isAdmin();
+      allow create: if isOwner(uid) || isAtLeastCoordinator();
+      allow update: if isOwner(uid) || isAtLeastCoordinator();
       allow delete: if isAdmin();
     }
 
@@ -117,8 +174,8 @@ service cloud.firestore {
       }
 
       allow read: if isAuthenticated();
-      allow create: if isAdmin() && isValidProject(request.resource.data);
-      allow update: if isAdmin() && isValidProject(request.resource.data);
+      allow create: if isAtLeastCoordinator() && isValidProject(request.resource.data);
+      allow update: if isAtLeastCoordinator() && isValidProject(request.resource.data);
       allow delete: if isAdmin();
 
       // Tasks Subcollection
@@ -130,10 +187,29 @@ service cloud.firestore {
                  data.priority in [1, 2, 3, 4, 5];
         }
 
+        function canCreateTask(data) {
+          return isAuthenticated() && (
+            isAtLeastCoordinator() || 
+            (isValidTask(data) && data.status == 'pending_approval')
+          );
+        }
+
+        function canUpdateTask(data, oldData) {
+          return isAuthenticated() && (
+            isAtLeastCoordinator() || 
+            (isValidTask(data) && (
+               // Permite cambios si el estado no cambia
+               data.status == oldData.status || 
+               // O si no es una acción de aprobación (de pendiente a otro) ni de rechazo
+               (oldData.status != 'pending_approval' && data.status != 'rejected')
+            ))
+          );
+        }
+
         allow read: if isAuthenticated();
-        allow create: if isAuthenticated() && (isValidTask(request.resource.data) || isAdmin());
-        allow update: if isAuthenticated() && (isAdmin() || isValidTask(request.resource.data));
-        allow delete: if isAdmin();
+        allow create: if canCreateTask(request.resource.data);
+        allow update: if canUpdateTask(request.resource.data, resource.data);
+        allow delete: if isAtLeastCoordinator();
 
         match /notes/{noteId} {
           allow read, write: if isAuthenticated();
@@ -151,33 +227,33 @@ service cloud.firestore {
 
       // Deleted Tasks
       match /deletedTasks/{taskId} {
-        allow read, write: if isAdmin();
+        allow read, write: if isAtLeastCoordinator();
       }
     }
 
     // Stages
     match /stages/{stageId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAtLeastCoordinator();
     }
 
     // Sprints, Categories, etc.
     match /sprints/{sprintId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAtLeastCoordinator();
     }
 
     match /categories/{categoryId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAtLeastCoordinator();
     }
 
     // Notifications
     match /users/{uid}/notifications/{notifId} {
-      allow read: if isOwner(uid) || isAdmin();
-      allow update: if isOwner(uid) || isAdmin();
+      allow read: if isOwner(uid) || isAtLeastCoordinator();
+      allow update: if isOwner(uid) || isAtLeastCoordinator();
       allow create: if isAuthenticated();
-      allow delete: if isOwner(uid) || isAdmin();
+      allow delete: if isOwner(uid) || isAtLeastCoordinator();
     }
 
     // Test Connection

@@ -148,7 +148,7 @@ export function SkillMap({ users, onAddUser, onUpdateUser, isAdmin, currentUserI
             </div>
 
             <div className="flex-1 relative overflow-hidden">
-              <AnimatePresence mode="wait">
+              <AnimatePresence>
                 <motion.div
                   key={activeTab}
                   initial={{ opacity: 0, scale: 0.98 }}

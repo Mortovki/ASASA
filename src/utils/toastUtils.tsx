@@ -24,7 +24,7 @@ export const showSuccessToast = (message: string) => {
       </div>
     </div>,
     document.body
-  ), { duration: 8000 });
+  ), { duration: 5000 });
 };
 
 export const showErrorToast = (message: string, onRetry?: () => void) => {
@@ -58,7 +58,7 @@ export const showErrorToast = (message: string, onRetry?: () => void) => {
       </div>
     </div>,
     document.body
-  ), { duration: 8000 });
+  ), { duration: 5000 });
 };
 
 export const showLoadingToast = (message: string) => {

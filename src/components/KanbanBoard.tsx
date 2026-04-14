@@ -297,7 +297,7 @@ const KanbanBoard = ({
         >
           {layout === 'mobile' ? (
             <div className="flex-1 overflow-y-auto px-1 pb-24">
-              <AnimatePresence mode="wait">
+              <AnimatePresence>
                 {activeColumn && (
                   <motion.div
                     key={activeColumn.id}

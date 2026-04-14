@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect, useRef, Component } from 'react';
 import { createPortal } from 'react-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
-import { doc, getDoc, setDoc, deleteDoc, getDocFromServer, getDocs, collection, query, orderBy, limit, onSnapshot, where, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, getDocFromServer, getDocs, collection, query, orderBy, limit, onSnapshot, where, writeBatch, updateDoc } from 'firebase/firestore';
 import Login from './components/Login';
 import ProfileForm from './components/ProfileForm';
 import { AdminValidation } from './components/AdminValidation';
@@ -646,13 +646,19 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'pending'>('desc');
 
-  const totalHours = (student?.records || []).reduce((acc: number, r: any) => {
-    if (r.validationStatus === 'aprobado') {
-      const val = parseFloat(r.hours);
-      return acc + (isNaN(val) ? 0 : val);
-    }
-    return acc;
-  }, 0);
+  const totalHours = useMemo(() => {
+    // REQUERIMIENTO: Usar horasTotales del documento de usuario como fuente oficial
+    if (typeof student?.horasTotales === 'number') return student.horasTotales;
+    
+    // Fallback al cálculo local si no existe el campo (ej. migración)
+    return (student?.records || []).reduce((acc: number, r: any) => {
+      if (r.validationStatus === 'aprobado') {
+        const val = parseFloat(r.hours);
+        return acc + (isNaN(val) ? 0 : val);
+      }
+      return acc;
+    }, 0);
+  }, [student?.horasTotales, student?.records]);
   const progress = Math.min((totalHours / TOTAL_REQUIRED_HOURS) * 100, 100);
 
   const calcHours = useMemo(() => {
@@ -749,90 +755,35 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
       }
     }
 
-    const newRecord = {
-        id: editingRecordId || Date.now().toString(),
-        date: form.date,
-        hours: calcHours,
-        categoryId: finalCatId,
+    const newRecordId = editingRecordId || `rec-${Date.now()}`;
+    const sessionData: any = {
+        id: newRecordId,
+        userId: student?.id,
         projectId: form.projectId,
+        categoryId: finalCatId,
         description: form.description,
-        evidenceLink: form.evidenceLink,
-        status: 'A',
+        date: form.date,
         startTime: form.startTime,
         endTime: form.endTime,
-        validationStatus: 'pendiente',
-        createdBy: userRole
+        horasCalculadas: calcHours,
+        estado: 'pendiente',
+        evidenceLink: form.evidenceLink,
+        updatedBy: auth.currentUser?.uid,
+        acknowledgedRejection: false,
     };
 
+    if (!editingRecordId) {
+      sessionData.createdAt = new Date().toISOString();
+    }
+
     try {
-      if (editingRecordId) {
-        const oldRecord = (student?.records || []).find((r: any) => r.id === editingRecordId);
-        const updatedRecord = {
-            ...(oldRecord || {}),
-            id: editingRecordId,
-            date: form.date,
-            hours: calcHours,
-            categoryId: finalCatId,
-            projectId: form.projectId,
-            description: form.description,
-            evidenceLink: form.evidenceLink,
-            status: 'A',
-            startTime: form.startTime,
-            endTime: form.endTime,
-            validationStatus: 'pendiente',
-            createdBy: oldRecord ? oldRecord.createdBy : userRole
-        };
-
-        const updatedStudents = students.map((s: any) => s.id === student?.id ? { 
-          ...s, 
-          records: (s.records || []).map((r: any) => r.id === editingRecordId ? updatedRecord : r) 
-        } : s);
-        setStudents(updatedStudents);
-        
-        let studentToUpdate = updatedStudents.find((s: any) => s.id === student?.id);
-        if (!studentToUpdate && student?.id) {
-          studentToUpdate = {
-            ...student,
-            records: (student.records || []).map((r: any) => r.id === editingRecordId ? updatedRecord : r)
-          };
-        }
-
-        if (studentToUpdate) {
-          const dataToSave = {
-            ...studentToUpdate,
-            uid: student?.id,
-            role: studentToUpdate.role || 'user',
-            createdAt: studentToUpdate.createdAt || new Date().toISOString()
-          };
-          await setDoc(doc(db, 'users', student?.id), dataToSave, { merge: true });
-        }
-        toast.dismiss(loadingToast);
-        showSuccessToast("Registro actualizado exitosamente");
-      } else {
-        const updatedStudents = students.map((s: any) => s.id === student?.id ? { ...s, records: [...(s.records || []), newRecord] } : s);
-        setStudents(updatedStudents);
-
-        let studentToUpdate = updatedStudents.find((s: any) => s.id === student?.id);
-        if (!studentToUpdate && student?.id) {
-          studentToUpdate = {
-            ...student,
-            records: [...(student.records || []), newRecord]
-          };
-        }
-
-        if (studentToUpdate) {
-          const dataToSave = {
-            ...studentToUpdate,
-            uid: student?.id,
-            role: studentToUpdate.role || 'user',
-            createdAt: studentToUpdate.createdAt || new Date().toISOString()
-          };
-          await setDoc(doc(db, 'users', student?.id), dataToSave, { merge: true });
-        }
-        toast.dismiss(loadingToast);
-        showSuccessToast("Registro enviado para revisión exitosamente");
-      }
-
+      setIsSubmitting(true);
+      const sessionRef = doc(db, 'sesiones', newRecordId);
+      await setDoc(sessionRef, sessionData, { merge: true });
+      
+      toast.dismiss(loadingToast);
+      showSuccessToast(editingRecordId ? "Registro actualizado exitosamente" : "Registro enviado para revisión exitosamente");
+      
       setForm({
         date: getCDMXDateString(),
         startTime: '09:00',
@@ -846,7 +797,8 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
       setEditingRecordId(null);
     } catch (error) {
       toast.dismiss(loadingToast);
-      handleFirestoreError(error, OperationType.WRITE, `users/${student?.id}`);
+      console.error("Error saving session:", error);
+      handleFirestoreError(error, OperationType.WRITE, `sesiones/${newRecordId}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -866,31 +818,16 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const handleDeleteTask = (recordId: string) => {
-    const updatedRecords = (student?.records || []).filter((r: any) => r.id !== recordId);
-    const updatedStudents = students.map((s: any) => s.id === student?.id ? { ...s, records: updatedRecords } : s);
-    
-    setStudents(updatedStudents);
+  const handleDeleteTask = async (recordId: string) => {
+    const loadingToast = showLoadingToast("Eliminando registro...");
     try {
-      let studentToUpdate = updatedStudents.find((s: any) => s.id === student?.id);
-      if (!studentToUpdate && student?.id) {
-        studentToUpdate = {
-          ...student,
-          records: updatedRecords
-        };
-      }
-      if (studentToUpdate) {
-        const dataToSave = {
-          ...studentToUpdate,
-          uid: student?.id,
-          role: studentToUpdate.role || 'user',
-          createdAt: studentToUpdate.createdAt || new Date().toISOString()
-        };
-        setDoc(doc(db, 'users', student?.id), dataToSave, { merge: true });
-        showSuccessToast("Actividad eliminada");
-      }
+      await deleteDoc(doc(db, 'sesiones', recordId));
+      showSuccessToast("Registro eliminado");
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${student?.id}`);
+      console.error("Error deleting session:", error);
+      handleFirestoreError(error, OperationType.DELETE, `sesiones/${recordId}`);
+    } finally {
+      toast.dismiss(loadingToast);
     }
   };
 
@@ -1020,36 +957,17 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
       return;
     }
 
-    const updatedStudents = students.map((s: any) => {
-      if (s.id === student?.id) {
-        return {
-          ...s,
-          records: (s.records || []).map((r: any) => {
-            if (r.id === disputeModal.recordId) {
-              return {
-                ...r,
-                validationStatus: 'disputado',
-                disputeReason: disputeReason.trim(),
-                disputeDate: new Date().toISOString()
-              };
-            }
-            return r;
-          })
-        };
-      }
-      return s;
-    });
-
-    setStudents(updatedStudents);
-    
     try {
-      const studentToUpdate = updatedStudents.find((s: any) => s.id === student?.id);
-      if (studentToUpdate) {
-        await setDoc(doc(db, 'users', student?.id), studentToUpdate, { merge: true });
+      if (disputeModal.recordId) {
+        await updateDoc(doc(db, 'sesiones', disputeModal.recordId), {
+          estado: 'disputado',
+          disputeReason: disputeReason.trim(),
+          disputeDate: new Date().toISOString()
+        });
         showSuccessToast("Disputa enviada correctamente. El administrador revisará tu caso.");
       }
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${student?.id}`);
+      handleFirestoreError(error, OperationType.UPDATE, `sesiones/${disputeModal.recordId}`);
     }
 
     setDisputeModal({ isOpen: false, recordId: null });
@@ -1555,7 +1473,14 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
         <div className="space-y-8">
           <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm">
             <div className="flex justify-between items-center mb-6">
-                <span className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] bg-indigo-50 px-3 py-1 rounded-full shadow-sm border border-indigo-100">Progreso General</span>
+                <div className="flex flex-col">
+                  <span className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] bg-indigo-50 px-3 py-1 rounded-full shadow-sm border border-indigo-100 w-fit">Progreso General</span>
+                  {typeof student?.horasTotales === 'number' && (
+                    <span className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest mt-2 ml-1 flex items-center gap-1">
+                      <Shield size={10} /> Verificado por Servidor
+                    </span>
+                  )}
+                </div>
                 <span className="text-2xl font-black text-indigo-600 tracking-tighter">{Number(totalHours.toFixed(2))} / {TOTAL_REQUIRED_HOURS}</span>
             </div>
             <div className="w-full bg-slate-100 h-6 rounded-full overflow-hidden mb-4 shadow-inner">
@@ -1658,7 +1583,7 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                           )}
                         </div>
                         {r.createdBy !== 'admin' && (
-                            <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                            <div className="absolute top-4 right-4 flex gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all">
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); handleEditTask(r); }} 
                                   className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
@@ -1925,6 +1850,20 @@ const App = () => {
     const saved = localStorage.getItem('app_students');
     return saved ? JSON.parse(saved) : INITIAL_STUDENTS;
   });
+  const [sessions, setSessions] = useState<any[]>([]);
+
+  const studentsWithRecords = useMemo(() => {
+    return students.map(student => {
+      const studentSessions = sessions
+        .filter((s: any) => s.userId === student.id)
+        .map((s: any) => ({
+          ...s,
+          hours: s.horasCalculadas,
+          validationStatus: s.estado
+        }));
+      return { ...student, records: dedupeById(studentSessions) };
+    });
+  }, [students, sessions]);
 
   const [categories, setCategories] = useState(() => {
     const saved = localStorage.getItem('app_categories');
@@ -2113,8 +2052,19 @@ const App = () => {
             if (data.records) {
               data.records = dedupeById(data.records);
             }
-            setUserProfile(data);
-            localStorage.setItem(`profile_${currentUser.uid}`, JSON.stringify(data));
+            const profileData = { ...data, id: currentUser.uid };
+            setUserProfile(profileData);
+            localStorage.setItem(`profile_${currentUser.uid}`, JSON.stringify(profileData));
+            
+            // Sync current user profile into students list
+            setStudents(prev => {
+              const exists = prev.find(s => s.id === currentUser.uid);
+              const name = `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || 'Sin nombre';
+              if (exists) {
+                return prev.map(s => s.id === currentUser.uid ? { ...s, ...profileData, name } : s);
+              }
+              return [...prev, { ...profileData, name }];
+            });
           } else {
             localStorage.removeItem(`profile_${currentUser.uid}`);
             setUserProfile(null);
@@ -2169,9 +2119,9 @@ const App = () => {
         const unacknowledged = userProfile.records.filter((r: any) => 
           r.validationStatus === 'rechazado' && r.acknowledgedRejection === false
         );
-        if (unacknowledged.length > 0) {
-          setRejectedNotifications(dedupeById(unacknowledged));
-        }
+        setRejectedNotifications(dedupeById(unacknowledged));
+      } else {
+        setRejectedNotifications([]);
       }
 
       if (userProfile.role === 'user') {
@@ -2203,6 +2153,40 @@ const App = () => {
       }
     }
   }, [userProfile]);
+  useEffect(() => {
+    if (!user || !userRole) return;
+
+    const sessionsQuery = userRole === 'user' 
+      ? query(collection(db, 'sesiones'), where('userId', '==', user.uid))
+      : collection(db, 'sesiones');
+
+    const unsubscribe = onSnapshot(sessionsQuery, (snapshot) => {
+      const sessionsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      
+      setSessions(sessionsData);
+      
+      // Update userProfile if it's the current user's sessions
+      if (user) {
+        const mySessions = sessionsData
+          .filter((s: any) => s.userId === user.uid)
+          .map((s: any) => ({
+            ...s,
+            hours: s.horasCalculadas,
+            validationStatus: s.estado
+          }));
+        setUserProfile(prev => prev ? { ...prev, records: dedupeById(mySessions) } : null);
+      }
+    }, (error) => {
+      console.error("Error listening to sessions:", error);
+      handleFirestoreError(error, OperationType.LIST, 'sesiones');
+    });
+
+    return () => unsubscribe();
+  }, [user, userRole]);
+
   useEffect(() => {
     if (loading || !user) return;
     const fetchConfig = async () => {
@@ -2261,36 +2245,71 @@ const App = () => {
   }, [user, userRole, loading]);
 
   useEffect(() => {
-    const fetchStudents = async () => {
-      setIsLoadingStudents(true);
-      try {
-        const collectionName = userRole !== 'user' ? 'users' : 'public_profiles';
-        const querySnapshot = await getDocs(collection(db, collectionName));
-        const studentsData = querySnapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            ...data,
-            records: data.records ? dedupeById(data.records) : [],
-            name: `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || 'Sin nombre'
-          };
-        });
-        setStudents(dedupeById(studentsData));
-      } catch (error: any) {
-        console.error("Error fetching students:", error);
-        // Only handle if it's not a permission error we already handle elsewhere
-        const isPermissionError = error?.code === 'permission-denied' || (error instanceof Error && error.message.includes('Missing or insufficient permissions'));
-        if (!isPermissionError) {
-          const collectionName = userRole !== 'user' ? 'users' : 'public_profiles';
-          handleFirestoreError(error, OperationType.LIST, collectionName);
-        }
-      } finally {
-        setIsLoadingStudents(false);
-      }
-    };
-    
     if (user && userRole) {
-      fetchStudents();
+      if (userRole !== 'user') {
+        // Real-time sync for admins/coordinators
+        const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
+          const studentsData = snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              ...data,
+              name: `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || 'Sin nombre'
+            };
+          });
+          
+          setStudents(prev => {
+            return studentsData.map(newStudent => {
+              const existingStudent = prev.find(s => s.id === newStudent.id);
+              return {
+                ...newStudent,
+                records: existingStudent?.records || []
+              };
+            });
+          });
+          setIsLoadingStudents(false);
+        }, (error) => {
+          console.error("Error listening to students:", error);
+          handleFirestoreError(error, OperationType.LIST, 'users');
+          setIsLoadingStudents(false);
+        });
+        return () => unsubscribe();
+      } else {
+        // One-time fetch for public profiles for regular users
+        const fetchStudents = async () => {
+          setIsLoadingStudents(true);
+          try {
+            const querySnapshot = await getDocs(collection(db, 'public_profiles'));
+            const studentsData = querySnapshot.docs.map(doc => {
+              const data = doc.data();
+              return {
+                id: doc.id,
+                ...data,
+                name: `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || 'Sin nombre'
+              };
+            });
+            
+            setStudents(prev => {
+              return studentsData.map(newStudent => {
+                const existingStudent = prev.find(s => s.id === newStudent.id);
+                return {
+                  ...newStudent,
+                  records: existingStudent?.records || []
+                };
+              });
+            });
+          } catch (error: any) {
+            console.error("Error fetching students:", error);
+            const isPermissionError = error?.code === 'permission-denied' || (error instanceof Error && error.message.includes('Missing or insufficient permissions'));
+            if (!isPermissionError) {
+              handleFirestoreError(error, OperationType.LIST, 'public_profiles');
+            }
+          } finally {
+            setIsLoadingStudents(false);
+          }
+        };
+        fetchStudents();
+      }
     }
   }, [user, userRole]);
 
@@ -2319,8 +2338,15 @@ const App = () => {
   const [activeSuggestionProject, setActiveSuggestionProject] = useState<string | null>(null);
 
   const getStudentData = (sId: string) => {
-    if (sId === user?.uid && userProfile) return { ...userProfile, id: userProfile.uid };
-    return students.find(s => s.id === sId);
+    const studentInList = studentsWithRecords.find(s => s.id === sId);
+    if (sId === user?.uid && userProfile) {
+      return { 
+        ...userProfile, 
+        id: userProfile.uid, 
+        records: studentInList?.records || userProfile.records || [] 
+      };
+    }
+    return studentInList;
   };
 
   const [studentForm, setStudentForm] = useState({
@@ -2533,26 +2559,23 @@ const App = () => {
     setStudents(updatedStudents);
 
     try {
-      const studentToUpdate = updatedStudents.find(s => s.id === selectedStudentId);
-      if (studentToUpdate) {
-        const dataToSave = {
-          ...studentToUpdate,
-          uid: selectedStudentId,
-          role: studentToUpdate.role || 'user',
-          createdAt: studentToUpdate.createdAt || new Date().toISOString()
-        };
-        await setDoc(doc(db, 'users', selectedStudentId), dataToSave, { merge: true });
-        
-        if (studentToUpdate.email) {
-          const subject = encodeURIComponent("Registro de horas rechazado");
-          const body = encodeURIComponent(`Hola ${studentToUpdate.name},\n\nTu registro de horas ha sido rechazado por el siguiente motivo:\n\n${rejectReason}\n\nPor favor revisa tu panel para más detalles.`);
-          window.open(`mailto:${studentToUpdate.email}?subject=${subject}&body=${body}`, '_blank');
-        }
-
-        showSuccessToast("Sesión rechazada y notificación enviada");
-        setRejectingRecord(null);
-        setRejectReason('');
+      await updateDoc(doc(db, 'sesiones', rejectingRecord.id), {
+        estado: 'rechazado',
+        rejectReason: rejectReason,
+        acknowledgedRejection: false,
+        updatedBy: auth.currentUser?.uid
+      });
+      
+      const studentToUpdate = students.find(s => s.id === selectedStudentId);
+      if (studentToUpdate && studentToUpdate.email) {
+        const subject = encodeURIComponent("Registro de horas rechazado");
+        const body = encodeURIComponent(`Hola ${studentToUpdate.name},\n\nTu registro de horas ha sido rechazado por el siguiente motivo:\n\n${rejectReason}\n\nPor favor revisa tu panel para más detalles.`);
+        window.open(`mailto:${studentToUpdate.email}?subject=${subject}&body=${body}`, '_blank');
       }
+
+      showSuccessToast("Sesión rechazada y notificación enviada");
+      setRejectingRecord(null);
+      setRejectReason('');
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${selectedStudentId}`);
     }
@@ -2603,18 +2626,12 @@ const App = () => {
   const handleAcknowledgeRejection = async (recordId: string) => {
     if (!userProfile) return;
     
-    const updatedRecords = (userProfile.records || []).map((r: any) => 
-      r.id === recordId ? { ...r, acknowledgedRejection: true } : r
-    );
-
-    const updatedProfile = { ...userProfile, records: updatedRecords };
-    setUserProfile(updatedProfile);
     setRejectedNotifications(prev => prev.filter(n => n.id !== recordId));
 
     try {
-      await setDoc(doc(db, 'users', userProfile.uid), updatedProfile, { merge: true });
+      await updateDoc(doc(db, 'sesiones', recordId), { acknowledgedRejection: true });
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${userProfile.uid}`);
+      handleFirestoreError(error, OperationType.UPDATE, `sesiones/${recordId}`);
     }
   };
 
@@ -2778,77 +2795,52 @@ const App = () => {
   };
 
   const handleApproveRecord = async (studentId: string, recordId: string) => {
-    const updatedStudents = students.map((s: any) => {
-      if (s.id === studentId) {
-        return {
-          ...s,
-          records: (s.records || []).map((r: any) => 
-            r.id === recordId ? { ...r, validationStatus: 'aprobado' } : r
-          )
-        };
-      }
-      return s;
-    });
-
-    setStudents(updatedStudents);
-
+    const loadingToast = showLoadingToast("Aprobando registro...");
     try {
-      const studentToUpdate = updatedStudents.find((s: any) => s.id === studentId);
-      if (studentToUpdate) {
-        const dataToSave = {
-          ...studentToUpdate,
-          uid: studentId,
-          role: studentToUpdate.role || 'user',
-          createdAt: studentToUpdate.createdAt || new Date().toISOString()
-        };
-        await setDoc(doc(db, 'users', studentId), dataToSave, { merge: true });
-        showSuccessToast("Registro aprobado");
-      }
+      const sessionRef = doc(db, 'sesiones', recordId);
+      await updateDoc(sessionRef, {
+        estado: 'aprobado',
+        updatedBy: user.uid
+      });
+      showSuccessToast("Registro aprobado");
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${studentId}`);
+      console.error("Error approving session:", error);
+      handleFirestoreError(error, OperationType.UPDATE, `sesiones/${recordId}`);
+    } finally {
+      toast.dismiss(loadingToast);
     }
   };
 
   const handleDeleteSelected = (studentId: string) => {
     if (selectedRecords.length === 0) return;
     
+    const studentToUpdate = students.find(s => s.id === studentId);
+    if (!studentToUpdate) return;
+
+    let recordsToDelete = selectedRecords;
+
+    if (recordsToDelete.length === 0) {
+      showErrorToast("No tienes permiso para eliminar los registros seleccionados.");
+      return;
+    }
+    
     showConfirmToast(
-      `¿Estás seguro de que deseas eliminar los ${selectedRecords.length} registros seleccionados?`,
+      `¿Estás seguro de que deseas eliminar ${recordsToDelete.length} registro(s)?`,
       async () => {
-        const updatedStudents = students.map((s: any) => {
-          if (s.id === studentId) {
-            return {
-              ...s,
-              records: (s.records || []).filter((r: any) => !selectedRecords.includes(r.id))
-            };
-          }
-          return s;
-        });
-        
-        setStudents(updatedStudents);
-        setSelectedRecords([]);
-        
+        const loadingToast = showLoadingToast("Eliminando seleccionados...");
         try {
-          let studentToUpdate = updatedStudents.find((s: any) => s.id === studentId);
-          if (!studentToUpdate && userProfile?.uid === studentId) {
-            studentToUpdate = {
-              ...userProfile,
-              id: userProfile.uid,
-              records: (userProfile.records || []).filter((r: any) => !selectedRecords.includes(r.id))
-            };
-          }
-          if (studentToUpdate) {
-            const dataToSave = {
-              ...studentToUpdate,
-              uid: studentId,
-              role: studentToUpdate.role || 'user',
-              createdAt: studentToUpdate.createdAt || new Date().toISOString()
-            };
-            await setDoc(doc(db, 'users', studentId), dataToSave, { merge: true });
-            showSuccessToast("Registros eliminados");
-          }
+          const batch = writeBatch(db);
+          recordsToDelete.forEach(recordId => {
+            batch.delete(doc(db, 'sesiones', recordId));
+          });
+          await batch.commit();
+          setSelectedRecords([]);
+          showSuccessToast("Registros eliminados");
         } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, `users/${studentId}`);
+          console.error("Error deleting selected sessions:", error);
+          handleFirestoreError(error, OperationType.DELETE, 'sesiones');
+        } finally {
+          toast.dismiss(loadingToast);
         }
       }
     );
@@ -3063,22 +3055,40 @@ const App = () => {
     const persistUpdates = async () => {
       try {
         const updates = targetIds.map(async (id: string) => {
-          const studentToUpdate = updatedStudents.find((s: any) => s.id === id);
-          if (studentToUpdate) {
-            const dataToSave = {
-              ...studentToUpdate,
-              uid: id,
-              role: studentToUpdate.role || 'user',
-              createdAt: studentToUpdate.createdAt || new Date().toISOString()
-            };
-            await setDoc(doc(db, 'users', id), dataToSave, { merge: true });
+          const sStat = isGroup ? (activityForm.studentStatuses[id] || 'A') : activityForm.status;
+          const sHrs = sStat === 'A' ? Number(activityForm.hours) : 0;
+          const sDesc = sStat === 'A' ? activityForm.description : '';
+          const sLink = sStat === 'A' ? activityForm.evidenceLink : '';
+          
+          const recordId = (editingRecordId && id === selectedStudentId) ? editingRecordId : `${Date.now()}-${id}`;
+          
+          const sessionData: any = {
+            id: recordId,
+            userId: id,
+            projectId: activityForm.projectId,
+            categoryId: activityForm.categoryId,
+            description: sDesc,
+            date: activityForm.date,
+            startTime: activityForm.isManualHours ? '' : activityForm.startTime,
+            endTime: activityForm.isManualHours ? '' : activityForm.endTime,
+            horasCalculadas: sHrs,
+            estado: 'aprobado', // Admins/Coordinators records are approved by default
+            evidenceLink: sLink,
+            updatedBy: auth.currentUser?.uid,
+            acknowledgedRejection: false
+          };
+
+          if (!editingRecordId || id !== selectedStudentId) {
+            sessionData.createdAt = new Date().toISOString();
           }
+
+          await setDoc(doc(db, 'sesiones', recordId), sessionData, { merge: true });
         });
         await Promise.all(updates);
         showSuccessToast(editingRecordId ? "Registro actualizado exitosamente" : "Registro agregado exitosamente");
       } catch (error) {
         console.error("Error persisting activity updates:", error);
-        handleFirestoreError(error, OperationType.WRITE, `users/multiple`);
+        handleFirestoreError(error, OperationType.WRITE, `sesiones/multiple`);
       } finally {
         setIsSubmitting(false);
       }
@@ -3410,14 +3420,9 @@ const App = () => {
   return (
     <ErrorBoundary>
       <Toaster 
-        position="top-center" 
-        containerStyle={{
-          top: '50%',
-          transform: 'translateY(-50%)',
-          bottom: 'auto'
-        }}
+        position="top-right" 
         toastOptions={{
-          duration: 10000,
+          duration: 5000,
         }}
       >
         {(t) => (
@@ -3460,7 +3465,7 @@ const App = () => {
                 }`}
                 style={{ 
                   width: t.visible ? '0%' : '100%',
-                  transitionDuration: '10000ms'
+                  transitionDuration: '5000ms'
                 }}
               />
             </div>
@@ -3488,7 +3493,7 @@ const App = () => {
           currentUserId={currentUserId}
           firstStudentId={students[0]?.id} 
           user={user} 
-          students={students}
+          students={studentsWithRecords}
           projects={projects}
           setSelectedProjectId={setSelectedProjectId}
           selectedProjectId={selectedProjectId}
@@ -3647,15 +3652,13 @@ const App = () => {
               </div>
             ) : (
               <UserDashboard 
-                student={getStudentData(currentUserId) || 
-                         (userProfile?.uid === currentUserId ? { ...userProfile, id: userProfile.uid } : null) ||
-                         (userProfile ? { ...userProfile, id: userProfile.uid } : null)} 
+                student={getStudentData(currentUserId || '')} 
                 setStudents={setStudents} 
                 userRole={userRole} 
                 categories={categories}
                 setCategories={setCategories}
                 projects={projects}
-                students={students}
+                students={studentsWithRecords}
                 checkTimeOverlap={checkTimeOverlap}
                 selectedRecords={selectedRecords}
                 setSelectedRecords={setSelectedRecords}
@@ -3705,7 +3708,7 @@ const App = () => {
               </div>
             ) : (
               <AdminValidation 
-                students={students}
+                students={studentsWithRecords}
                 setStudents={setStudents}
                 categories={categories}
                 projects={projects}
@@ -3719,7 +3722,7 @@ const App = () => {
               project={projects.find(p => p.id === selectedProjectId)}
               userRole={userRole}
               currentUser={user}
-              students={students}
+              students={studentsWithRecords}
               initialTaskId={selectedTaskId}
               onBack={() => {
                 setSelectedProjectId(null);
@@ -3733,14 +3736,14 @@ const App = () => {
           )}
           {view === 'skills' && (
             <SkillsView 
-              users={students}
+              users={studentsWithRecords}
               currentUserRole={userRole}
               currentUserId={user?.uid || ''}
               projects={projects}
               isDarkMode={isDarkMode}
             />
           )}
-          {view === 'dashboard' && (
+          {view === 'dashboard' && userRole !== 'user' && (
             <div className="space-y-6 sm:space-y-10">
               <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 sm:gap-8">
                 <div>
@@ -4505,26 +4508,14 @@ const App = () => {
                                     <div className="flex gap-2 mb-2">
                                       <button 
                                         onClick={async () => {
-                                          const updatedStudents = students.map(s => s.id === selectedStudentId ? {
-                                            ...s,
-                                            records: (s.records || []).map((rec: any) => rec.id === r.id ? { ...rec, validationStatus: 'aprobado' } : rec)
-                                          } : s);
-                                          setStudents(updatedStudents);
-                                          
                                           try {
-                                            const studentToUpdate = updatedStudents.find(s => s.id === selectedStudentId);
-                                            if (studentToUpdate) {
-                                              const dataToSave = {
-                                                ...studentToUpdate,
-                                                uid: selectedStudentId!,
-                                                role: studentToUpdate.role || 'user',
-                                                createdAt: studentToUpdate.createdAt || new Date().toISOString()
-                                              };
-                                              await setDoc(doc(db, 'users', selectedStudentId!), dataToSave, { merge: true });
-                                              showSuccessToast("Sesión aprobada");
-                                            }
+                                            await updateDoc(doc(db, 'sesiones', r.id), {
+                                              estado: 'aprobado',
+                                              updatedBy: auth.currentUser?.uid
+                                            });
+                                            showSuccessToast("Sesión aprobada");
                                           } catch (error) {
-                                            handleFirestoreError(error, OperationType.WRITE, `users/${selectedStudentId}`);
+                                            handleFirestoreError(error, OperationType.UPDATE, `sesiones/${r.id}`);
                                           }
                                         }}
                                         className="p-3 text-emerald-600 bg-emerald-50 hover:bg-emerald-600 hover:text-white rounded-xl border border-emerald-100 shadow-sm transition-all"
@@ -4543,22 +4534,11 @@ const App = () => {
                                   )}
                                   <button onClick={()=>{startEditRecord(r); window.scrollTo({top:0, behavior:'smooth'});}} className="p-4 text-slate-400 hover:text-amber-600 hover:bg-amber-50 bg-white rounded-2xl border border-slate-100 shadow-sm transition-all" title="Editar"><Edit2 size={20}/></button>
                                   <button type="button" onClick={(e)=>{e.preventDefault(); e.stopPropagation(); showConfirmToast("¿Estás seguro de que deseas eliminar esta sesión?", async () => { 
-                                    const updatedStudents = students.map(s=>s.id===selectedStudentId?{...s,records:(s.records || []).filter((x: any)=>x.id!==r.id)}:s);
-                                    setStudents(updatedStudents);
                                     try {
-                                      const studentToUpdate = updatedStudents.find(s => s.id === selectedStudentId);
-                                      if (studentToUpdate) {
-                                        const dataToSave = {
-                                          ...studentToUpdate,
-                                          uid: selectedStudentId!,
-                                          role: studentToUpdate.role || 'user',
-                                          createdAt: studentToUpdate.createdAt || new Date().toISOString()
-                                        };
-                                        await setDoc(doc(db, 'users', selectedStudentId!), dataToSave, { merge: true });
-                                        showSuccessToast("Sesión eliminada");
-                                      }
+                                      await deleteDoc(doc(db, 'sesiones', r.id));
+                                      showSuccessToast("Sesión eliminada");
                                     } catch (error) {
-                                      handleFirestoreError(error, OperationType.WRITE, `users/${selectedStudentId}`);
+                                      handleFirestoreError(error, OperationType.DELETE, `sesiones/${r.id}`);
                                     }
                                   }); }} className="p-4 text-slate-400 hover:text-red-500 hover:bg-red-50 bg-white rounded-2xl border border-slate-100 shadow-sm transition-all" title="Eliminar"><Trash2 size={20}/></button>
                               </div>
@@ -4969,7 +4949,7 @@ const App = () => {
                                <div className={`w-5 h-5 rounded-full shadow-inner border shrink-0 ${isDarkMode ? 'border-white/10' : 'border-slate-100'}`} style={{ backgroundColor: cat.color }}></div>
                                <span className={`font-bold text-sm tracking-tight truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{cat.name}</span>
                             </div>
-                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                               <button onClick={() => setEditingCategory(cat)} className={`p-2.5 rounded-xl transition-all shadow-sm ${isDarkMode ? 'text-gray-400 hover:text-indigo-400 bg-white/5 hover:bg-white/10' : 'text-slate-300 hover:text-indigo-500 bg-slate-50'}`}><Edit2 size={16} /></button>
                               <button onClick={() => {
                                 showConfirmToast('¿Estás seguro de que deseas eliminar esta categoría? Esto no se puede deshacer.', async () => {
@@ -5065,7 +5045,7 @@ const App = () => {
                                <div className={`w-5 h-5 rounded-full shadow-inner border shrink-0 ${isDarkMode ? 'border-white/10' : 'border-slate-100'}`} style={{ backgroundColor: p.color }}></div>
                                <span className={`font-bold text-sm tracking-tight truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{p.name}</span>
                             </div>
-                            <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-2 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                               <button onClick={() => setEditingProject(p)} className={`p-2.5 rounded-xl transition-all shadow-sm ${isDarkMode ? 'text-gray-400 hover:text-emerald-400 bg-white/10' : 'text-slate-300 hover:text-emerald-500 bg-slate-50'}`}><Edit2 size={16} /></button>
                               <button onClick={() => { 
                                 showConfirm(

@@ -29,7 +29,8 @@
         },
         "brigadePeriod": { "type": "string" },
         "status": { "type": "string" },
-        "role": { "type": "string", "enum": ["admin", "user"] },
+        "horasTotales": { "type": "number", "description": "Total de horas aprobadas acumuladas" },
+        "role": { "type": "string", "enum": ["admin", "user", "coordinator"] },
         "createdAt": { "type": "string", "format": "date-time" },
         "notificationPreferences": {
           "type": "object",
@@ -205,6 +206,42 @@
         "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] }
       },
       "required": ["id", "type", "title", "message", "triggeredBy", "triggeredByName", "read", "createdAt", "priority"]
+    },
+    "Session": {
+      "title": "Session",
+      "description": "Registro de actividad o sesión de servicio",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "projectId": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "horasCalculadas": { "type": "number" },
+        "estado": { "type": "string", "enum": ["pendiente", "aprobado", "rechazado", "disputado"] },
+        "evidenceLink": { "type": "string" },
+        "updatedBy": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "projectId", "categoryId", "date", "horasCalculadas", "estado", "createdAt"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Registro de auditoría para cambios críticos",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "sesionId": { "type": "string" },
+        "accion": { "type": "string" },
+        "estadoAnterior": { "type": "string" },
+        "estadoNuevo": { "type": "string" },
+        "modificadoPor": { "type": "string" },
+        "fecha": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "sesionId", "accion", "modificadoPor", "fecha"]
     }
   },
   "firestore": {
@@ -247,6 +284,14 @@
     "/users/{uid}/notifications/{notifId}": {
       "schema": "Notification",
       "description": "Collection of user notifications"
+    },
+    "/sesiones/{sesionId}": {
+      "schema": "Session",
+      "description": "Colección de sesiones de servicio"
+    },
+    "/logs_auditoria/{logId}": {
+      "schema": "AuditLog",
+      "description": "Colección de registros de auditoría"
     }
   }
 }

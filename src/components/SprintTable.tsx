@@ -72,24 +72,25 @@ const SprintTable = ({
     try {
       const stage = isStage ? project.stages.find((s: any) => s.id === groupKey) : null;
       
+      const isUser = userRole === 'user';
       const task = {
         title: newTaskData.title,
-        status: newTaskData.status,
+        status: isUser ? 'pending_approval' : newTaskData.status,
         phase: isStage ? (stage?.name || '') : (groupKey === 'Sin Sprint' ? '' : groupKey),
         stageId: isStage ? groupKey : null,
         projectId,
         priority: 3,
         effort: 1,
         type: 'feature',
-        assignedTo: '',
+        assignedTo: isUser ? currentUser?.uid : '',
         startDate: stage?.startDate || new Date().toISOString(),
         endDate: stage?.endDate || new Date(Date.now() + 86400000).toISOString(),
-        estimatedSP: 1
+        estimatedSP: isUser ? 0 : 1
       };
 
       const newId = await addTask(task);
       if (newId) {
-        toast.success('Tarea creada');
+        toast.success(isUser ? 'Propuesta enviada para revisión' : 'Tarea creada');
         setNewTasks(prev => ({ 
           ...prev, 
           [groupKey]: { title: '', status: 'todo', isSubmitting: false } 

@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Check, X, Clock, CheckCircle2, XCircle, Send, MessageSquare, ShieldAlert, CheckSquare, Square } from 'lucide-react';
-import { doc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { doc, updateDoc, writeBatch } from 'firebase/firestore';
+import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../firebase';
 import { showSuccessToast, showErrorToast, showLoadingToast } from '../utils/toastUtils';
 import toast from 'react-hot-toast';
@@ -33,91 +33,57 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
   };
 
   const handleApproveRecords = async (recordsToApprove: { studentId: string, recordId: string }[]) => {
-    const studentUpdates: { [key: string]: any } = {};
-    
-    const updatedStudents = students.map((s: any) => {
-      const relevantRecords = recordsToApprove.filter(r => r.studentId === s.id);
-      if (relevantRecords.length > 0) {
-        const newRecords = (s.records || []).map((r: any) => {
-          const match = relevantRecords.find(rr => rr.recordId === r.id);
-          return match ? { ...r, validationStatus: 'aprobado' } : r;
-        });
-        const updatedStudent = { ...s, records: newRecords };
-        studentUpdates[s.id] = updatedStudent;
-        return updatedStudent;
-      }
-      return s;
-    });
-
-    setStudents(updatedStudents);
-
     const loadingToast = showLoadingToast(recordsToApprove.length === 1 ? "Aprobando registro..." : `Aprobando ${recordsToApprove.length} registros...`);
     try {
-      for (const studentId in studentUpdates) {
-        const studentToUpdate = studentUpdates[studentId];
-        const dataToSave = {
-          ...studentToUpdate,
-          uid: studentId,
-          role: studentToUpdate.role || 'user',
-          createdAt: studentToUpdate.createdAt || new Date().toISOString()
-        };
-        await setDoc(doc(db, 'users', studentId), dataToSave, { merge: true });
-      }
+      const batch = writeBatch(db);
+      recordsToApprove.forEach(r => {
+        const sessionRef = doc(db, 'sesiones', r.recordId);
+        batch.update(sessionRef, {
+          estado: 'aprobado',
+          updatedBy: auth.currentUser?.uid
+        });
+      });
+      
+      await batch.commit();
       toast.dismiss(loadingToast);
       showSuccessToast(recordsToApprove.length === 1 ? "Registro aprobado" : `${recordsToApprove.length} registros aprobados`);
       setSelectedIds([]);
     } catch (error) {
       toast.dismiss(loadingToast);
-      handleFirestoreError(error, OperationType.WRITE, `bulk-validation`);
+      console.error("Error approving sessions:", error);
+      handleFirestoreError(error, OperationType.UPDATE, `bulk-validation`);
     }
   };
 
   const handleRejectRecords = async () => {
     if (rejectingRecords.length === 0 || !rejectReason.trim()) return;
 
-    const studentUpdates: { [key: string]: any } = {};
-    const studentsToNotify: any[] = [];
-
-    const updatedStudents = students.map((s: any) => {
-      const relevantRecords = rejectingRecords.filter(r => r.studentId === s.id);
-      if (relevantRecords.length > 0) {
-        const newRecords = (s.records || []).map((r: any) => {
-          const match = relevantRecords.find(rr => rr.id === r.id);
-          return match ? { 
-            ...r, 
-            validationStatus: 'rechazado',
-            rejectReason: rejectReason,
-            acknowledgedRejection: false
-          } : r;
-        });
-        const updatedStudent = { ...s, records: newRecords };
-        studentUpdates[s.id] = updatedStudent;
-        studentsToNotify.push({
-          email: s.email,
-          name: s.name,
-          records: relevantRecords
-        });
-        return updatedStudent;
-      }
-      return s;
-    });
-
-    setStudents(updatedStudents);
-
     const loadingToast = showLoadingToast(rejectingRecords.length === 1 ? "Rechazando registro..." : `Rechazando ${rejectingRecords.length} registros...`);
     try {
-      for (const studentId in studentUpdates) {
-        const studentToUpdate = studentUpdates[studentId];
-        const dataToSave = {
-          ...studentToUpdate,
-          uid: studentId,
-          role: studentToUpdate.role || 'user',
-          createdAt: studentToUpdate.createdAt || new Date().toISOString()
-        };
-        await setDoc(doc(db, 'users', studentId), dataToSave, { merge: true });
-      }
+      const batch = writeBatch(db);
+      rejectingRecords.forEach(r => {
+        const sessionRef = doc(db, 'sesiones', r.id);
+        batch.update(sessionRef, {
+          estado: 'rechazado',
+          rejectReason: rejectReason,
+          acknowledgedRejection: false,
+          updatedBy: auth.currentUser?.uid
+        });
+      });
+
+      await batch.commit();
 
       // Group notifications by student
+      const studentsToNotify: any[] = [];
+      rejectingRecords.forEach(r => {
+        let student = studentsToNotify.find(s => s.id === r.studentId);
+        if (!student) {
+          student = { id: r.studentId, email: r.studentEmail, name: r.studentName, records: [] };
+          studentsToNotify.push(student);
+        }
+        student.records.push(r);
+      });
+
       studentsToNotify.forEach(student => {
         if (student.email) {
           const subject = encodeURIComponent("Registro de horas rechazado");
@@ -134,7 +100,8 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
       setSelectedIds([]);
     } catch (error) {
       toast.dismiss(loadingToast);
-      handleFirestoreError(error, OperationType.WRITE, `bulk-rejection`);
+      console.error("Error rejecting sessions:", error);
+      handleFirestoreError(error, OperationType.UPDATE, `bulk-rejection`);
     }
   };
 
@@ -160,7 +127,7 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
         }
       });
     });
-    return records.sort((a, b) => new Date(b.disputedAt || b.date).getTime() - new Date(a.disputedAt || a.date).getTime());
+    return records.sort((a, b) => new Date(b.disputeDate || b.date).getTime() - new Date(a.disputeDate || a.date).getTime());
   }, [students]);
 
   const currentRecords = activeTab === 'pending' ? pendingRecords : disputedRecords;
