@@ -63,9 +63,9 @@ const ProfileForm = ({ user, onComplete, isDarkMode }: ProfileFormProps) => {
     setLoading(true);
     const loadingToast = showLoadingToast("Guardando perfil...");
     try {
-      // Hardcoded admin emails, must be verified
+      // Hardcoded admin emails
       const adminEmails = ['luisedgar.gutierrez17@gmail.com'];
-      const isAdmin = user.email && adminEmails.includes(user.email) && user.emailVerified;
+      const isAdmin = user.email && adminEmails.includes(user.email);
       
       // Derive skills array from skillRatings for backward compatibility
       const derivedSkills = data.skillRatings.map((s: SkillRating) => s.name);

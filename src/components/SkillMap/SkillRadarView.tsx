@@ -36,7 +36,7 @@ export const SkillRadarView: React.FC<SkillRadarViewProps> = ({ stats, hasRefere
           {/* Background circles */}
           {[0.2, 0.4, 0.6, 0.8, 1].map((scale, i) => (
             <circle
-              key={i}
+              key={`bg-circle-${i}`}
               cx={center}
               cy={center}
               r={radius * scale}
@@ -100,7 +100,7 @@ export const SkillRadarView: React.FC<SkillRadarViewProps> = ({ stats, hasRefere
           {/* Data Points */}
           {userPoints.map((p, i) => (
             <circle
-              key={i}
+              key={`user-point-${i}`}
               cx={p.x}
               cy={p.y}
               r="4"

@@ -281,8 +281,8 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                 >
                   <option value="all">Todos los prestadores</option>
                   <option value="unassigned">Sin asignar</option>
-                  {students?.map((s: any) => (
-                    <option key={s.id} value={s.id}>
+                  {students?.map((s: any, idx: number) => (
+                    <option key={`${s.id || 'student'}-${idx}`} value={s.id}>
                       {s.firstName} {s.lastNamePaterno || ''}
                     </option>
                   ))}
@@ -313,8 +313,8 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                   >
                     <option value="all">Todos los prestadores</option>
                     <option value="unassigned">Sin asignar</option>
-                    {students?.map((s: any) => (
-                      <option key={s.id} value={s.id}>
+                    {students?.map((s: any, idx: number) => (
+                      <option key={`${s.id || 'student'}-${idx}`} value={s.id}>
                         {s.firstName} {s.lastNamePaterno || ''}
                       </option>
                     ))}

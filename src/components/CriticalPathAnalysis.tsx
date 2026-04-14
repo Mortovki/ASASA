@@ -266,7 +266,7 @@ export const CriticalPathAnalysis: React.FC<CriticalPathAnalysisProps> = ({ task
                     { l: 'LF', v: selectedTask.lateFinish, c: selectedTask.isCritical ? 'text-red-600' : 'text-amber-600' },
                     { l: 'Holg', v: selectedTask.slack, c: selectedTask.isCritical ? 'text-red-600' : 'text-amber-600' },
                   ].map((cell, i) => (
-                    <div key={i} className={`p-2 rounded-xl border ${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+                    <div key={`cell-${i}`} className={`p-2 rounded-xl border ${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                       <p className={`text-[8px] font-black uppercase tracking-widest mb-1 ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>{cell.l}</p>
                       <p className={`text-xs font-black font-mono ${cell.c}`}>{cell.v}</p>
                     </div>

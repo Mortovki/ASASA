@@ -37,6 +37,10 @@ const TaskSidePanel = ({
   const [notes, setNotes] = useState<any[]>([]);
   const [activity, setActivity] = useState<any[]>([]);
   const [newNote, setNewNote] = useState('');
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editNoteContent, setEditNoteContent] = useState('');
+  const [showVersionHistory, setShowVersionHistory] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<any>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -137,8 +141,14 @@ const TaskSidePanel = ({
         content: newNote,
         authorUid: currentUser?.uid || 'unknown',
         authorName: authorName,
+        projectId: projectId,
+        taskId: taskId,
+        taskTitle: task.title,
         createdAt: new Date().toISOString(),
-        editedAt: null
+        editedAt: null,
+        parentId: replyingTo || null,
+        isDeleted: false,
+        editHistory: []
       });
       
       const currentUsr = {
@@ -158,10 +168,59 @@ const TaskSidePanel = ({
       );
 
       setNewNote('');
+      setReplyingTo(null);
       toast.success('Nota agregada');
     } catch (error) {
       console.error("Error adding note:", error);
       toast.error('Error al agregar nota');
+    }
+  };
+
+  const handleEditNote = async (noteId: string, currentContent: string) => {
+    if (!editNoteContent.trim() || editNoteContent === currentContent) {
+      setEditingNoteId(null);
+      return;
+    }
+    try {
+      const noteRef = doc(db, `projects/${projectId}/tasks/${taskId}/notes`, noteId);
+      const noteToEdit = notes.find(n => n.id === noteId);
+      
+      if (!noteToEdit) return;
+
+      const historyEntry = {
+        content: noteToEdit.content,
+        editedAt: new Date().toISOString(),
+        editedBy: currentUser?.uid || 'unknown',
+        editedByName: currentUser?.displayName || 'Usuario'
+      };
+
+      await updateDoc(noteRef, {
+        content: editNoteContent,
+        editedAt: new Date().toISOString(),
+        editHistory: [...(noteToEdit.editHistory || []), historyEntry]
+      });
+
+      setEditingNoteId(null);
+      setEditNoteContent('');
+      toast.success('Nota editada');
+    } catch (error) {
+      console.error("Error editing note:", error);
+      toast.error('Error al editar nota');
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    try {
+      const noteRef = doc(db, `projects/${projectId}/tasks/${taskId}/notes`, noteId);
+      await updateDoc(noteRef, {
+        isDeleted: true,
+        content: 'Este comentario ha sido eliminado.',
+        deletedAt: new Date().toISOString()
+      });
+      toast.success('Nota eliminada');
+    } catch (error) {
+      console.error("Error deleting note:", error);
+      toast.error('Error al eliminar nota');
     }
   };
 
@@ -205,8 +264,13 @@ const TaskSidePanel = ({
         content: `RECHAZO: ${rejectionReason}`,
         authorUid: currentUser?.uid,
         authorName: currentUser?.displayName || 'Admin',
+        projectId: projectId,
+        taskId: taskId,
+        taskTitle: task.title,
         tag: 'rechazo',
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        isDeleted: false,
+        editHistory: []
       });
 
       toast.success('Tarea rechazada');
@@ -224,8 +288,9 @@ const TaskSidePanel = ({
   if (isLoading) return null;
 
   return (
-    <AnimatePresence>
+    <>
       <motion.div
+        key={`task-panel-overlay-${taskId}`}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
@@ -233,6 +298,7 @@ const TaskSidePanel = ({
         onClick={onClose}
       >
         <motion.div
+          key={`task-panel-content-${taskId}`}
           initial={{ x: '100%' }}
           animate={{ x: 0 }}
           exit={{ x: '100%' }}
@@ -260,8 +326,8 @@ const TaskSidePanel = ({
                   disabled={isPending || isRejected}
                   className={`px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[10px] sm:text-xs font-bold uppercase tracking-widest outline-none cursor-pointer disabled:cursor-not-allowed ${STATUS_OPTIONS.find(o => o.value === task?.status)?.color || (isDarkMode ? 'bg-white/5 text-slate-300' : 'bg-slate-100 text-slate-700')}`}
                 >
-                  {STATUS_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : 'bg-white text-slate-900'}>{opt.label}</option>
+                  {STATUS_OPTIONS.map((opt, idx) => (
+                    <option key={`${opt.value}-${idx}`} value={opt.value} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : 'bg-white text-slate-900'}>{opt.label}</option>
                   ))}
                 </select>
 
@@ -274,8 +340,8 @@ const TaskSidePanel = ({
                       className={`${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-slate-200'} border rounded-lg px-2 py-1 outline-none text-xs sm:text-sm`}
                     >
                       <option value="" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Sin asignar</option>
-                      {students.map((s: any) => (
-                        <option key={s.id} value={s.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{formatName(s.firstName, s.lastNamePaterno)}</option>
+                      {students.map((s: any, idx: number) => (
+                        <option key={`${s.id || 'student'}-${idx}`} value={s.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{formatName(s.firstName, s.lastNamePaterno)}</option>
                       ))}
                     </select>
                   ) : (
@@ -362,12 +428,12 @@ const TaskSidePanel = ({
                 <span className={`text-[10px] font-black ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-1`}><Star size={12}/> Prioridad</span>
                 {isEditing ? (
                   <select value={editForm.priority || 3} onChange={e => setEditForm({...editForm, priority: Number(e.target.value)})} className={`w-full text-sm font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg px-2 py-1 outline-none`}>
-                    {[1,2,3,4,5].map(n => <option key={n} value={n} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{n} Estrellas</option>)}
+                    {[1,2,3,4,5].map(n => <option key={`priority-${n}`} value={n} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{n} Estrellas</option>)}
                   </select>
                 ) : (
                   <div className="flex gap-0.5">
                     {Array.from({ length: 5 }).map((_, i) => (
-                      <Star key={i} size={14} className={i < (task?.priority || 3) ? 'text-yellow-400 fill-yellow-400' : (isDarkMode ? 'text-white/10' : 'text-slate-200')} />
+                      <Star key={`star-${i}`} size={14} className={i < (task?.priority || 3) ? 'text-yellow-400 fill-yellow-400' : (isDarkMode ? 'text-white/10' : 'text-slate-200')} />
                     ))}
                   </div>
                 )}
@@ -376,7 +442,7 @@ const TaskSidePanel = ({
                 <span className={`text-[10px] font-black ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-1`}><Tag size={12}/> Tipo</span>
                 {isEditing ? (
                   <select value={editForm.type || 'feature'} onChange={e => setEditForm({...editForm, type: e.target.value})} className={`w-full text-sm font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg px-2 py-1 outline-none`}>
-                    {TYPE_OPTIONS.map(t => <option key={t} value={t} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{t}</option>)}
+                    {TYPE_OPTIONS.map((t, idx) => <option key={`${t}-${idx}`} value={t} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{t}</option>)}
                   </select>
                 ) : (
                   <p className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} text-sm capitalize`}>{task?.type || '-'}</p>
@@ -410,8 +476,8 @@ const TaskSidePanel = ({
                   />
                 ) : (
                   <div className="flex flex-wrap gap-2 mt-1">
-                    {task?.resources?.map((r: string) => (
-                      <span key={r} className={`px-2 py-1 ${isDarkMode ? 'bg-white/5 text-slate-400 border-white/10' : 'bg-slate-100 text-slate-600 border-slate-200'} rounded-lg text-[10px] font-bold uppercase tracking-widest border`}>
+                    {task?.resources?.map((r: string, idx: number) => (
+                      <span key={`${r}-${idx}`} className={`px-2 py-1 ${isDarkMode ? 'bg-white/5 text-slate-400 border-white/10' : 'bg-slate-100 text-slate-600 border-slate-200'} rounded-lg text-[10px] font-bold uppercase tracking-widest border`}>
                         {r}
                       </span>
                     )) || <p className="text-slate-400 text-xs font-medium">Sin recursos asignados</p>}
@@ -482,8 +548,8 @@ const TaskSidePanel = ({
                   </div>
 
                   <div className="space-y-4">
-                    {notes.map((note: any) => (
-                      <div key={note.id} className={`${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'} p-4 rounded-2xl border space-y-3`}>
+                    {notes.filter(n => !n.parentId).map((note: any, idx: number) => (
+                      <div key={`${note.id}-${idx}`} className={`${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100 shadow-sm'} p-4 rounded-2xl border space-y-3`}>
                         <div className="flex justify-between items-start">
                           <div className="flex items-center gap-2">
                             <div className={`w-8 h-8 rounded-full ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-100 text-indigo-700'} flex items-center justify-center text-xs font-black`}>
@@ -496,18 +562,184 @@ const TaskSidePanel = ({
                                   <span className="bg-red-100 text-red-600 text-[8px] font-black uppercase px-1.5 py-0.5 rounded">Rechazo</span>
                                 )}
                               </div>
-                              <p className={`text-[10px] font-semibold ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest`}>
+                              <p className={`text-[10px] font-semibold ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-2`}>
                                 {new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(note.createdAt))}
+                                {note.editedAt && !note.isDeleted && (
+                                  <span 
+                                    className="cursor-pointer hover:text-indigo-500 transition-colors"
+                                    onClick={() => setShowVersionHistory(showVersionHistory === note.id ? null : note.id)}
+                                  >
+                                    (Editado)
+                                  </span>
+                                )}
                               </p>
                             </div>
                           </div>
-                          {note.authorUid === currentUser?.uid && (
-                            <button className={`text-slate-400 ${isDarkMode ? 'hover:text-indigo-400' : 'hover:text-indigo-600'} p-1`}><Edit2 size={14} /></button>
+                          {!note.isDeleted && (note.authorUid === currentUser?.uid || permissions.isAdmin) && (
+                            <div className="flex items-center gap-1">
+                              {(note.authorUid === currentUser?.uid || permissions.isAdmin) && (
+                                <button 
+                                  onClick={() => {
+                                    setEditingNoteId(note.id);
+                                    setEditNoteContent(note.content);
+                                  }}
+                                  className={`text-slate-400 ${isDarkMode ? 'hover:text-indigo-400' : 'hover:text-indigo-600'} p-1`}
+                                ><Edit2 size={14} /></button>
+                              )}
+                              <button 
+                                onClick={() => handleDeleteNote(note.id)}
+                                className={`text-slate-400 ${isDarkMode ? 'hover:text-red-400' : 'hover:text-red-600'} p-1`}
+                              ><Trash2 size={14} /></button>
+                            </div>
                           )}
                         </div>
-                        <div className={`prose prose-sm max-w-none ${isDarkMode ? 'text-slate-400 prose-invert' : 'text-slate-600'} pl-10`}>
-                          <ReactMarkdown>{note.content}</ReactMarkdown>
-                        </div>
+                        
+                        {editingNoteId === note.id ? (
+                          <div className="pl-10 space-y-2">
+                            <textarea 
+                              value={editNoteContent}
+                              onChange={e => setEditNoteContent(e.target.value)}
+                              className={`w-full p-3 ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-xl min-h-[80px] focus:ring-2 focus:ring-indigo-500 outline-none text-sm`}
+                            />
+                            <div className="flex justify-end gap-2">
+                              <button onClick={() => setEditingNoteId(null)} className="px-4 py-1.5 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded-lg">Cancelar</button>
+                              <button onClick={() => handleEditNote(note.id, note.content)} className="px-4 py-1.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg">Guardar</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className={`prose prose-sm max-w-none ${isDarkMode ? 'text-slate-400 prose-invert' : 'text-slate-600'} pl-10 ${note.isDeleted ? 'italic opacity-50' : ''}`}>
+                            <ReactMarkdown>{note.content}</ReactMarkdown>
+                          </div>
+                        )}
+
+                        {showVersionHistory === note.id && note.editHistory && note.editHistory.length > 0 && (
+                          <div className={`ml-10 mt-2 p-3 rounded-xl text-xs ${isDarkMode ? 'bg-black/20 border border-white/5' : 'bg-slate-50 border border-slate-100'}`}>
+                            <p className="font-bold mb-2">Historial de versiones:</p>
+                            <div className="space-y-2">
+                              {note.editHistory.map((history: any, idx: number) => (
+                                <div key={`${history.editedAt}-${idx}`} className="border-l-2 border-indigo-200 pl-2">
+                                  <p className="text-[10px] text-slate-400 mb-1">
+                                    {new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(history.editedAt))} por {history.editedByName}
+                                  </p>
+                                  <p className="text-slate-500 line-clamp-2">{history.content}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {!note.isDeleted && (
+                          <div className="pl-10">
+                            <button 
+                              onClick={() => setReplyingTo(replyingTo === note.id ? null : note.id)}
+                              className="text-xs font-bold text-indigo-500 hover:text-indigo-600"
+                            >
+                              Responder
+                            </button>
+                          </div>
+                        )}
+
+                        {replyingTo === note.id && (
+                          <div className="pl-10 mt-2">
+                            <div className="flex gap-2">
+                              <textarea 
+                                value={newNote}
+                                onChange={e => setNewNote(e.target.value)}
+                                placeholder="Escribe una respuesta..."
+                                className={`flex-1 p-2 ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg min-h-[40px] focus:ring-2 focus:ring-indigo-500 outline-none text-xs`}
+                              />
+                              <button 
+                                onClick={handleAddNote}
+                                disabled={!newNote.trim()}
+                                className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs font-bold hover:bg-indigo-700 disabled:opacity-50"
+                              >
+                                Enviar
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Render Replies */}
+                        {notes.filter(n => n.parentId === note.id).length > 0 && (
+                          <div className="pl-10 space-y-3 mt-3 border-l-2 border-slate-100 dark:border-white/5">
+                            {notes.filter(n => n.parentId === note.id).map((reply: any, idx: number) => (
+                              <div key={`${reply.id}-${idx}`} className="pl-3 space-y-2">
+                                <div className="flex justify-between items-start">
+                                  <div className="flex items-center gap-2">
+                                    <div className={`w-6 h-6 rounded-full ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-100 text-indigo-700'} flex items-center justify-center text-[10px] font-black`}>
+                                      {reply.authorName?.charAt(0) || 'U'}
+                                    </div>
+                                    <div>
+                                      <p className={`text-xs font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{formatFullName(reply.authorName)}</p>
+                                      <p className={`text-[8px] font-semibold ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-2`}>
+                                        {new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(reply.createdAt))}
+                                        {reply.editedAt && !reply.isDeleted && (
+                                          <span 
+                                            className="cursor-pointer hover:text-indigo-500 transition-colors"
+                                            onClick={() => setShowVersionHistory(showVersionHistory === reply.id ? null : reply.id)}
+                                          >
+                                            (Editado)
+                                          </span>
+                                        )}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  {!reply.isDeleted && (reply.authorUid === currentUser?.uid || permissions.isAdmin) && (
+                                    <div className="flex items-center gap-1">
+                                      {(reply.authorUid === currentUser?.uid || permissions.isAdmin) && (
+                                        <button 
+                                          onClick={() => {
+                                            setEditingNoteId(reply.id);
+                                            setEditNoteContent(reply.content);
+                                          }}
+                                          className={`text-slate-400 ${isDarkMode ? 'hover:text-indigo-400' : 'hover:text-indigo-600'} p-1`}
+                                        ><Edit2 size={12} /></button>
+                                      )}
+                                      <button 
+                                        onClick={() => handleDeleteNote(reply.id)}
+                                        className={`text-slate-400 ${isDarkMode ? 'hover:text-red-400' : 'hover:text-red-600'} p-1`}
+                                      ><Trash2 size={12} /></button>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {editingNoteId === reply.id ? (
+                                  <div className="space-y-2">
+                                    <textarea 
+                                      value={editNoteContent}
+                                      onChange={e => setEditNoteContent(e.target.value)}
+                                      className={`w-full p-2 ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg min-h-[60px] focus:ring-2 focus:ring-indigo-500 outline-none text-xs`}
+                                    />
+                                    <div className="flex justify-end gap-2">
+                                      <button onClick={() => setEditingNoteId(null)} className="px-3 py-1 text-[10px] font-bold text-slate-500 hover:bg-slate-100 rounded-md">Cancelar</button>
+                                      <button onClick={() => handleEditNote(reply.id, reply.content)} className="px-3 py-1 text-[10px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-md">Guardar</button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className={`prose prose-sm max-w-none ${isDarkMode ? 'text-slate-400 prose-invert' : 'text-slate-600'} text-xs ${reply.isDeleted ? 'italic opacity-50' : ''}`}>
+                                    <ReactMarkdown>{reply.content}</ReactMarkdown>
+                                  </div>
+                                )}
+
+                                {showVersionHistory === reply.id && reply.editHistory && reply.editHistory.length > 0 && (
+                                  <div className={`mt-2 p-2 rounded-lg text-[10px] ${isDarkMode ? 'bg-black/20 border border-white/5' : 'bg-slate-50 border border-slate-100'}`}>
+                                    <p className="font-bold mb-1">Historial de versiones:</p>
+                                    <div className="space-y-1">
+                                      {reply.editHistory.map((history: any, idx: number) => (
+                                        <div key={`${history.editedAt}-${idx}`} className="border-l-2 border-indigo-200 pl-2">
+                                          <p className="text-[8px] text-slate-400">
+                                            {new Intl.DateTimeFormat('es-MX', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(history.editedAt))} por {history.editedByName}
+                                          </p>
+                                          <p className="text-slate-500 line-clamp-2">{history.content}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))}
                     {notes.length === 0 && (
@@ -520,8 +752,8 @@ const TaskSidePanel = ({
               <div className="space-y-6">
                 <h3 className={`text-sm font-black ${isDarkMode ? 'text-slate-300' : 'text-slate-800'} uppercase tracking-widest flex items-center gap-2`}><History size={16} /> Historial de Cambios</h3>
                 <div className="space-y-4">
-                  {activity.map((item: any) => (
-                    <div key={item.id} className="flex gap-4 relative">
+                  {activity.map((item: any, idx: number) => (
+                    <div key={`${item.id}-${idx}`} className="flex gap-4 relative">
                       <div className="w-8 flex flex-col items-center shrink-0">
                         <div className={`w-8 h-8 rounded-full ${isDarkMode ? 'bg-white/5 text-slate-500 border-white/10' : 'bg-slate-100 text-slate-500 border-slate-200'} flex items-center justify-center z-10`}>
                           <Clock size={14} />
@@ -560,10 +792,17 @@ const TaskSidePanel = ({
       </motion.div>
 
       {/* Rejection Modal */}
-      <AnimatePresence>
+      <AnimatePresence key={`rejection-modal-presence-${taskId}`}>
         {rejectionModal && (
-          <div className={`fixed inset-0 ${isDarkMode ? 'bg-black/60' : 'bg-slate-900/40'} backdrop-blur-sm z-[70] flex items-center justify-center p-4`}>
+          <motion.div 
+            key={`rejection-modal-overlay-${taskId}`} 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className={`fixed inset-0 ${isDarkMode ? 'bg-black/60' : 'bg-slate-900/40'} backdrop-blur-sm z-[70] flex items-center justify-center p-4`}
+          >
             <motion.div 
+              key={`rejection-modal-content-${taskId}`}
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.9, opacity: 0 }}
@@ -598,10 +837,11 @@ const TaskSidePanel = ({
                 </div>
               </div>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
       <ConfirmModal
+        key={`delete-confirm-modal-${taskId}`}
         isOpen={showDeleteConfirm}
         onClose={() => setShowDeleteConfirm(false)}
         onConfirm={handleDelete}
@@ -610,7 +850,7 @@ const TaskSidePanel = ({
         confirmText="Eliminar"
         isDarkMode={isDarkMode}
       />
-    </AnimatePresence>
+    </>
   );
 };
 

@@ -1,0 +1,12 @@
+65:            <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-4" />
+323:              <div className="mb-4 w-full">
+443:              <div className="px-4 mb-4 flex items-center justify-between">
+1557:            <div className="w-full bg-slate-100 h-6 rounded-full overflow-hidden mb-4 shadow-inner">
+3872:                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-4 gap-2">
+4110:                          <div className="flex items-center justify-between mb-3 sm:mb-4">
+4324:                            <p className="text-[9px] sm:text-[11px] font-black text-indigo-400 uppercase tracking-[0.3em] mb-4">Horas Totales Reportadas</p>
+4765:                                <div className={`sticky top-0 backdrop-blur-md py-3 sm:py-4 mb-4 sm:mb-6 border-b-2 z-10 flex items-center gap-4 ${isDarkMode ? 'bg-[#1a1a1a]/95 border-white/5' : 'bg-white/95 border-slate-100'}`}>
+5127:                  <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center text-red-600 mb-4">
+5138:                        <div className="flex justify-between items-start mb-4">
+5329:            <h3 className={`text-3xl sm:text-6xl font-black mb-2 sm:mb-4 tracking-tighter ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{showEditStudent ? 'Modificar Perfil' : 'Alta de Prestador'}</h3>
+5496:                  {studentFormErrors.projectIds && <p className="text-red-500 text-[10px] font-bold mb-4 ml-2">{studentFormErrors.projectIds}</p>}

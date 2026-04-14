@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Folder, FileText, ExternalLink, Plus, Edit2, Save, Trash2, X, PlayCircle, ChevronRight, Search, MoreHorizontal, Copy, Download, Pencil, AlertTriangle } from 'lucide-react';
 import { ConfirmModal } from './ui/ConfirmModal';
 import { db } from '../firebase';
-import { doc, setDoc, collection } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs, collectionGroup } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'motion/react';
 import { useBreakpoint } from '../hooks/useBreakpoint';
+import { handleFirestoreError, OperationType } from '../firebase';
 
 const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, userProfile, onUpdateProfile, onOpenWorkspace, onDeleteProject, isDarkMode }: any) => {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
@@ -14,8 +15,33 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<string | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<{ [key: string]: boolean }>({});
+  const [projectTasks, setProjectTasks] = useState<{ [key: string]: any[] }>({});
   const projectRefs = useRef<{ [key: string]: HTMLDivElement | null }>({});
   const { isMobile, isTablet } = useBreakpoint();
+
+  useEffect(() => {
+    const fetchTasks = async () => {
+      try {
+        const tasksSnapshot = await getDocs(collectionGroup(db, 'tasks'));
+        const tasksByProject: { [key: string]: any[] } = {};
+        tasksSnapshot.forEach(doc => {
+          const task = doc.data();
+          const projectId = task.projectId;
+          if (projectId) {
+            if (!tasksByProject[projectId]) {
+              tasksByProject[projectId] = [];
+            }
+            tasksByProject[projectId].push(task);
+          }
+        });
+        setProjectTasks(tasksByProject);
+      } catch (error) {
+        console.error("Error fetching tasks for projects:", error);
+        handleFirestoreError(error, OperationType.GET, 'collectionGroup/tasks');
+      }
+    };
+    fetchTasks();
+  }, []);
 
   useEffect(() => {
     if (selectedProjectId && projectRefs.current[selectedProjectId]) {
@@ -286,11 +312,11 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
                         <h3 className={`text-lg sm:text-xl font-black break-words leading-tight line-clamp-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{project.name}</h3>
                         <div className="flex items-center gap-2 mt-1">
                           <span className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
-                            {project.tasks?.length || 0} tareas
+                            {projectTasks[project.id]?.filter(t => t.status !== 'done' && !t.deletedAt).length || 0} tareas pendientes
                           </span>
-                          {project.tasks?.filter((t: any) => t.slack === 0).length > 0 && (
+                          {projectTasks[project.id]?.filter((t: any) => t.slack === 0 && t.status !== 'done' && !t.deletedAt).length > 0 && (
                             <span className="text-[10px] font-black text-red-500 uppercase tracking-widest flex items-center gap-1">
-                              · {project.tasks.filter((t: any) => t.slack === 0).length} críticas 🔴
+                              · {projectTasks[project.id].filter((t: any) => t.slack === 0 && t.status !== 'done' && !t.deletedAt).length} críticas 🔴
                             </span>
                           )}
                         </div>

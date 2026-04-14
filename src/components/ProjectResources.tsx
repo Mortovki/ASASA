@@ -80,7 +80,7 @@ export function ProjectResources({ projectId, permissions, isDarkMode }: any) {
     return (
       <div className="p-6 flex flex-col gap-4">
         {[1, 2, 3].map(i => (
-          <div key={i} className={`h-20 rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-100'}`} />
+          <div key={`placeholder-res-${i}`} className={`h-20 rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-100'}`} />
         ))}
       </div>
     );
@@ -151,7 +151,7 @@ export function ProjectResources({ projectId, permissions, isDarkMode }: any) {
       {/* List */}
       {filtered.length === 0 ? (
         <div className={`flex flex-col items-center justify-center py-20 rounded-3xl border border-dashed ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-100'}`}>
-          <FolderOpen size={48} className={isDarkMode ? 'text-gray-800' : 'text-slate-200'} mb-4 />
+          <FolderOpen size={48} className={`${isDarkMode ? 'text-gray-800' : 'text-slate-200'} mb-4`} />
           <p className={`font-bold ${isDarkMode ? 'text-gray-600' : 'text-slate-500'}`}>No se encontraron recursos</p>
           {permissions.canEditProject && (
             <button 

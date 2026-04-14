@@ -60,7 +60,7 @@ service cloud.firestore {
       return isAuthenticated() &&
         ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
-         (request.auth.token.email == "luisedgar.gutierrez17@gmail.com" && request.auth.token.email_verified == true));
+         request.auth.token.email == "luisedgar.gutierrez17@gmail.com");
     }
 
     function isCoordinator() {
@@ -94,12 +94,10 @@ service cloud.firestore {
       allow read: if isOwner(uid) || isAdmin() || isCoordinator() || (isAuthenticated() && resource.data.email == request.auth.token.email) || (isAuthenticated() && resource.data.role in ['admin', 'coordinator']);
       
       allow create: if isAuthenticated() && 
-                      isValidUser(request.resource.data) && 
-                      (isOwner(uid) && request.resource.data.role == 'user' || isAdmin());
+                      (isAdmin() || (isValidUser(request.resource.data) && isOwner(uid) && request.resource.data.role == 'user'));
                       
       allow update: if isAuthenticated() && 
-                      isValidUser(request.resource.data) && 
-                      (isOwner(uid) && request.resource.data.role == resource.data.role || isAdmin());
+                      (isAdmin() || (isValidUser(request.resource.data) && isOwner(uid) && request.resource.data.role == resource.data.role));
       allow delete: if isAdmin();
     }
 
@@ -185,6 +183,15 @@ service cloud.firestore {
     // Test Connection
     match /test/connection {
       allow read: if true;
+    }
+
+    // Collection Group Rules for tasks and notes
+    match /{path=**}/tasks/{taskId} {
+      allow read: if isAuthenticated();
+    }
+
+    match /{path=**}/notes/{noteId} {
+      allow read: if isAuthenticated();
     }
   }
 }

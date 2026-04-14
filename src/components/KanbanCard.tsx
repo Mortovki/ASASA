@@ -83,7 +83,7 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
       <div className="flex gap-0.5">
         {Array.from({ length: 5 }).map((_, i) => (
           <Star 
-            key={i} 
+            key={`star-${i}`} 
             size={12} 
             className={i < (priority || 3) ? 'text-yellow-400 fill-yellow-400' : (isDarkMode ? 'text-gray-700' : 'text-slate-200')} 
           />

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Star, ChevronDown, ChevronRight, Filter, User, AlertTriangle, Plus, Send, Loader2 } from 'lucide-react';
+import { AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
 import TaskSidePanel from './TaskSidePanel';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -125,7 +126,7 @@ const SprintTable = ({
       <div className="flex gap-0.5 cursor-pointer">
         {Array.from({ length: 5 }).map((_, i) => (
           <Star 
-            key={i} 
+            key={`star-${i}`} 
             size={14} 
             onClick={(e) => { e.stopPropagation(); handlePriorityChange(taskId, i + 1, priority); }}
             className={i < priority ? 'text-yellow-400 fill-yellow-400' : (isDarkMode ? 'text-gray-700 hover:text-yellow-200' : 'text-slate-200 hover:text-yellow-200')} 
@@ -664,7 +665,7 @@ const SprintTable = ({
                         <td className="p-4">
                           <div className="flex gap-0.5 opacity-30">
                             {Array.from({ length: 5 }).map((_, i) => (
-                              <Star key={i} size={14} className={i < 3 ? 'text-yellow-400 fill-yellow-400' : (isDarkMode ? 'text-gray-700' : 'text-slate-200')} />
+                              <Star key={`star-${i}`} size={14} className={i < 3 ? 'text-yellow-400 fill-yellow-400' : (isDarkMode ? 'text-gray-700' : 'text-slate-200')} />
                             ))}
                           </div>
                         </td>
@@ -690,20 +691,23 @@ const SprintTable = ({
         )}
       </div>
 
-      {selectedTaskId && (
-        <TaskSidePanel 
-          taskId={selectedTaskId} 
-          projectId={projectId} 
-          onClose={() => setSelectedTaskId(null)} 
-          userRole={userRole}
-          currentUser={currentUser}
-          students={students}
-          updateTaskStatus={updateTaskStatus}
-          updateTaskField={updateTaskField}
-          deleteTask={deleteTask}
-          isDarkMode={isDarkMode}
-        />
-      )}
+      <AnimatePresence>
+        {selectedTaskId && (
+          <TaskSidePanel 
+            key={selectedTaskId}
+            taskId={selectedTaskId} 
+            projectId={projectId} 
+            onClose={() => setSelectedTaskId(null)} 
+            userRole={userRole}
+            currentUser={currentUser}
+            students={students}
+            updateTaskStatus={updateTaskStatus}
+            updateTaskField={updateTaskField}
+            deleteTask={deleteTask}
+            isDarkMode={isDarkMode}
+          />
+        )}
+      </AnimatePresence>
 
     </div>
   );

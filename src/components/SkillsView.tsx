@@ -157,8 +157,8 @@ const SkillsView = ({ users, currentUserRole, currentUserId, projects, isDarkMod
                   {editingUserId === user.id ? (
                     <div className="w-full space-y-3">
                       <div className={`flex flex-wrap gap-2 p-3 rounded-2xl border shadow-inner min-h-[60px] ${isDarkMode ? 'bg-black/20 border-white/5' : 'bg-white border-slate-200'}`}>
-                        {editingSkills.map((skill, i) => (
-                          <span key={i} className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase flex items-center gap-2 ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
+                        {editingSkills.map((skill) => (
+                          <span key={skill} className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase flex items-center gap-2 ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
                             {skill}
                             <button onClick={() => removeSkill(skill)} className="hover:text-red-500"><X size={12}/></button>
                           </span>
@@ -197,11 +197,14 @@ const SkillsView = ({ users, currentUserRole, currentUserId, projects, isDarkMod
                     </div>
                   ) : (
                     <>
-                      {user.skills.length > 0 ? user.skills.map((skill: any, i: number) => (
-                        <span key={i} className={`border px-3 py-1 rounded-lg text-[10px] font-black uppercase shadow-sm flex items-center gap-1.5 ${isDarkMode ? 'bg-white/5 border-white/5 text-gray-300' : 'bg-white border-slate-200 text-slate-600'}`}>
-                          <Tag size={10} className="text-indigo-400" /> {typeof skill === 'string' ? skill : (skill.name || skill.id || JSON.stringify(skill))}
-                        </span>
-                      )) : (
+                      {user.skills.length > 0 ? user.skills.map((skill: any, idx: number) => {
+                        const skillName = typeof skill === 'string' ? skill : (skill.name || skill.id || JSON.stringify(skill));
+                        return (
+                          <span key={`${skillName}-${idx}`} className={`border px-3 py-1 rounded-lg text-[10px] font-black uppercase shadow-sm flex items-center gap-1.5 ${isDarkMode ? 'bg-white/5 border-white/5 text-gray-300' : 'bg-white border-slate-200 text-slate-600'}`}>
+                            <Tag size={10} className="text-indigo-400" /> {skillName}
+                          </span>
+                        );
+                      }) : (
                         <p className={`text-[10px] font-black uppercase italic tracking-widest ${isDarkMode ? 'text-gray-700' : 'text-slate-300'}`}>Sin habilidades registradas</p>
                       )}
                     </>

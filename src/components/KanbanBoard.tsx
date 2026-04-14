@@ -568,20 +568,23 @@ const KanbanBoard = ({
         )}
       </AnimatePresence>
 
-      {selectedTaskId && (
-        <TaskSidePanel 
-          taskId={selectedTaskId} 
-          projectId={projectId} 
-          onClose={() => setSelectedTaskId(null)} 
-          userRole={userRole}
-          currentUser={currentUser}
-          students={students}
-          updateTaskStatus={updateTaskStatus}
-          updateTaskField={updateTaskField}
-          deleteTask={deleteTask}
-          isDarkMode={isDarkMode}
-        />
-      )}
+      <AnimatePresence>
+        {selectedTaskId && (
+          <TaskSidePanel 
+            key={selectedTaskId}
+            taskId={selectedTaskId} 
+            projectId={projectId} 
+            onClose={() => setSelectedTaskId(null)} 
+            userRole={userRole}
+            currentUser={currentUser}
+            students={students}
+            updateTaskStatus={updateTaskStatus}
+            updateTaskField={updateTaskField}
+            deleteTask={deleteTask}
+            isDarkMode={isDarkMode}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -11,7 +11,7 @@ import ProjectDirectory from './components/ProjectDirectory';
 import ProjectWorkspace from './components/ProjectWorkspace';
 import SkillsView from './components/SkillsView';
 import { notifyProjectDeleted, getProjectAdmins, createNotification } from './services/notificationService';
-import { Users, PlusCircle, Clock, Calendar as CalendarIcon, CheckCircle2, XCircle, AlertCircle, History, Trash2, Edit2, ChevronRight, ChevronLeft, ArrowLeft, UserPlus, Tag, LayoutDashboard, CalendarDays, ExternalLink, Link as LinkIcon, Phone, Mail, GraduationCap, Briefcase, Plus, Filter, Search, Check, X, List, LayoutGrid, Download, RefreshCw, BarChart3, AlertTriangle, CheckSquare, ArrowDownUp, Folder, Send, Shield, ShieldOff, Menu, Settings, Bell, Sun, Moon, PieChart as PieChartIcon } from 'lucide-react';
+import { Users, User, PlusCircle, Clock, Calendar as CalendarIcon, CheckCircle2, XCircle, AlertCircle, History, Trash2, Edit2, ChevronRight, ChevronLeft, ArrowLeft, UserPlus, Tag, LayoutDashboard, CalendarDays, ExternalLink, Link as LinkIcon, Phone, Mail, GraduationCap, Briefcase, Plus, Filter, Search, Check, X, List, LayoutGrid, Download, RefreshCw, BarChart3, AlertTriangle, CheckSquare, ArrowDownUp, Folder, Send, Shield, ShieldOff, Menu, Settings, Bell, Sun, Moon, PieChart as PieChartIcon } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -276,6 +276,7 @@ const Sidebar = ({
       <AnimatePresence>
         {((isMobile && isMobileMenuOpen) || (isRail && isExpanded)) && (
           <motion.div
+            key="sidebar-overlay"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -412,6 +413,14 @@ const Sidebar = ({
                 isDarkMode={isDarkMode}
               />
               <SidebarItem
+                icon={<CalendarIcon size={20} />}
+                label="Calendario"
+                active={view === 'calendar'}
+                onClick={() => { setView('calendar'); setEditingRecordId(null); if (isRail) setIsExpanded(false); if (isMobile) setIsMobileMenuOpen(false); }}
+                collapsed={isRail && !isExpanded}
+                isDarkMode={isDarkMode}
+              />
+              <SidebarItem
                 icon={<Briefcase size={20} />}
                 label="Directorio Proyectos"
                 active={view === 'project-directory'}
@@ -445,7 +454,7 @@ const Sidebar = ({
                 (!isRail || isExpanded) && (
                   <div className="space-y-2 px-2">
                     {[1, 2, 3].map(i => (
-                      <div key={i} className="h-14 bg-white/5 rounded-2xl animate-pulse" />
+                      <div key={`placeholder-sidebar-${i}`} className="h-14 bg-white/5 rounded-2xl animate-pulse" />
                     ))}
                   </div>
                 )
@@ -578,6 +587,7 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
   
   const studentProjectIds = student 
     ? Array.from(new Set(((student.projectIds && student.projectIds.length > 0) ? student.projectIds : ['p-general']) as string[]))
+        .filter(Boolean)
     : ['p-general'];
   
   const projectStats = useMemo(() => {
@@ -756,9 +766,26 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
 
     try {
       if (editingRecordId) {
+        const oldRecord = (student?.records || []).find((r: any) => r.id === editingRecordId);
+        const updatedRecord = {
+            ...(oldRecord || {}),
+            id: editingRecordId,
+            date: form.date,
+            hours: calcHours,
+            categoryId: finalCatId,
+            projectId: form.projectId,
+            description: form.description,
+            evidenceLink: form.evidenceLink,
+            status: 'A',
+            startTime: form.startTime,
+            endTime: form.endTime,
+            validationStatus: 'pendiente',
+            createdBy: oldRecord ? oldRecord.createdBy : userRole
+        };
+
         const updatedStudents = students.map((s: any) => s.id === student?.id ? { 
           ...s, 
-          records: (s.records || []).map((r: any) => r.id === editingRecordId ? newRecord : r) 
+          records: (s.records || []).map((r: any) => r.id === editingRecordId ? updatedRecord : r) 
         } : s);
         setStudents(updatedStudents);
         
@@ -766,7 +793,7 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
         if (!studentToUpdate && student?.id) {
           studentToUpdate = {
             ...student,
-            records: (student.records || []).map((r: any) => r.id === editingRecordId ? newRecord : r)
+            records: (student.records || []).map((r: any) => r.id === editingRecordId ? updatedRecord : r)
           };
         }
 
@@ -827,20 +854,14 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
 
   const handleEditTask = (record: any) => {
     setEditingRecordId(record.id);
-    setSelectedStudentId(record.studentId);
-    setActivityForm({
+    setForm({
       date: record.date || getCDMXDateString(),
       startTime: record.startTime || '09:00',
       endTime: record.endTime || '13:00',
-      hours: record.hours || 0,
-      isManualHours: !record.startTime || !record.endTime,
-      status: record.status || 'A',
       categoryId: record.categoryId || '',
       projectId: record.projectId || '',
       description: record.description || '',
-      evidenceLink: record.evidenceLink || '',
-      selectedStudentIds: [record.studentId],
-      studentStatuses: { [record.studentId]: record.status || 'A' }
+      evidenceLink: record.evidenceLink || ''
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -1042,8 +1063,9 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
       {/* Dispute Modal */}
       <AnimatePresence>
         {disputeModal.isOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
+          <div key="dispute-modal-overlay" className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
             <motion.div 
+              key="dispute-modal-backdrop"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
@@ -1051,6 +1073,7 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
               className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
             />
             <motion.div 
+              key="dispute-modal-content"
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
@@ -1419,7 +1442,7 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                     const percentage = totalHours > 0 ? ((stat.value / totalHours) * 100).toFixed(1) : 0;
                     
                     return (
-                      <div key={index} className={`flex items-center justify-between p-4 rounded-2xl ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}>
+                      <div key={stat.name} className={`flex items-center justify-between p-4 rounded-2xl ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}>
                         <div className="flex items-center gap-3">
                           <div className="w-3 h-3 rounded-full" style={{ backgroundColor: stat.color }}></div>
                           <span className={`text-xs font-bold ${isDarkMode ? 'text-gray-300' : 'text-slate-600'}`}>{stat.name}</span>
@@ -2052,6 +2075,7 @@ const App = () => {
   const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [studentFormErrors, setStudentFormErrors] = useState<Record<string, string>>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('Todos');
@@ -2086,6 +2110,9 @@ const App = () => {
         unsubscribeProfile = onSnapshot(docRef, (docSnap) => {
           if (docSnap.exists()) {
             const data = docSnap.data();
+            if (data.records) {
+              data.records = dedupeById(data.records);
+            }
             setUserProfile(data);
             localStorage.setItem(`profile_${currentUser.uid}`, JSON.stringify(data));
           } else {
@@ -2097,7 +2124,11 @@ const App = () => {
           // Fallback to local storage on error
           const localProfile = localStorage.getItem(`profile_${currentUser.uid}`);
           if (localProfile) {
-            setUserProfile(JSON.parse(localProfile));
+            const data = JSON.parse(localProfile);
+            if (data.records) {
+              data.records = dedupeById(data.records);
+            }
+            setUserProfile(data);
           }
         });
       } else {
@@ -2183,7 +2214,7 @@ const App = () => {
             id: doc.id,
             ...doc.data()
           }));
-          setProjects(projectsData);
+          setProjects(dedupeById(projectsData));
         } else if (userRole !== 'user') {
           // If empty and admin, save defaults to Firestore
           const defaults = [
@@ -2199,7 +2230,7 @@ const App = () => {
         const categoriesSnapshot = await getDocs(collection(db, 'categories'));
         if (!categoriesSnapshot.empty) {
           const categoriesData = categoriesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          setCategories(categoriesData);
+          setCategories(dedupeById(categoriesData));
         } else if (userRole !== 'user') {
           // If empty and admin, save defaults to Firestore
           const defaults = [
@@ -2240,10 +2271,11 @@ const App = () => {
           return {
             id: doc.id,
             ...data,
+            records: data.records ? dedupeById(data.records) : [],
             name: `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || 'Sin nombre'
           };
         });
-        setStudents(studentsData);
+        setStudents(dedupeById(studentsData));
       } catch (error: any) {
         console.error("Error fetching students:", error);
         // Only handle if it's not a permission error we already handle elsewhere
@@ -2402,7 +2434,8 @@ const App = () => {
     if (userRole === 'user' && currentUserId) {
       filtered = students.filter(s => s.id === currentUserId);
     }
-    return filtered.flatMap(s => (s.records || []).map((r: any) => ({ ...r, studentName: s.name, studentId: s.id })));
+    const flat = filtered.flatMap(s => (s.records || []).map((r: any) => ({ ...r, studentName: s.name, studentId: s.id })));
+    return dedupeById(flat);
   }, [students, userRole, currentUserId]);
 
   const paginatedSessions = useMemo(() => {
@@ -2876,6 +2909,7 @@ const App = () => {
   const startEditRecord = (record: any) => {
     setEditingRecordId(record.id);
     const isManual = !record.startTime || !record.endTime;
+    const sId = record.studentId || selectedStudentId;
     setActivityForm({
       date: record.date || getCDMXDateString(), 
       startTime: record.startTime || '09:00', 
@@ -2887,8 +2921,8 @@ const App = () => {
       projectId: record.projectId || '',
       description: record.description || '', 
       evidenceLink: record.evidenceLink || '',
-      selectedStudentIds: [record.studentId], 
-      studentStatuses: { [record.studentId]: record.status || 'A' }
+      selectedStudentIds: sId ? [sId] : [], 
+      studentStatuses: sId ? { [sId]: record.status || 'A' } : {}
     });
   };
 
@@ -2983,23 +3017,35 @@ const App = () => {
         const sDesc = sStat === 'A' ? activityForm.description : '';
         const sLink = sStat === 'A' ? activityForm.evidenceLink : '';
 
-        const newRecord = {
-          id: editingRecordId && s.id === selectedStudentId ? editingRecordId : `${Date.now()}-${s.id}`,
-          date: activityForm.date, 
-          startTime: activityForm.isManualHours ? '' : activityForm.startTime, 
-          endTime: activityForm.isManualHours ? '' : activityForm.endTime,
-          hours: sHrs, status: sStat, categoryId: activityForm.categoryId,
-          projectId: activityForm.projectId,
-          description: sDesc, evidenceLink: sLink, 
-          validationStatus: 'aprobado',
-          createdBy: userRole
-        };
-
         let updatedRecords;
         const records = s.records || [];
         if (editingRecordId && s.id === selectedStudentId) {
-          updatedRecords = records.map((r: any) => r.id === editingRecordId ? newRecord : r);
+          const oldRecord = records.find((r: any) => r.id === editingRecordId);
+          const updatedRecord = {
+            ...(oldRecord || {}),
+            id: editingRecordId,
+            date: activityForm.date, 
+            startTime: activityForm.isManualHours ? '' : activityForm.startTime, 
+            endTime: activityForm.isManualHours ? '' : activityForm.endTime,
+            hours: sHrs, status: sStat, categoryId: activityForm.categoryId,
+            projectId: activityForm.projectId,
+            description: sDesc, evidenceLink: sLink, 
+            validationStatus: oldRecord ? oldRecord.validationStatus : 'aprobado',
+            createdBy: oldRecord ? oldRecord.createdBy : userRole
+          };
+          updatedRecords = records.map((r: any) => r.id === editingRecordId ? updatedRecord : r);
         } else {
+          const newRecord = {
+            id: `${Date.now()}-${s.id}`,
+            date: activityForm.date, 
+            startTime: activityForm.isManualHours ? '' : activityForm.startTime, 
+            endTime: activityForm.isManualHours ? '' : activityForm.endTime,
+            hours: sHrs, status: sStat, categoryId: activityForm.categoryId,
+            projectId: activityForm.projectId,
+            description: sDesc, evidenceLink: sLink, 
+            validationStatus: 'aprobado',
+            createdBy: userRole
+          };
           updatedRecords = [newRecord, ...records];
         }
         const approvedHours = updatedRecords.reduce((a: number,c: any) => {
@@ -3168,7 +3214,7 @@ const App = () => {
                 setSelectedStudentId(e.target.value);
               }}>
                 <option value="">Seleccionar Alumno</option>
-                {students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {students.map((s, idx) => <option key={`${s.id || 'student'}-${idx}`} value={s.id}>{s.name}</option>)}
               </select>
             </div>
           )}
@@ -3178,11 +3224,11 @@ const App = () => {
           <div className="space-y-4">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Participantes</label>
             <div className="grid grid-cols-1 gap-4 p-6 bg-slate-50 rounded-[2rem] border max-h-[300px] overflow-y-auto">
-              {students.map(s => {
+              {students.map((s, idx) => {
                 const isSelected = activityForm.selectedStudentIds.includes(s.id);
                 const sStatus = activityForm.studentStatuses[s.id] || 'A';
                 return (
-                  <div key={s.id} className={`p-4 rounded-xl border-2 ${isSelected ? 'bg-white border-emerald-500' : 'bg-transparent border-transparent'}`}>
+                  <div key={`${s.id || 'student'}-${idx}`} className={`p-4 rounded-xl border-2 ${isSelected ? 'bg-white border-emerald-500' : 'bg-transparent border-transparent'}`}>
                     <label className="flex items-center gap-3 cursor-pointer">
                       <input type="checkbox" checked={isSelected} onChange={e => {
                         const checked = e.target.checked;
@@ -3522,36 +3568,70 @@ const App = () => {
                 )}
               </button>
               
-              <button 
-                onClick={() => {
-                  setEditingProfileForm({
-                    ...userProfile,
-                    firstName: userProfile.firstName || '',
-                    lastNamePaterno: userProfile.lastNamePaterno || '',
-                    lastNameMaterno: userProfile.lastNameMaterno || '',
-                    email: userProfile.email || '',
-                    phone: userProfile.phone || '',
-                    emergencyPhone: userProfile.emergencyPhone || '',
-                    skills: userProfile.skills || [],
-                    skillRatings: userProfile.skillRatings || [],
-                    brigadePeriod: userProfile.brigadePeriod || '',
-                    studentId: userProfile.studentId || '',
-                    career: userProfile.career || '',
-                    status: userProfile.status || 'En Curso',
-                  });
-                  setShowProfileModal(true);
-                }}
-                className="flex items-center gap-2 p-1 pr-3 hover:bg-slate-100 rounded-xl transition-all group"
-              >
-                <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white font-black text-xs">
-                  {user?.displayName?.charAt(0) || 'U'}
-                </div>
-                {breakpoint !== 'mobile' && (
-                  <span className="text-xs font-bold text-slate-600 group-hover:text-slate-900 transition-colors">
-                    {user?.displayName?.split(' ')[0] || 'Perfil'}
-                  </span>
-                )}
-              </button>
+              <div className="relative">
+                <button 
+                  onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                  className="flex items-center gap-2 p-1 pr-3 hover:bg-slate-100 rounded-xl transition-all group"
+                >
+                  <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white font-black text-xs">
+                    {user?.displayName?.charAt(0) || 'U'}
+                  </div>
+                  {breakpoint !== 'mobile' && (
+                    <span className="text-xs font-bold text-slate-600 group-hover:text-slate-900 transition-colors">
+                      {user?.displayName?.split(' ')[0] || 'Perfil'}
+                    </span>
+                  )}
+                </button>
+                
+                <AnimatePresence>
+                  {isProfileMenuOpen && (
+                    <>
+                      <div key="profile-menu-overlay" className="fixed inset-0 z-40" onClick={() => setIsProfileMenuOpen(false)} />
+                      <motion.div 
+                        key="profile-menu-content"
+                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                        className="absolute right-0 mt-2 w-48 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50"
+                      >
+                        <button 
+                          onClick={() => {
+                            setIsProfileMenuOpen(false);
+                            setEditingProfileForm({
+                              ...userProfile,
+                              firstName: userProfile.firstName || '',
+                              lastNamePaterno: userProfile.lastNamePaterno || '',
+                              lastNameMaterno: userProfile.lastNameMaterno || '',
+                              email: userProfile.email || '',
+                              phone: userProfile.phone || '',
+                              emergencyPhone: userProfile.emergencyPhone || '',
+                              skills: userProfile.skills || [],
+                              skillRatings: userProfile.skillRatings || [],
+                              brigadePeriod: userProfile.brigadePeriod || '',
+                              studentId: userProfile.studentId || '',
+                              career: userProfile.career || '',
+                              status: userProfile.status || 'En Curso',
+                            });
+                            setShowProfileModal(true);
+                          }}
+                          className="w-full text-left px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-indigo-600 transition-colors flex items-center gap-2"
+                        >
+                          <User size={16} /> Mi Perfil
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setIsProfileMenuOpen(false);
+                            auth.signOut();
+                          }}
+                          className="w-full text-left px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors flex items-center gap-2 border-t border-slate-100"
+                        >
+                          <ShieldOff size={16} /> Cerrar Sesión
+                        </button>
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
           </header>
 
@@ -3592,7 +3672,7 @@ const App = () => {
                 <div className="h-12 bg-slate-100 rounded-2xl w-1/3"></div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                   {Array.from({ length: 6 }).map((_, i) => (
-                    <div key={i} className="h-64 bg-slate-50 rounded-[2.5rem]"></div>
+                    <div key={`placeholder-proj-${i}`} className="h-64 bg-slate-50 rounded-[2.5rem]"></div>
                   ))}
                 </div>
               </div>
@@ -3619,7 +3699,7 @@ const App = () => {
                 <div className="h-12 bg-slate-100 rounded-2xl w-1/4"></div>
                 <div className="space-y-4">
                   {Array.from({ length: 5 }).map((_, i) => (
-                    <div key={i} className="h-32 bg-slate-50 rounded-[2rem]"></div>
+                    <div key={`placeholder-val-${i}`} className="h-32 bg-slate-50 rounded-[2rem]"></div>
                   ))}
                 </div>
               </div>
@@ -3760,7 +3840,7 @@ const App = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-6 w-full">
                 {isLoadingStudents ? (
                   Array.from({ length: 4 }).map((_, i) => (
-                    <div key={i} className={`p-4 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border shadow-sm animate-pulse flex flex-col justify-center items-center text-center gap-2 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}>
+                    <div key={`placeholder-stat-${i}`} className={`p-4 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] border shadow-sm animate-pulse flex flex-col justify-center items-center text-center gap-2 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}>
                       <div className={`h-3 rounded-full w-1/2 ${isDarkMode ? 'bg-white/10' : 'bg-slate-100'}`}></div>
                       <div className={`h-10 rounded-xl w-3/4 ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                     </div>
@@ -3825,7 +3905,7 @@ const App = () => {
                     <div className={`h-48 sm:h-64 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                   ) : (
                     <div className="h-48 sm:h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                         <BarChart data={chartData.projectChartData}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#333' : '#e2e8f0'} />
                           <XAxis dataKey="name" tick={{fontSize: 8, fill: isDarkMode ? '#666' : '#64748b'}} axisLine={false} tickLine={false} />
@@ -3848,7 +3928,7 @@ const App = () => {
                     <div className={`h-48 sm:h-64 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                   ) : (
                     <div className="h-48 sm:h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                         <BarChart data={chartData.projectChartData}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#333' : '#e2e8f0'} />
                           <XAxis dataKey="name" tick={{fontSize: 8, fill: isDarkMode ? '#666' : '#64748b'}} axisLine={false} tickLine={false} />
@@ -3871,7 +3951,7 @@ const App = () => {
                     <div className={`h-48 sm:h-64 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                   ) : (
                     <div className="h-48 sm:h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                         <BarChart data={chartData.projectChartData}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#333' : '#e2e8f0'} />
                           <XAxis dataKey="name" tick={{fontSize: 8, fill: isDarkMode ? '#666' : '#64748b'}} axisLine={false} tickLine={false} />
@@ -3894,7 +3974,7 @@ const App = () => {
                     <div className="h-48 sm:h-64 w-full bg-slate-50 rounded-2xl animate-pulse"></div>
                   ) : (
                     <div className="h-48 sm:h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
+                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
                         <PieChart>
                           <Pie
                             data={chartData.categoryChartData}
@@ -3923,7 +4003,7 @@ const App = () => {
               <div className="grid grid-cols-1 gap-6">
                 {isLoadingStudents ? (
                   Array.from({ length: 5 }).map((_, i) => (
-                    <div key={i} className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm animate-pulse flex flex-col md:flex-row items-center gap-6">
+                    <div key={`placeholder-student-${i}`} className="bg-white p-6 md:p-8 rounded-[2.5rem] border border-slate-100 shadow-sm animate-pulse flex flex-col md:flex-row items-center gap-6">
                       <div className="w-2 h-24 bg-slate-100 rounded-full"></div>
                       <div className="flex-1 space-y-4 w-full">
                         <div className="h-8 bg-slate-100 rounded-xl w-1/3"></div>
@@ -4057,7 +4137,7 @@ const App = () => {
                                    </div>
                                    <div className="flex flex-wrap gap-1 pl-1">
                                      {tasks.map((t: string, i: number) => (
-                                       <span key={i} className={`text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-lg border italic shadow-sm tracking-tight ${isDarkMode ? 'text-indigo-400 bg-white/10 border-indigo-500/30' : 'text-indigo-700 bg-white border-indigo-100'}`}>#{String(t)}</span>
+                                       <span key={`${t}-${i}`} className={`text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-lg border italic shadow-sm tracking-tight ${isDarkMode ? 'text-indigo-400 bg-white/10 border-indigo-500/30' : 'text-indigo-700 bg-white border-indigo-100'}`}>#{String(t)}</span>
                                      ))}
                                    </div>
                                  </div>
@@ -4071,7 +4151,7 @@ const App = () => {
                                  </div>
                                  <div className="flex flex-wrap gap-1 pl-1">
                                    {student.skills.map((skill: any, i: number) => (
-                                     <span key={i} className="text-[8px] sm:text-[9px] font-bold text-emerald-800 bg-white px-1.5 py-0.5 rounded-lg border border-emerald-100 shadow-sm">
+                                     <span key={`${typeof skill === 'string' ? skill : (skill.id || skill.name || 'skill')}-${i}`} className="text-[8px] sm:text-[9px] font-bold text-emerald-800 bg-white px-1.5 py-0.5 rounded-lg border border-emerald-100 shadow-sm">
                                        {typeof skill === 'string' ? skill : (skill.name || skill.id || 'Skill')}
                                      </span>
                                    ))}
@@ -4225,7 +4305,7 @@ const App = () => {
                                             </div>
                                             <div className="flex flex-wrap gap-2">
                                                 {tasks.map((t: string, i: number) => (
-                                                    <span key={i} className={`text-[9px] sm:text-[10px] font-bold px-3 py-1 rounded-lg border italic shadow-sm ${isDarkMode ? 'text-indigo-400 bg-white/10 border-indigo-500/30' : 'text-indigo-700 bg-white border-indigo-100'}`}>#{String(t)}</span>
+                                                    <span key={`${t}-${i}`} className={`text-[9px] sm:text-[10px] font-bold px-3 py-1 rounded-lg border italic shadow-sm ${isDarkMode ? 'text-indigo-400 bg-white/10 border-indigo-500/30' : 'text-indigo-700 bg-white border-indigo-100'}`}>#{String(t)}</span>
                                                 ))}
                                                 {tasks.length === 0 && <span className="text-[10px] font-bold text-slate-300 italic">Sin tareas específicas</span>}
                                             </div>
@@ -4243,7 +4323,7 @@ const App = () => {
                             </div>
                             <div className="flex flex-wrap gap-2 sm:gap-3">
                                 {(selectedStudent.skills || []).map((skill: string, i: number) => (
-                                    <span key={i} className="bg-emerald-50 text-emerald-700 border border-emerald-100 px-4 py-2 rounded-xl text-[10px] sm:text-[11px] font-black uppercase shadow-sm">{skill}</span>
+                                    <span key={`${skill}-${i}`} className="bg-emerald-50 text-emerald-700 border border-emerald-100 px-4 py-2 rounded-xl text-[10px] sm:text-[11px] font-black uppercase shadow-sm">{skill}</span>
                                 ))}
                                 {(selectedStudent.skills || []).length === 0 && (
                                     <div className="w-full p-8 text-center border-2 border-dashed border-emerald-50 rounded-[2rem] text-emerald-200 font-black uppercase text-[10px] tracking-widest">Sin habilidades registradas</div>
@@ -4581,7 +4661,7 @@ const App = () => {
                             className={`font-black text-sm sm:text-2xl tracking-tighter leading-none bg-transparent outline-none cursor-pointer capitalize appearance-none text-center min-w-[80px] sm:min-w-[140px] ${isDarkMode ? 'text-white' : 'text-slate-800'}`}
                           >
                             {Array.from({ length: 12 }).map((_, i) => (
-                              <option key={i} value={i} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : 'bg-white text-slate-800'}>
+                              <option key={`month-${i}`} value={i} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : 'bg-white text-slate-800'}>
                                 {new Date(2000, i, 1).toLocaleDateString('es-ES', { month: 'long' })}
                               </option>
                             ))}
@@ -4700,10 +4780,10 @@ const App = () => {
                                  <h3 className="font-black text-lg sm:text-2xl text-slate-800 capitalize tracking-tight">{dateObj.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
                                </div>
                                <div className="space-y-4 pl-2 sm:pl-8 border-l-2 border-indigo-50">
-                                 {Object.values(groupedActs).map((group: any, idx) => {
+                                 {Object.entries(groupedActs).map(([k, group]: any, idx: number) => {
                                    const cat = categories.find(c => c.id === group.categoryId);
                                    return (
-                                      <div key={idx} className={`p-4 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] flex flex-col md:flex-row items-center justify-between gap-4 sm:gap-6 transition-all border group ${isDarkMode ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-slate-50 border-slate-100 hover:bg-white hover:shadow-lg'}`}>
+                                      <div key={`${k}-${idx}`} className={`p-4 sm:p-6 rounded-[1.5rem] sm:rounded-[2rem] flex flex-col md:flex-row items-center justify-between gap-4 sm:gap-6 transition-all border group ${isDarkMode ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-slate-50 border-slate-100 hover:bg-white hover:shadow-lg'}`}>
                                        <div className="flex items-center gap-4 sm:gap-6 w-full md:w-auto">
                                           <div className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl shadow-sm border text-center min-w-[80px] sm:min-w-[100px] ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}>
                                            <p className="text-lg sm:text-xl font-black text-indigo-600 leading-none">{group.startTime}</p>
@@ -4715,7 +4795,7 @@ const App = () => {
                                            </div>
                                            <div className="flex flex-wrap gap-2">
                                               {group.participants.map((pName: string, i: number) => (
-                                                   <div key={i} className={`border px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[9px] sm:text-[10px] font-bold shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400' : 'bg-white border-slate-200 text-slate-700'}`}>{String(pName)}</div>
+                                                   <div key={`${pName}-${i}`} className={`border px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-[9px] sm:text-[10px] font-bold shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400' : 'bg-white border-slate-200 text-slate-700'}`}>{String(pName)}</div>
                                               ))}
                                            </div>
                                          </div>
@@ -4748,10 +4828,10 @@ const App = () => {
                              if (!grouped[key]) grouped[key] = { ...r, participants: [r.studentName] };
                              else grouped[key].participants.push(r.studentName);
                           });
-                          return Object.values(grouped).map((group: any, idx) => {
+                          return Object.entries(grouped).map(([k, group]: any, idx: number) => {
                              const cat = categories.find(c => c.id === group.categoryId);
                              return (
-                               <div key={idx} className={`p-6 sm:p-8 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6 transition-all border ${isDarkMode ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-slate-50 border-slate-100 hover:bg-white hover:shadow-lg'}`}>
+                               <div key={`${k}-${idx}`} className={`p-6 sm:p-8 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6 transition-all border ${isDarkMode ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-slate-50 border-slate-100 hover:bg-white hover:shadow-lg'}`}>
                                  <div className="flex items-center gap-6 w-full md:w-auto">
                                    <div className={`p-4 rounded-2xl shadow-sm border text-center min-w-[100px] ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}>
                                      <p className="text-xl font-black text-indigo-600 leading-none">{group.startTime || 'Manual'}</p>
@@ -4761,7 +4841,7 @@ const App = () => {
                                         <span className="px-3 py-1.5 rounded-xl text-[9px] font-black text-white uppercase" style={{ backgroundColor: cat?.color || '#ccc' }}>{cat?.name || 'Categoría'}</span>
                                         {group.participants.length > 1 && <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black flex items-center gap-1 ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-100 text-indigo-700'}`}><Users size={10}/> Grupal</span>}
                                      </div>
-                                     <div className="flex flex-wrap gap-2"> {group.participants.map((pName: string, i: number) => ( <div key={i} className={`border px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400' : 'bg-white border-slate-200 text-slate-700'}`}>{String(pName)}</div> ))} </div>
+                                     <div className="flex flex-wrap gap-2"> {group.participants.map((pName: string, i: number) => ( <div key={`${pName}-${i}`} className={`border px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400' : 'bg-white border-slate-200 text-slate-700'}`}>{String(pName)}</div> ))} </div>
                                    </div>
                                  </div>
                                  {group.description && <div className="md:max-w-xs w-full"> <p className={`text-[11px] font-bold italic line-clamp-3 ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>"{group.description}"</p> </div>}
@@ -5068,7 +5148,7 @@ const App = () => {
                   
                   <div className="w-full mt-8 space-y-6">
                     {rejectedNotifications.map((notification, index) => (
-                      <div key={notification.id || `notif-${index}`} className="bg-slate-50 border border-slate-200 rounded-3xl p-6 text-left">
+                      <div key={`${notification.id || 'notif'}-${index}`} className="bg-slate-50 border border-slate-200 rounded-3xl p-6 text-left">
                         <div className="flex justify-between items-start mb-4">
                           <div>
                             <h3 className="font-semibold text-slate-900 text-xl">{notification.date}</h3>
@@ -5172,7 +5252,7 @@ const App = () => {
                     <div className={`p-6 sm:p-10 rounded-[2rem] sm:rounded-[3.5rem] border shadow-inner space-y-4 sm:space-y-6 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-100'}`}>
                       <h4 className={`text-[10px] sm:text-xs font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Proyectos Asignados</h4>
                       <div className="space-y-3 sm:space-y-4">
-                        {userProfile.projectIds?.length > 0 ? userProfile.projectIds.map((pid: string, idx: number) => {
+                        {userProfile.projectIds?.length > 0 ? Array.from(new Set(userProfile.projectIds)).map((pid: string, idx: number) => {
                           const p = projects.find((proj: any) => proj.id === pid);
                           return (
                             <div key={`${pid}-${idx}`} className={`flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}>
@@ -5487,7 +5567,7 @@ const App = () => {
                                  />
                                  {showSuggestions && (
                                    <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-indigo-100 rounded-xl shadow-xl z-50 max-h-32 overflow-y-auto">
-                                     {suggestions.map((sugg: string) => (
+                                     {Array.from(new Set(suggestions)).map((sugg: string) => (
                                        <div key={sugg} className="p-3 hover:bg-indigo-50 cursor-pointer text-[10px] font-black uppercase text-slate-700 border-b last:border-0 transition-colors"
                                          onClick={() => {
                                            if (!currentTags.includes(sugg)) { setStudentForm({ ...studentForm, projectTasks: { ...studentForm.projectTasks, [pid]: [...currentTags, sugg] } }); }
@@ -5506,7 +5586,7 @@ const App = () => {
 
                            <div className="flex flex-wrap gap-2 min-h-[40px] max-h-[120px] overflow-y-auto custom-scrollbar p-1">
                               {currentTags.map((tag: string, idx: number) => (
-                                <div key={idx} onClick={() => {
+                                <div key={`${tag}-${idx}`} onClick={() => {
                                       const removedTag = currentTags[idx];
                                       const updatedTagsForProj = currentTags.filter((_: any, i: number) => i !== idx);
                                       const currentHistory = studentForm.projectTaskHistory?.[pid] || [];
@@ -5544,7 +5624,7 @@ const App = () => {
                                </div>
                                <div className="flex flex-wrap gap-1 max-h-[80px] overflow-y-auto custom-scrollbar pr-1">
                                  {((studentForm.projectTaskHistory && studentForm.projectTaskHistory[pid]) || []).map((tag: string, idx: number) => (
-                                   <div key={idx} className="flex items-center gap-1 bg-slate-50 text-slate-400 px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-tight">
+                                   <div key={`${tag}-${idx}`} className="flex items-center gap-1 bg-slate-50 text-slate-400 px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-tight">
                                      <span className="truncate max-w-[80px]">{String(tag)}</span>
                                      <button type="button" onClick={() => {
                                        const currentHistory = (studentForm.projectTaskHistory && studentForm.projectTaskHistory[pid]) || [];

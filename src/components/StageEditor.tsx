@@ -138,7 +138,7 @@ export const StageEditor = ({ project, tasks, onSave, isDarkMode }: StageEditorP
           { label: 'Total SP', value: kpis.totalSP, color: 'bg-slate-400' },
         ].map((kpi, i) => (
           <motion.div
-            key={i}
+            key={`kpi-${i}`}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.05 }}
@@ -249,7 +249,7 @@ export const StageEditor = ({ project, tasks, onSave, isDarkMode }: StageEditorP
                   Errores de Validación
                 </div>
                 <ul className={`text-xs space-y-2 list-disc list-inside font-medium ${isDarkMode ? 'text-red-400/80' : 'text-red-600'}`}>
-                  {errors.map((err, i) => <li key={i}>{err}</li>)}
+                  {errors.map((err, i) => <li key={`err-${i}`}>{err}</li>)}
                 </ul>
               </motion.div>
             )}

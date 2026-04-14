@@ -1,7 +1,11 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart, Bar, ResponsiveContainer } from 'recharts';
-import { Target, CheckCircle2, AlertTriangle, Clock, Calendar, LayoutGrid, BarChart3, PieChart as PieChartIcon, Activity, Users } from 'lucide-react';
-import { formatName } from '../utils/formatters';
+import { Target, CheckCircle2, AlertTriangle, Clock, Calendar, LayoutGrid, BarChart3, PieChart as PieChartIcon, Activity, Users, MessageSquare, ChevronRight } from 'lucide-react';
+import { formatName, formatFullName } from '../utils/formatters';
+import { db } from '../firebase';
+import { collectionGroup, query, where, orderBy, onSnapshot, limit } from 'firebase/firestore';
+import ReactMarkdown from 'react-markdown';
+import { dedupeById } from '../utils/dedupe';
 
 import ProjectProgressAnalysis from './ProjectProgressAnalysis';
 
@@ -25,6 +29,46 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: a
   const [selectedStageId, setSelectedStageId] = useState<string>(
     project?.stages?.[project?.currentStageIndex || 0]?.id || 'all'
   );
+  const [projectNotes, setProjectNotes] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!projectId) return;
+
+    let unsubscribeFallback: (() => void) | null = null;
+
+    // Fetch all notes for this project using collectionGroup
+    // Note: This requires a composite index on projectId and createdAt
+    const notesQuery = query(
+      collectionGroup(db, 'notes'),
+      where('projectId', '==', projectId),
+      orderBy('createdAt', 'desc'),
+      limit(50)
+    );
+
+    const unsubscribe = onSnapshot(notesQuery, (snapshot) => {
+      const notesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setProjectNotes(dedupeById(notesData));
+    }, (error) => {
+      console.error("Error fetching project notes:", error);
+      // Fallback: fetch without ordering if index is missing
+      const fallbackQuery = query(
+        collectionGroup(db, 'notes'),
+        where('projectId', '==', projectId)
+      );
+      unsubscribeFallback = onSnapshot(fallbackQuery, (snapshot) => {
+        const notesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const sorted = notesData.sort((a: any, b: any) => 
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        ).slice(0, 50);
+        setProjectNotes(dedupeById(sorted));
+      });
+    });
+
+    return () => {
+      unsubscribe();
+      if (unsubscribeFallback) unsubscribeFallback();
+    };
+  }, [projectId]);
 
   const filteredTasks = useMemo(() => {
     if (selectedStageId === 'all') return tasks;
@@ -301,6 +345,55 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: a
         tasks={tasks} 
         isDarkMode={isDarkMode} 
       />
+
+      {/* Comment History Section */}
+      <div className={`p-6 rounded-2xl shadow-sm border ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-100'}`}>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center gap-2">
+            <MessageSquare size={18} className="text-indigo-500" />
+            <h3 className={`text-lg font-black ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Historial de Comentarios</h3>
+          </div>
+          <div className={`text-xs font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Actividad Reciente</div>
+        </div>
+
+        <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+          {projectNotes.length === 0 ? (
+            <div className="text-center py-12">
+              <MessageSquare size={48} className={`mx-auto mb-4 opacity-20 ${isDarkMode ? 'text-gray-400' : 'text-slate-400'}`} />
+              <p className={`font-medium ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>No hay comentarios aún en este proyecto.</p>
+            </div>
+          ) : (
+            projectNotes.map((note) => (
+              <div key={note.id} className={`p-4 rounded-xl border transition-all ${isDarkMode ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-slate-50 border-slate-100 hover:bg-slate-100'}`}>
+                <div className="flex justify-between items-start mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-black ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-100 text-indigo-700'}`}>
+                      {note.authorName?.charAt(0) || 'U'}
+                    </div>
+                    <div>
+                      <p className={`text-xs font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-800'}`}>{formatFullName(note.authorName)}</p>
+                      <p className={`text-[10px] font-semibold ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest`}>
+                        {new Intl.DateTimeFormat('es-MX', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(note.createdAt))}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>
+                      Tarea: {note.taskTitle || 'Sin título'}
+                    </p>
+                    {note.parentId && (
+                      <span className="text-[8px] font-black uppercase px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded ml-2">Respuesta</span>
+                    )}
+                  </div>
+                </div>
+                <div className={`prose prose-sm max-w-none ${isDarkMode ? 'text-slate-400 prose-invert' : 'text-slate-600'} line-clamp-3 text-xs`}>
+                  <ReactMarkdown>{note.content}</ReactMarkdown>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 };

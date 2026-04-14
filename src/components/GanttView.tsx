@@ -260,18 +260,21 @@ const GanttView = ({
             );
           })}
         </div>
-        {selectedTaskId && (
-          <TaskSidePanel 
-            taskId={selectedTaskId} 
-            projectId={projectId} 
-            onClose={() => setSelectedTaskId(null)} 
-            userRole={userRole}
-            currentUser={currentUser}
-            students={students}
-            deleteTask={deleteTask}
-            isDarkMode={isDarkMode}
-          />
-        )}
+        <AnimatePresence>
+          {selectedTaskId && (
+            <TaskSidePanel 
+              key={selectedTaskId}
+              taskId={selectedTaskId} 
+              projectId={projectId} 
+              onClose={() => setSelectedTaskId(null)} 
+              userRole={userRole}
+              currentUser={currentUser}
+              students={students}
+              deleteTask={deleteTask}
+              isDarkMode={isDarkMode}
+            />
+          )}
+        </AnimatePresence>
       </div>
     );
   }
@@ -431,7 +434,7 @@ const GanttView = ({
                 if (scale === 'months') {
                   if (date.getDate() === 1) {
                     return (
-                      <div key={i} className={`absolute h-full flex items-end pb-2 border-l pl-2 ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`} style={{ left: i * DAY_WIDTH, width: 30 * DAY_WIDTH }}>
+                      <div key={`month-${date.getTime()}-${i}`} className={`absolute h-full flex items-end pb-2 border-l pl-2 ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`} style={{ left: i * DAY_WIDTH, width: 30 * DAY_WIDTH }}>
                         <span className={`text-xs font-bold ${isDarkMode ? 'text-gray-300' : 'text-slate-700'}`}>{date.toLocaleDateString('es-MX', { month: 'long', year: 'numeric' })}</span>
                       </div>
                     );
@@ -442,7 +445,7 @@ const GanttView = ({
                 if (scale === 'weeks') {
                   if (date.getDay() === 1) { // Monday
                     return (
-                      <div key={i} className={`absolute h-full flex flex-col justify-end pb-2 border-l pl-2 ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`} style={{ left: i * DAY_WIDTH, width: 7 * DAY_WIDTH }}>
+                      <div key={`week-${date.getTime()}-${i}`} className={`absolute h-full flex flex-col justify-end pb-2 border-l pl-2 ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`} style={{ left: i * DAY_WIDTH, width: 7 * DAY_WIDTH }}>
                         <span className={`text-[9px] font-black uppercase ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Semana</span>
                         <span className={`text-xs font-bold ${isDarkMode ? 'text-gray-300' : 'text-slate-700'}`}>{date.getDate()} {date.toLocaleDateString('es-MX', { month: 'short' })}</span>
                       </div>
@@ -453,7 +456,7 @@ const GanttView = ({
 
                 // Days scale
                 return (
-                  <div key={i} className={`flex flex-col items-center justify-end pb-2 border-r shrink-0 ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`} style={{ width: DAY_WIDTH }}>
+                  <div key={`day-${date.getTime()}-${i}`} className={`flex flex-col items-center justify-end pb-2 border-r shrink-0 ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`} style={{ width: DAY_WIDTH }}>
                     <span className={`text-[9px] font-black uppercase ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>{date.toLocaleDateString('es-MX', { weekday: 'short' }).charAt(0)}</span>
                     <span className={`text-xs font-bold ${date.getDay() === 0 || date.getDay() === 6 ? (isDarkMode ? 'text-gray-600' : 'text-slate-300') : (isDarkMode ? 'text-gray-300' : 'text-slate-700')}`}>{date.getDate()}</span>
                   </div>
@@ -505,20 +508,23 @@ const GanttView = ({
         </div>
       </div>
 
-      {selectedTaskId && (
-        <TaskSidePanel 
-          taskId={selectedTaskId} 
-          projectId={projectId} 
-          onClose={() => setSelectedTaskId(null)} 
-          userRole={userRole}
-          currentUser={currentUser}
-          students={students}
-          updateTaskStatus={updateTaskStatus}
-          updateTaskField={updateTaskField}
-          deleteTask={deleteTask}
-          isDarkMode={isDarkMode}
-        />
-      )}
+      <AnimatePresence>
+        {selectedTaskId && (
+          <TaskSidePanel 
+            key={selectedTaskId}
+            taskId={selectedTaskId} 
+            projectId={projectId} 
+            onClose={() => setSelectedTaskId(null)} 
+            userRole={userRole}
+            currentUser={currentUser}
+            students={students}
+            updateTaskStatus={updateTaskStatus}
+            updateTaskField={updateTaskField}
+            deleteTask={deleteTask}
+            isDarkMode={isDarkMode}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };

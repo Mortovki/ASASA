@@ -30,7 +30,7 @@ export const CPMMetrics: React.FC<CPMMetricsProps> = ({
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
       {metrics.map((m, i) => (
-        <div key={i} className={`p-4 rounded-3xl border shadow-sm flex flex-col gap-2 ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-200'}`}>
+        <div key={`metric-${m.label}-${i}`} className={`p-4 rounded-3xl border shadow-sm flex flex-col gap-2 ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-200'}`}>
           <div className="flex items-center justify-between">
             <div className={`p-2 rounded-xl ${m.bg} ${m.color}`}>
               <m.icon size={16} />
