@@ -343,7 +343,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
         {/* Bottom Row: Navigation Tabs */}
         <div className="px-2 sm:px-8 py-2 flex items-center justify-center">
           <div className={`p-1 rounded-2xl w-full lg:w-auto relative border shadow-inner flex justify-center ${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-slate-100/80 border-slate-200/50'}`}>
-            <div className={`flex gap-1 overflow-x-auto hide-scrollbar flex-1 lg:flex-none justify-center ${isMobile || isTablet ? 'snap-x snap-mandatory' : ''}`} style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+            <div className={`flex gap-1 overflow-x-auto hide-scrollbar flex-1 lg:flex-none justify-start lg:justify-center ${isMobile || isTablet ? 'snap-x snap-mandatory' : ''}`} style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
               {visibleTabs.map(renderTab)}
             </div>
             

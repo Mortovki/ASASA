@@ -261,12 +261,12 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
           {displayProjects.map((project: any) => (
             <div 
               key={project.id} 
               ref={el => { projectRefs.current[project.id] = el; }}
-              className={`p-5 sm:p-6 rounded-3xl shadow-sm border transition-all duration-300 flex flex-col overflow-hidden h-64 sm:h-72 ${selectedProjectId === project.id ? 'border-indigo-500 ring-4 ring-indigo-500/20' : (isDarkMode ? 'bg-[#1a1a1a] border-white/5 hover:border-white/10' : 'bg-white border-slate-200 hover:border-indigo-200 hover:shadow-md')}`}
+              className={`p-5 sm:p-6 rounded-3xl shadow-sm border transition-all duration-300 flex flex-col overflow-hidden h-72 sm:h-80 ${selectedProjectId === project.id ? 'border-indigo-500 ring-4 ring-indigo-500/20' : (isDarkMode ? 'bg-[#1a1a1a] border-white/5 hover:border-white/10' : 'bg-white border-slate-200 hover:border-indigo-200 hover:shadow-md')}`}
             >
               {editingProjectId === project.id ? (
                 <div className="space-y-4 sm:space-y-6 flex flex-col h-full">

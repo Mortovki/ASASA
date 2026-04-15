@@ -243,6 +243,37 @@ const KanbanBoard = ({
     setMovingTaskId(null);
   };
 
+  const [showLeftArrow, setShowLeftArrow] = useState(false);
+  const [showRightArrow, setShowRightArrow] = useState(true);
+  const tabsRef = useRef<HTMLDivElement>(null);
+
+  const handleScroll = () => {
+    if (tabsRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = tabsRef.current;
+      setShowLeftArrow(scrollLeft > 0);
+      setShowRightArrow(scrollLeft < scrollWidth - clientWidth - 5);
+    }
+  };
+
+  const scroll = (direction: 'left' | 'right') => {
+    if (tabsRef.current) {
+      const scrollAmount = 200;
+      tabsRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+    }
+  };
+
+  useEffect(() => {
+    const ref = tabsRef.current;
+    if (ref) {
+      ref.addEventListener('scroll', handleScroll);
+      handleScroll();
+      return () => ref.removeEventListener('scroll', handleScroll);
+    }
+  }, [activeColumnId]);
+
   const mobileTabs = columnsToRender.map(col => ({
     id: col.id,
     label: col.shortLabel,
@@ -257,8 +288,13 @@ const KanbanBoard = ({
     <div className={`h-full flex flex-col overflow-hidden ${isDarkMode ? 'bg-[#0a0a0a]' : 'bg-slate-50/50'}`}>
       {/* Mobile Header with Tabs */}
       {layout === 'mobile' && (
-        <div className={`px-4 py-4 border-b shrink-0 ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}>
-          <div className="flex gap-3 overflow-x-auto pb-2 hide-scrollbar snap-x snap-mandatory px-1">
+        <div className={`px-4 py-4 border-b shrink-0 relative flex items-center ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}>
+          {showLeftArrow && (
+            <button onClick={() => scroll('left')} className={`absolute left-1 z-10 p-1 rounded-full shadow-lg ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}>
+              <ChevronLeft size={16} />
+            </button>
+          )}
+          <div ref={tabsRef} className="flex gap-3 overflow-x-auto pb-2 hide-scrollbar snap-x snap-mandatory px-6">
             {mobileTabs.map(tab => {
               const isActive = activeColumnId === tab.id;
               return (
@@ -282,6 +318,11 @@ const KanbanBoard = ({
               );
             })}
           </div>
+          {showRightArrow && (
+            <button onClick={() => scroll('right')} className={`absolute right-1 z-10 p-1 rounded-full shadow-lg ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}>
+              <ChevronRight size={16} />
+            </button>
+          )}
         </div>
       )}
 

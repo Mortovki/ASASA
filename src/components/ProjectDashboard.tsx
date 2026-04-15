@@ -159,6 +159,37 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: a
     return data;
   }, [project, selectedStageId, filteredTasks, stats.totalSP]);
 
+  const [showLeftArrow, setShowLeftArrow] = useState(false);
+  const [showRightArrow, setShowRightArrow] = useState(true);
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  const handleScroll = () => {
+    if (scrollRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
+      setShowLeftArrow(scrollLeft > 0);
+      setShowRightArrow(scrollLeft < scrollWidth - clientWidth - 5);
+    }
+  };
+
+  const scroll = (direction: 'left' | 'right') => {
+    if (scrollRef.current) {
+      const scrollAmount = 200;
+      scrollRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+    }
+  };
+
+  useEffect(() => {
+    const ref = scrollRef.current;
+    if (ref) {
+      ref.addEventListener('scroll', handleScroll);
+      handleScroll();
+      return () => ref.removeEventListener('scroll', handleScroll);
+    }
+  }, []);
+
   return (
     <div className="space-y-6">
       {/* Stage Selector & Summary Header */}
@@ -167,24 +198,36 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: a
           <h1 className={`text-4xl font-display italic leading-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Dashboard del Proyecto</h1>
           <p className={`font-medium ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>Resumen de ejecución y métricas clave</p>
         </div>
-        <div className="flex items-center gap-3 overflow-x-auto hide-scrollbar snap-x snap-mandatory p-1 rounded-xl border shadow-sm max-w-full" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-          <button 
-            onClick={() => setSelectedStageId('all')}
-            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition-all shrink-0 snap-center ${selectedStageId === 'all' ? 'bg-indigo-600 text-white shadow-md' : (isDarkMode ? 'text-gray-400 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-50')}`}
-          >
-            <LayoutGrid size={14} />
-            <span className="whitespace-nowrap">Todo el Proyecto</span>
-          </button>
-          {project?.stages?.map((stage: any) => (
-            <button 
-              key={stage.id}
-              onClick={() => setSelectedStageId(stage.id)}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition-all shrink-0 snap-center ${selectedStageId === stage.id ? 'bg-indigo-600 text-white shadow-md' : (isDarkMode ? 'text-gray-400 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-50')}`}
-            >
-              <Target size={14} />
-              <span className="whitespace-nowrap">{stage.name}</span>
+        <div className="relative flex items-center w-full md:w-auto">
+          {showLeftArrow && (
+            <button onClick={() => scroll('left')} className={`absolute left-0 z-10 p-2 rounded-full shadow-lg ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}>
+              <ChevronRight size={16} className="rotate-180" />
             </button>
-          ))}
+          )}
+          <div ref={scrollRef} className="flex items-center gap-3 overflow-x-auto hide-scrollbar snap-x snap-mandatory p-1 rounded-xl border shadow-sm max-w-full" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+            <button 
+              onClick={() => setSelectedStageId('all')}
+              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition-all shrink-0 snap-center ${selectedStageId === 'all' ? 'bg-indigo-600 text-white shadow-md' : (isDarkMode ? 'text-gray-400 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-50')}`}
+            >
+              <LayoutGrid size={14} />
+              <span className="whitespace-nowrap">Todo el Proyecto</span>
+            </button>
+            {project?.stages?.map((stage: any) => (
+              <button 
+                key={stage.id}
+                onClick={() => setSelectedStageId(stage.id)}
+                className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition-all shrink-0 snap-center ${selectedStageId === stage.id ? 'bg-indigo-600 text-white shadow-md' : (isDarkMode ? 'text-gray-400 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-50')}`}
+              >
+                <Target size={14} />
+                <span className="whitespace-nowrap">{stage.name}</span>
+              </button>
+            ))}
+          </div>
+          {showRightArrow && (
+            <button onClick={() => scroll('right')} className={`absolute right-0 z-10 p-2 rounded-full shadow-lg ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}>
+              <ChevronRight size={16} />
+            </button>
+          )}
         </div>
       </div>
 

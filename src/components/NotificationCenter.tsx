@@ -123,14 +123,14 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
             }`}
           >
             {/* Header */}
-            <div className={`p-6 border-b flex items-center justify-between ${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-slate-50/50 border-slate-100'}`}>
+            <div className={`p-5 border-b flex items-center justify-between ${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-slate-50/50 border-slate-100'}`}>
               <div className="flex items-center gap-3">
                 <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-100 text-indigo-600'}`}>
-                  <Bell size={20} />
+                  <Bell size={18} />
                 </div>
                 <div>
-                  <h2 className={`font-bold ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Notificaciones</h2>
-                  <p className={`text-xs font-medium ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
+                  <h2 className={`font-bold text-sm ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Notificaciones</h2>
+                  <p className={`text-[10px] font-medium ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
                     {notifications.filter(n => !n.read).length} sin leer
                   </p>
                 </div>
@@ -140,65 +140,65 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                   onClick={onClose}
                   className={`p-2 rounded-lg transition-all ${isDarkMode ? 'text-gray-500 hover:text-white hover:bg-white/5' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
                 >
-                  <X size={20} />
+                  <X size={18} />
                 </button>
               </div>
             </div>
 
             {/* Tabs & Actions */}
-            <div className={`px-6 py-3 border-b flex items-center justify-between ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`}>
-              <div className={`p-1 rounded-xl ${isDarkMode ? 'bg-white/5' : 'bg-slate-100'}`}>
-                <button
-                  onClick={() => setFilter('all')}
-                  className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
-                    filter === 'all' 
-                      ? (isDarkMode ? 'bg-white/10 text-white shadow-sm' : 'bg-white text-indigo-600 shadow-sm') 
-                      : (isDarkMode ? 'text-gray-500 hover:text-gray-300' : 'text-slate-500 hover:text-slate-700')
-                  }`}
-                >
-                  Todas
-                </button>
-                <button
-                  onClick={() => setFilter('unread')}
-                  className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
-                    filter === 'unread' 
-                      ? (isDarkMode ? 'bg-white/10 text-white shadow-sm' : 'bg-white text-indigo-600 shadow-sm') 
-                      : (isDarkMode ? 'text-gray-500 hover:text-gray-300' : 'text-slate-500 hover:text-slate-700')
-                  }`}
-                >
-                  Sin leer
-                </button>
-                <button
-                  onClick={() => setFilter('read')}
-                  className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
-                    filter === 'read' 
-                      ? (isDarkMode ? 'bg-white/10 text-white shadow-sm' : 'bg-white text-indigo-600 shadow-sm') 
-                      : (isDarkMode ? 'text-gray-500 hover:text-gray-300' : 'text-slate-500 hover:text-slate-700')
-                  }`}
-                >
-                  Leídas
-                </button>
-              </div>
-              
-              <div className="flex items-center gap-2">
-                {notifications.some(n => !n.read) && (
+            <div className={`px-4 py-3 border-b flex flex-col gap-3 ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`}>
+              <div className={`p-1 rounded-xl flex items-center justify-between ${isDarkMode ? 'bg-white/5' : 'bg-slate-100'}`}>
+                <div className="flex items-center">
                   <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      markAllAsRead().then(() => toast.success('Todas las notificaciones marcadas como leídas'));
-                    }}
-                    className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg transition-all border shadow-sm flex items-center gap-2 active:scale-95 ${
-                      isDarkMode 
-                        ? 'text-indigo-400 border-indigo-500/20 hover:bg-indigo-500/10' 
-                        : 'text-indigo-600 border-indigo-100 hover:text-white hover:bg-indigo-600'
+                    onClick={() => setFilter('all')}
+                    className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
+                      filter === 'all' 
+                        ? (isDarkMode ? 'bg-white/10 text-white shadow-sm' : 'bg-white text-indigo-600 shadow-sm') 
+                        : (isDarkMode ? 'text-gray-500 hover:text-gray-300' : 'text-slate-500 hover:text-slate-700')
                     }`}
                   >
-                    <Check size={12} />
-                    Marcar todo leído
+                    Todas
                   </button>
-                )}
+                  <button
+                    onClick={() => setFilter('unread')}
+                    className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
+                      filter === 'unread' 
+                        ? (isDarkMode ? 'bg-white/10 text-white shadow-sm' : 'bg-white text-indigo-600 shadow-sm') 
+                        : (isDarkMode ? 'text-gray-500 hover:text-gray-300' : 'text-slate-500 hover:text-slate-700')
+                    }`}
+                  >
+                    Sin leer
+                  </button>
+                  <button
+                    onClick={() => setFilter('read')}
+                    className={`px-3 py-1.5 text-[10px] font-black uppercase tracking-widest rounded-lg transition-all ${
+                      filter === 'read' 
+                        ? (isDarkMode ? 'bg-white/10 text-white shadow-sm' : 'bg-white text-indigo-600 shadow-sm') 
+                        : (isDarkMode ? 'text-gray-500 hover:text-gray-300' : 'text-slate-500 hover:text-slate-700')
+                    }`}
+                  >
+                    Leídas
+                  </button>
+                </div>
               </div>
+              
+              {notifications.some(n => !n.read) && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    markAllAsRead().then(() => toast.success('Todas las notificaciones marcadas como leídas'));
+                  }}
+                  className={`text-[10px] font-black uppercase tracking-widest px-3 py-2 rounded-lg transition-all border shadow-sm flex items-center justify-center gap-2 active:scale-95 w-full ${
+                    isDarkMode 
+                      ? 'text-indigo-400 border-indigo-500/20 hover:bg-indigo-500/10' 
+                      : 'text-indigo-600 border-indigo-100 hover:text-white hover:bg-indigo-600'
+                  }`}
+                >
+                  <Check size={12} />
+                  Marcar todo leído
+                </button>
+              )}
             </div>
 
             {/* Content */}
@@ -208,7 +208,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                   <div className={`p-6 rounded-full ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}>
                     <Bell size={48} className="opacity-20" />
                   </div>
-                  <p className="font-medium">
+                  <p className="font-medium text-sm">
                     {filter === 'unread' ? 'No tienes notificaciones sin leer' : filter === 'read' ? 'No tienes notificaciones leídas' : 'No tienes notificaciones'}
                   </p>
                 </div>
@@ -226,8 +226,8 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                             animate={{ opacity: 1, y: 0 }}
                             className={`p-4 rounded-2xl border transition-all relative group ${
                               notification.read 
-                                ? (isDarkMode ? 'bg-white/5 border-white/5 opacity-50 grayscale shadow-none' : 'bg-slate-50/30 border-slate-100 opacity-50 grayscale-[0.8] shadow-none') 
-                                : (isDarkMode ? 'bg-indigo-500/10 border-indigo-500/20 shadow-sm' : 'bg-indigo-50/30 border-indigo-100 shadow-sm')
+                                ? (isDarkMode ? 'bg-white/5 border-white/5 opacity-50 grayscale shadow-none' : 'bg-white border-slate-100 opacity-60 grayscale-[0.8] shadow-sm') 
+                                : (isDarkMode ? 'bg-indigo-500/10 border-indigo-500/20 shadow-md' : 'bg-white border-indigo-100 shadow-md shadow-indigo-500/5')
                             }`}
                           >
                             <div className="flex gap-4">
@@ -239,7 +239,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                                   <h3 className={`text-sm font-bold truncate ${
                                     notification.read 
                                       ? (isDarkMode ? 'text-gray-400' : 'text-slate-700') 
-                                      : (isDarkMode ? 'text-white' : 'text-indigo-900')
+                                      : (isDarkMode ? 'text-white' : 'text-indigo-950')
                                   }`}>
                                     {notification.title}
                                   </h3>
@@ -251,7 +251,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                                 <p className={`text-xs leading-relaxed ${
                                   notification.read 
                                     ? (isDarkMode ? 'text-gray-500' : 'text-slate-500') 
-                                    : (isDarkMode ? 'text-gray-300' : 'text-indigo-700/70')
+                                    : (isDarkMode ? 'text-gray-300' : 'text-slate-600')
                                 }`}>
                                   {notification.message}
                                 </p>
@@ -267,7 +267,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                                           e.stopPropagation();
                                           markAsRead(notification.id).then(() => toast.success('Notificación leída'));
                                         }}
-                                        className={`p-1.5 rounded-lg transition-all ${isDarkMode ? 'text-gray-500 hover:text-indigo-400 hover:bg-white/5' : 'text-slate-300 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                                        className={`p-1.5 rounded-lg transition-all ${isDarkMode ? 'text-gray-500 hover:text-indigo-400 hover:bg-white/5' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
                                         title="Marcar como leída"
                                       >
                                         <Check size={14} />
@@ -282,8 +282,8 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                                           markAsRead(notification.id).then(() => toast.success('Notificación leída'));
                                           onClose();
                                         }}
-                                        className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded-md ${
-                                          isDarkMode ? 'bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30' : 'bg-indigo-50 text-indigo-600 hover:text-indigo-700'
+                                        className={`text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg ${
+                                          isDarkMode ? 'bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30' : 'bg-indigo-600 text-white hover:bg-indigo-700'
                                         }`}
                                       >
                                         Ver
@@ -304,12 +304,12 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                                             toast.error('Error al eliminar: ' + (err.message || 'Error desconocido'));
                                           });
                                       }}
-                                      className={`p-3 rounded-xl transition-all relative z-50 active:scale-90 cursor-pointer flex items-center justify-center ${
-                                        isDarkMode ? 'text-gray-600 hover:text-rose-400 hover:bg-rose-500/10' : 'text-slate-300 hover:text-rose-600 hover:bg-rose-100/80 bg-slate-50/50'
+                                      className={`p-2 rounded-lg transition-all active:scale-90 flex items-center justify-center ${
+                                        isDarkMode ? 'text-gray-600 hover:text-rose-400 hover:bg-rose-500/10' : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
                                       }`}
                                       title={`Eliminar notificación (${notification.id})`}
                                     >
-                                      <Trash2 size={18} />
+                                      <Trash2 size={16} />
                                     </button>
                                   </div>
                                 </div>
@@ -333,7 +333,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
                     e.stopPropagation();
                     clearAll().then(() => toast.success('Todas las notificaciones eliminadas'));
                   }}
-                  className={`w-full py-3 text-xs font-bold transition-colors uppercase tracking-widest ${isDarkMode ? 'text-gray-500 hover:text-rose-400' : 'text-slate-500 hover:text-rose-600'}`}
+                  className={`w-full py-3 text-[10px] font-black transition-colors uppercase tracking-widest rounded-xl border ${isDarkMode ? 'text-gray-500 border-white/5 hover:text-rose-400 hover:border-rose-500/20' : 'text-slate-400 border-slate-200 hover:text-rose-600 hover:border-rose-200'}`}
                 >
                   Limpiar todas las notificaciones
                 </button>
