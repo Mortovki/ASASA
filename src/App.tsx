@@ -1550,18 +1550,18 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                             <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-slate-200'}`}>
                               {isSelected && <Check size={12} className="text-white" />}
                             </div>
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{r.date}</span>
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest truncate">{r.date}</span>
                           </div>
                           <span className="text-sm font-black text-indigo-600 shrink-0">{Number(r.hours.toFixed(2))}h</span>
                       </div>
-                        <p className="font-bold text-slate-800 text-sm leading-tight mb-3">{r.description || 'Sin descripción'}</p>
-                        <div className="flex items-center gap-4 mt-3">
-                          <div className="flex items-center gap-2">
+                        <p className="font-bold text-slate-800 text-sm leading-tight mb-3 break-words">{r.description || 'Sin descripción'}</p>
+                        <div className="flex flex-wrap items-center gap-4 mt-3">
+                          <div className="flex items-center gap-2 shrink-0">
                             <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cat?.color || '#cbd5e1' }}></div>
                             <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">{cat?.name || 'Otra'}</span>
                           </div>
                           {r.validationStatus && (
-                            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-[8px] font-black uppercase tracking-widest ${(VALIDATION_STATUS as any)[r.validationStatus]?.color || 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-[8px] font-black uppercase tracking-widest shrink-0 ${(VALIDATION_STATUS as any)[r.validationStatus]?.color || 'bg-slate-50 text-slate-400 border-slate-100'}`}>
                               {(() => {
                                 const Icon = (VALIDATION_STATUS as any)[r.validationStatus]?.icon || Clock;
                                 return <Icon size={10} />;
@@ -1575,7 +1575,7 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                                 e.stopPropagation();
                                 setDisputeModal({ isOpen: true, recordId: r.id });
                               }}
-                              className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-600 text-[8px] font-black uppercase tracking-widest hover:bg-amber-100 transition-all"
+                              className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-600 text-[8px] font-black uppercase tracking-widest hover:bg-amber-100 transition-all shrink-0"
                             >
                               <AlertTriangle size={10} />
                               Disputar
@@ -1586,14 +1586,14 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                             <div className="absolute top-4 right-4 flex gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all">
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); handleEditTask(r); }} 
-                                  className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                  className="p-2 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
                                   title="Editar"
                                 >
                                     <Edit2 size={16} />
                                 </button>
                                 <button 
                                   onClick={(e) => { e.stopPropagation(); showConfirmToast("¿Eliminar este registro?", () => handleDeleteTask(r.id)); }} 
-                                  className="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                  className="p-2 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
                                   title="Eliminar"
                                 >
                                     <Trash2 size={16} />
@@ -4481,7 +4481,7 @@ const App = () => {
                               </div>
                               <div className="relative pl-6">
                                 <div className="absolute top-0 left-0 w-1 h-full bg-indigo-100 group-hover/item:bg-indigo-300 transition-colors rounded-full"></div>
-                                <p className="text-slate-600 font-bold text-lg leading-relaxed italic">"{r.description || 'Sin detalles.'}"</p>
+                                <p className="text-slate-600 font-bold text-lg leading-relaxed italic break-words">"{r.description || 'Sin detalles.'}"</p>
                               </div>
                               {r.evidenceLink && <a href={r.evidenceLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-3 text-[10px] text-indigo-600 font-black bg-indigo-50 border border-indigo-100 px-6 py-3 rounded-2xl shadow-sm uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all"><LinkIcon size={14}/> Comprobante</a>}
                             </div>
@@ -4532,7 +4532,7 @@ const App = () => {
                                       </button>
                                     </div>
                                   )}
-                                  <button onClick={()=>{startEditRecord(r); window.scrollTo({top:0, behavior:'smooth'});}} className="p-4 text-slate-400 hover:text-amber-600 hover:bg-amber-50 bg-white rounded-2xl border border-slate-100 shadow-sm transition-all" title="Editar"><Edit2 size={20}/></button>
+                                  <button onClick={()=>{startEditRecord(r); window.scrollTo({top:0, behavior:'smooth'});}} className="p-4 flex items-center justify-center text-slate-400 hover:text-amber-600 hover:bg-amber-50 bg-white rounded-2xl border border-slate-100 shadow-sm transition-all" title="Editar"><Edit2 size={20}/></button>
                                   <button type="button" onClick={(e)=>{e.preventDefault(); e.stopPropagation(); showConfirmToast("¿Estás seguro de que deseas eliminar esta sesión?", async () => { 
                                     try {
                                       await deleteDoc(doc(db, 'sesiones', r.id));
@@ -4540,7 +4540,7 @@ const App = () => {
                                     } catch (error) {
                                       handleFirestoreError(error, OperationType.DELETE, `sesiones/${r.id}`);
                                     }
-                                  }); }} className="p-4 text-slate-400 hover:text-red-500 hover:bg-red-50 bg-white rounded-2xl border border-slate-100 shadow-sm transition-all" title="Eliminar"><Trash2 size={20}/></button>
+                                  }); }} className="p-4 flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 bg-white rounded-2xl border border-slate-100 shadow-sm transition-all" title="Eliminar"><Trash2 size={20}/></button>
                               </div>
                             </div>
                         </div>
@@ -5129,16 +5129,16 @@ const App = () => {
                   <div className="w-full mt-8 space-y-6">
                     {rejectedNotifications.map((notification, index) => (
                       <div key={`${notification.id || 'notif'}-${index}`} className="bg-slate-50 border border-slate-200 rounded-3xl p-6 text-left">
-                        <div className="flex justify-between items-start mb-4">
-                          <div>
+                        <div className="flex flex-col sm:flex-row justify-between items-start mb-4 gap-4">
+                          <div className="min-w-0 w-full">
                             <h3 className="font-semibold text-slate-900 text-xl">{notification.date}</h3>
-                            <p className="text-slate-500">{notification.hours} horas - {notification.description}</p>
+                            <p className="text-slate-500 break-words">{notification.hours} horas - {notification.description}</p>
                           </div>
-                          <span className="bg-red-100 text-red-700 px-4 py-1.5 rounded-full text-sm font-medium">Rechazado</span>
+                          <span className="bg-red-100 text-red-700 px-4 py-1.5 rounded-full text-sm font-medium shrink-0">Rechazado</span>
                         </div>
                         <div className="bg-white border border-red-100 rounded-2xl p-5 mt-4">
                           <h4 className="text-sm font-semibold text-red-800 uppercase tracking-wider mb-2">Motivo del rechazo:</h4>
-                          <p className="text-slate-700 whitespace-pre-wrap">{notification.rejectReason || 'No se especificó un motivo.'}</p>
+                          <p className="text-slate-700 whitespace-pre-wrap break-words">{notification.rejectReason || 'No se especificó un motivo.'}</p>
                         </div>
                         <div className="mt-6 flex justify-end">
                           <button
