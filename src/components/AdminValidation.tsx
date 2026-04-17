@@ -13,6 +13,8 @@ const VALIDATION_STATUS = {
   'disputado': { label: 'Disputado', color: 'bg-indigo-100 text-indigo-700 border-indigo-200', icon: MessageSquare },
 };
 
+const SUPER_ADMIN_EMAILS = ["luisedgar.gutierrez17@gmail.com", "luisedgar.gutierrez1@gmail.com"];
+
 export const AdminValidation = ({ students, setStudents, categories, projects, isDarkMode }: any) => {
   const [activeTab, setActiveTab] = React.useState<'pending' | 'disputed'>('pending');
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
@@ -108,7 +110,7 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
   const pendingRecords = React.useMemo(() => {
     const records: any[] = [];
     students.forEach((s: any) => {
-      if (s.email === 'luisedgar.gutierrez17@gmail.com') return;
+      if (s.email && SUPER_ADMIN_EMAILS.includes(s.email)) return;
       (s.records || []).forEach((r: any) => {
         if (r.validationStatus === 'pendiente') {
           records.push({ ...r, studentId: s.id, studentName: s.name, studentEmail: s.email });
@@ -121,6 +123,7 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
   const disputedRecords = React.useMemo(() => {
     const records: any[] = [];
     students.forEach((s: any) => {
+      if (s.email && SUPER_ADMIN_EMAILS.includes(s.email)) return;
       (s.records || []).forEach((r: any) => {
         if (r.validationStatus === 'disputado') {
           records.push({ ...r, studentId: s.id, studentName: s.name, studentEmail: s.email });

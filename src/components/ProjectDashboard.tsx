@@ -185,54 +185,70 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: a
     const ref = scrollRef.current;
     if (ref) {
       ref.addEventListener('scroll', handleScroll);
-      handleScroll();
-      return () => ref.removeEventListener('scroll', handleScroll);
+      // Use a small timeout to ensure DOM has updated after stages change
+      const timeoutId = setTimeout(handleScroll, 100);
+      
+      // Also observe resize
+      const resizeObserver = new ResizeObserver(() => handleScroll());
+      resizeObserver.observe(ref);
+
+      return () => {
+        ref.removeEventListener('scroll', handleScroll);
+        clearTimeout(timeoutId);
+        resizeObserver.disconnect();
+      };
     }
-  }, []);
+  }, [project?.stages]);
 
   return (
     <div className="space-y-6">
       {/* Stage Selector & Summary Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="flex flex-col gap-4">
         <div>
-          <h1 className={`text-4xl font-display italic leading-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Dashboard del Proyecto</h1>
+          <h1 className={`text-3xl sm:text-4xl font-black tracking-tight leading-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Dashboard del Proyecto</h1>
           <p className={`font-medium ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>Resumen de ejecución y métricas clave</p>
         </div>
-        <div className="relative flex items-center w-full md:w-auto">
-          {showLeftArrow && (
-            <button onClick={() => scroll('left')} className={`absolute left-0 z-10 p-2 rounded-full shadow-lg ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}>
-              <ChevronRight size={16} className="rotate-180" />
-            </button>
-          )}
-          <div ref={scrollRef} className="flex items-center gap-3 overflow-x-auto hide-scrollbar snap-x snap-mandatory p-1 rounded-xl border shadow-sm max-w-full" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+        <div className="flex items-center gap-2 w-full">
+          <button 
+            onClick={() => scroll('left')} 
+            className={`shrink-0 p-2 rounded-full shadow-sm border transition-all ${!showLeftArrow ? 'opacity-0 pointer-events-none' : ''} ${isDarkMode ? 'bg-slate-800 text-white border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+            aria-hidden={!showLeftArrow}
+          >
+            <ChevronRight size={16} className="rotate-180" />
+          </button>
+          
+          <div ref={scrollRef} className="flex items-center gap-2 sm:gap-4 overflow-x-auto hide-scrollbar snap-x snap-mandatory p-1.5 rounded-xl border shadow-sm flex-1" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
             <button 
               onClick={() => setSelectedStageId('all')}
-              className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition-all shrink-0 snap-center ${selectedStageId === 'all' ? 'bg-indigo-600 text-white shadow-md' : (isDarkMode ? 'text-gray-400 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-50')}`}
+              className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-bold rounded-lg transition-all shrink-0 snap-center min-h-[44px] ${selectedStageId === 'all' ? 'bg-indigo-600 text-white shadow-md' : (isDarkMode ? 'text-gray-400 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-50')}`}
             >
-              <LayoutGrid size={14} />
+              <LayoutGrid size={16} />
               <span className="whitespace-nowrap">Todo el Proyecto</span>
             </button>
             {project?.stages?.map((stage: any) => (
               <button 
                 key={stage.id}
                 onClick={() => setSelectedStageId(stage.id)}
-                className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition-all shrink-0 snap-center ${selectedStageId === stage.id ? 'bg-indigo-600 text-white shadow-md' : (isDarkMode ? 'text-gray-400 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-50')}`}
+                className={`flex items-center gap-2 px-4 sm:px-5 py-2.5 sm:py-3 text-xs sm:text-sm font-bold rounded-lg transition-all shrink-0 snap-center min-h-[44px] ${selectedStageId === stage.id ? 'bg-indigo-600 text-white shadow-md' : (isDarkMode ? 'text-gray-400 hover:bg-white/5' : 'text-slate-500 hover:bg-slate-50')}`}
               >
-                <Target size={14} />
+                <Target size={16} />
                 <span className="whitespace-nowrap">{stage.name}</span>
               </button>
             ))}
           </div>
-          {showRightArrow && (
-            <button onClick={() => scroll('right')} className={`absolute right-0 z-10 p-2 rounded-full shadow-lg ${isDarkMode ? 'bg-slate-800 text-white' : 'bg-white text-slate-600'}`}>
-              <ChevronRight size={16} />
-            </button>
-          )}
+
+          <button 
+            onClick={() => scroll('right')} 
+            className={`shrink-0 p-2 rounded-full shadow-sm border transition-all ${!showRightArrow ? 'opacity-0 pointer-events-none' : ''} ${isDarkMode ? 'bg-slate-800 text-white border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+            aria-hidden={!showRightArrow}
+          >
+            <ChevronRight size={16} />
+          </button>
         </div>
       </div>
 
       {/* Metric Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
         <div className={`p-4 sm:p-6 rounded-2xl shadow-sm border flex items-center gap-3 sm:gap-4 ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-100'}`}>
           <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
             <LayoutGrid size={20} className="sm:w-6 sm:h-6" />
@@ -282,7 +298,7 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: a
             <div className={`text-xs font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Distribución</div>
           </div>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
               <PieChart>
                 <Pie
                   data={statusData}
@@ -321,7 +337,7 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: a
             <div className={`text-xs font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Esfuerzo Activo</div>
           </div>
           <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
               <BarChart data={userLoadData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={isDarkMode ? 'rgba(255,255,255,0.05)' : '#e2e8f0'} />
                 <XAxis type="number" tick={{ fill: isDarkMode ? '#64748b' : '#94a3b8' }} />
@@ -355,7 +371,7 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: a
         </div>
         <div className="h-72">
           {burndownData.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
               <LineChart data={burndownData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? 'rgba(255,255,255,0.05)' : '#e2e8f0'} />
                 <XAxis dataKey="day" tick={{ fontSize: 10, fontWeight: 'bold', fill: isDarkMode ? '#64748b' : '#94a3b8' }} />

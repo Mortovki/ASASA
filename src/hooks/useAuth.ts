@@ -3,7 +3,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { doc, onSnapshot } from 'firebase/firestore';
 
-const SUPER_ADMINS = ["luisedgar.gutierrez17@gmail.com"];
+const SUPER_ADMINS = ["luisedgar.gutierrez17@gmail.com", "luisedgar.gutierrez1@gmail.com"];
 
 export function useAuth() {
   const [user, setUser] = useState<User | null>(auth.currentUser);

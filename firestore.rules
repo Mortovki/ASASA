@@ -127,8 +127,10 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAtLeastCoordinator());
       
       allow create: if isAuthenticated() && 
-                      request.resource.data.userId == request.auth.uid &&
-                      request.resource.data.estado == 'pendiente' &&
+                      (
+                        (request.resource.data.userId == request.auth.uid && request.resource.data.estado == 'pendiente') ||
+                        (isAtLeastCoordinator() && request.resource.data.estado in ['aprobado', 'pendiente'])
+                      ) &&
                       isValidSession(request.resource.data);
                       
       allow update: if isAuthenticated() && (

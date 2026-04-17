@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { CheckCircle2, AlertCircle, Clock } from 'lucide-react';
 import React from 'react';
 
-export const showSuccessToast = (message: string) => {
+export const showSuccessToast = (message: React.ReactNode) => {
   const isDark = document.documentElement.classList.contains('dark');
   toast.custom((t) => createPortal(
     <div className={`fixed inset-0 flex items-center justify-center z-[99999] pointer-events-none p-4 transition-all duration-500 ease-out ${t.visible ? 'opacity-100 scale-100' : 'opacity-0 scale-90'}`}>
@@ -13,7 +13,7 @@ export const showSuccessToast = (message: string) => {
         </div>
         <div className="space-y-2">
           <p className={`font-black text-xs uppercase tracking-[0.2em] ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>¡Éxito!</p>
-          <p className={`font-bold text-xs uppercase tracking-widest leading-relaxed ${isDark ? 'text-white' : 'text-slate-900'}`}>{message}</p>
+          <div className={`font-bold text-sm leading-relaxed ${isDark ? 'text-white' : 'text-slate-900'} whitespace-pre-wrap`}>{message}</div>
         </div>
         <button 
           onClick={() => toast.dismiss(t.id)} 

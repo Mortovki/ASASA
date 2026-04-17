@@ -190,6 +190,44 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
   const hasOverflow = overflowTabs.length > 0;
   const activeIsInOverflow = overflowTabs.some(t => t.id === activeTab);
 
+  const [showLeftArrow, setShowLeftArrow] = useState(false);
+  const [showRightArrow, setShowRightArrow] = useState(true);
+  const tabsScrollRef = React.useRef<HTMLDivElement>(null);
+
+  const handleTabsScroll = () => {
+    if (tabsScrollRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = tabsScrollRef.current;
+      setShowLeftArrow(scrollLeft > 0);
+      setShowRightArrow(scrollLeft < scrollWidth - clientWidth - 5);
+    }
+  };
+
+  useEffect(() => {
+    const ref = tabsScrollRef.current;
+    if (ref) {
+      ref.addEventListener('scroll', handleTabsScroll);
+      const timeoutId = setTimeout(handleTabsScroll, 100);
+      const resizeObserver = new ResizeObserver(() => handleTabsScroll());
+      resizeObserver.observe(ref);
+
+      return () => {
+        ref.removeEventListener('scroll', handleTabsScroll);
+        clearTimeout(timeoutId);
+        resizeObserver.disconnect();
+      };
+    }
+  }, [filteredAllTabs]);
+
+  const scrollTabs = (direction: 'left' | 'right') => {
+    if (tabsScrollRef.current) {
+      const scrollAmount = 200;
+      tabsScrollRef.current.scrollBy({
+        left: direction === 'left' ? -scrollAmount : scrollAmount,
+        behavior: 'smooth'
+      });
+    }
+  };
+
   const renderTab = (tab: Tab) => {
     const Icon = tab.icon;
     const isActive = activeTab === tab.id;
@@ -341,145 +379,30 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
         </div>
 
         {/* Bottom Row: Navigation Tabs */}
-        <div className="px-2 sm:px-8 py-2 flex items-center justify-center">
-          <div className={`p-1 rounded-2xl w-full lg:w-auto relative border shadow-inner flex justify-center ${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-slate-100/80 border-slate-200/50'}`}>
-            <div className={`flex gap-1 overflow-x-auto hide-scrollbar flex-1 lg:flex-none justify-start lg:justify-center ${isMobile || isTablet ? 'snap-x snap-mandatory' : ''}`} style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-              {visibleTabs.map(renderTab)}
-            </div>
-            
-            {hasOverflow && (
-              <div className="relative ml-1 shrink-0">
-                <button
-                  ref={moreButtonRef}
-                  onClick={() => setMoreMenuOpen(prev => !prev)}
-                  aria-expanded={moreMenuOpen}
-                  aria-haspopup="true"
-                  aria-label="Más pestañas"
-                  className={`
-                    flex items-center gap-1.5 px-4 py-2 rounded-xl
-                    text-sm font-bold transition-all duration-150
-                    focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400
-                    ${moreMenuOpen || activeIsInOverflow
-                      ? (isDarkMode ? 'bg-white/10 text-white shadow-sm ring-1 ring-white/10' : 'bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200/50')
-                      : (isDarkMode ? 'text-gray-400 hover:text-white hover:bg-white/5' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50')}
-                  `}
-                >
-                  <MoreHorizontal className="w-4 h-4 flex-shrink-0" />
-                  <span className="hidden sm:inline">Más</span>
-                  <motion.span
-                    animate={{ rotate: moreMenuOpen ? 180 : 0 }}
-                    transition={{ duration: 0.2 }}
-                    className="hidden sm:inline"
-                  >
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  </motion.span>
-
-                  {activeIsInOverflow && (
-                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-indigo-500 rounded-full" />
-                  )}
-                </button>
-
-                {!isMobile && (
-                  <AnimatePresence>
-                    {moreMenuOpen && (
-                      <motion.div
-                        ref={moreMenuRef}
-                        initial={{ opacity: 0, y: -6, scale: 0.97 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: -6, scale: 0.97 }}
-                        transition={{ duration: 0.15, ease: 'easeOut' }}
-                        className={`
-                          absolute right-0 top-full mt-2 z-50
-                          min-w-[200px]
-                          rounded-2xl shadow-xl
-                          border
-                          py-1.5 overflow-hidden
-                          ${isDarkMode ? 'bg-[#2a2a2a] border-white/10' : 'bg-white border-slate-100'}
-                        `}
-                        role="menu"
-                      >
-                        {overflowTabs.map(tab => (
-                          <button
-                            key={tab.id}
-                            role="menuitem"
-                            onClick={() => {
-                              setActiveTab(tab.id);
-                              setMoreMenuOpen(false);
-                            }}
-                            className={`
-                              w-full flex items-center gap-3
-                              px-4 py-3 text-sm text-left
-                              transition-colors duration-100
-                              focus:outline-none focus-visible:bg-indigo-50
-                              ${activeTab === tab.id
-                                ? (isDarkMode ? 'bg-white/10 text-white font-bold' : 'bg-indigo-50 text-indigo-700 font-bold')
-                                : (isDarkMode ? 'text-gray-300 hover:bg-white/5' : 'text-slate-700 hover:bg-slate-50')}
-                            `}
-                          >
-                            <tab.icon className={`w-4 h-4 flex-shrink-0
-                              ${activeTab === tab.id ? 'text-indigo-600' : 'text-slate-400'}`}
-                            />
-                            {tab.label}
-                            {activeTab === tab.id && (
-                              <span className="ml-auto w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                            )}
-                          </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                )}
+        <div className="px-2 sm:px-8 py-2 flex items-center justify-center w-full overflow-hidden">
+          <div className="flex items-center gap-1 w-full lg:w-auto min-w-0">
+            <button 
+              onClick={() => scrollTabs('left')} 
+              className={`shrink-0 p-1.5 rounded-full shadow-sm border transition-all ${!showLeftArrow ? 'opacity-0 pointer-events-none' : ''} ${isDarkMode ? 'bg-slate-800 text-white border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+              aria-hidden={!showLeftArrow}
+            >
+              <ChevronRight size={16} className="rotate-180" />
+            </button>
+            <div className={`p-1 rounded-2xl w-full lg:w-auto relative border shadow-inner flex justify-center flex-1 min-w-0 ${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-slate-100/80 border-slate-200/50'}`}>
+              <div ref={tabsScrollRef} className={`flex gap-1 overflow-x-auto hide-scrollbar flex-1 lg:flex-none justify-start lg:justify-center w-full ${isMobile || isTablet ? 'snap-x snap-mandatory' : ''}`} style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+                {filteredAllTabs.map(renderTab)}
               </div>
-            )}
+            </div>
+            <button 
+              onClick={() => scrollTabs('right')} 
+              className={`shrink-0 p-1.5 rounded-full shadow-sm border transition-all ${!showRightArrow ? 'opacity-0 pointer-events-none' : ''} ${isDarkMode ? 'bg-slate-800 text-white border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+              aria-hidden={!showRightArrow}
+            >
+              <ChevronRight size={16} />
+            </button>
           </div>
         </div>
       </div>
-
-      {isMobile && (
-        <BottomSheet
-          isOpen={moreMenuOpen}
-          onClose={() => setMoreMenuOpen(false)}
-          title="Más opciones"
-          isDarkMode={isDarkMode}
-        >
-          <div className="pb-8">
-            {overflowTabs.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  setActiveTab(tab.id);
-                  setMoreMenuOpen(false);
-                }}
-                className={`
-                  w-full flex items-center gap-4
-                  px-4 py-4 rounded-2xl mb-2
-                  transition-all active:scale-[0.98]
-                  ${activeTab === tab.id
-                    ? (isDarkMode ? 'bg-white/10 border border-white/20' : 'bg-indigo-50 border border-indigo-200')
-                    : (isDarkMode ? 'bg-white/5 border border-transparent' : 'bg-slate-50 border border-transparent')}
-                `}
-              >
-                <div className={`
-                  w-10 h-10 rounded-xl flex items-center justify-center
-                  flex-shrink-0
-                  ${activeTab === tab.id
-                    ? 'bg-indigo-600 text-white'
-                    : (isDarkMode ? 'bg-[#1a1a1a] text-gray-400 border border-white/10' : 'bg-white text-slate-500 border border-slate-200')}
-                `}>
-                  <tab.icon className="w-5 h-5" />
-                </div>
-                <span className={`text-sm font-bold
-                  ${activeTab === tab.id ? (isDarkMode ? 'text-white' : 'text-indigo-700') : (isDarkMode ? 'text-gray-300' : 'text-slate-800')}`}>
-                  {tab.label}
-                </span>
-                {activeTab === tab.id && (
-                  <CheckCircle2 className="w-4 h-4 text-indigo-500 ml-auto" />
-                )}
-              </button>
-            ))}
-          </div>
-        </BottomSheet>
-      )}
 
       <div className={`flex-1 ${activeTab === 'kanban' || activeTab === 'gantt' ? 'overflow-hidden' : 'overflow-auto'} p-4 sm:p-6 ${isDarkMode ? 'bg-[#0a0a0a]' : 'bg-slate-50'}`}>
         {isLoading ? (

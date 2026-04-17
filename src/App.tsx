@@ -33,6 +33,7 @@ import { PREDEFINED_SKILLS } from './constants/skills';
 import { notifyProjectAssigned } from './services/notificationService';
 
 const TOTAL_REQUIRED_HOURS = 480;
+const SUPER_ADMIN_EMAILS = ["luisedgar.gutierrez17@gmail.com", "luisedgar.gutierrez1@gmail.com"];
 
 class ErrorBoundary extends React.Component<any, any> {
   state: { hasError: boolean, error: any };
@@ -257,7 +258,7 @@ const Sidebar = ({
 
   const enrolledProjects = useMemo(() => {
     // Admins and coordinators see all projects as shortcuts
-    if (userRole === 'admin' || userRole === 'coordinator' || user?.email === 'luisedgar.gutierrez17@gmail.com') {
+    if (userRole === 'admin' || userRole === 'coordinator' || (user?.email && SUPER_ADMIN_EMAILS.includes(user.email))) {
       return projects.map((p: any) => p.id);
     }
     // Regular users see only their enrolled projects
@@ -291,12 +292,11 @@ const Sidebar = ({
 
       <div 
         className={`
-          ${isMobile ? 'fixed inset-y-0 left-0 z-[100]' : 'relative z-[80]'}
+          ${isMobile ? 'fixed inset-y-0 left-0 z-[100]' : (isRail && isExpanded ? 'fixed inset-y-0 left-0 z-[100]' : 'relative z-[80]')}
           ${isMobile && !isMobileMenuOpen ? '-translate-x-full' : 'translate-x-0'}
           ${sidebarWidth} 
           ${isDarkMode ? 'bg-[#121212] border-r border-white/10' : 'bg-slate-900'} 
           text-white flex flex-col shadow-2xl transition-all duration-300 ease-in-out
-          ${isRail && isExpanded ? 'fixed h-full' : ''}
         `}
       >
         <div className={`p-5 border-b ${isDarkMode ? 'border-white/5' : 'border-slate-800'} flex items-center justify-between`}>
@@ -767,6 +767,7 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
         endTime: form.endTime,
         horasCalculadas: calcHours,
         estado: 'pendiente',
+        status: 'A',
         evidenceLink: form.evidenceLink,
         updatedBy: auth.currentUser?.uid,
         acknowledgedRejection: false,
@@ -887,7 +888,7 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
     if (!student) return [];
     return students.filter((s: any) => 
       s.id !== student?.id && 
-      s.email !== 'luisedgar.gutierrez17@gmail.com' &&
+      (!s.email || !SUPER_ADMIN_EMAILS.includes(s.email)) &&
       (s.projectIds || []).some((pid: string) => studentProjectIds.includes(pid))
     );
   }, [students, student?.id, studentProjectIds]);
@@ -1126,8 +1127,8 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                   </div>
                   {showNewCat ? (
                     <div className="flex gap-2">
-                      <input type="text" placeholder="Nombre..." className="flex-1 p-4 bg-slate-50 border-none rounded-2xl font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all" value={newCat.name} onChange={e => setNewCat({...newCat, name: e.target.value})} />
-                      <input type="color" className="w-14 h-14 p-1 bg-slate-50 border-none rounded-2xl cursor-pointer" value={newCat.color} onChange={e => setNewCat({...newCat, color: e.target.value})} />
+                      <input type="text" placeholder="Nombre..." className="flex-1 min-w-0 p-4 bg-slate-50 border-none rounded-2xl font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all" value={newCat.name} onChange={e => setNewCat({...newCat, name: e.target.value})} />
+                      <input type="color" className="w-24 sm:w-16 h-14 p-1 bg-slate-50 border-none rounded-2xl cursor-pointer shrink-0" value={newCat.color} onChange={e => setNewCat({...newCat, color: e.target.value})} />
                     </div>
                   ) : (
                     <div className="relative">
@@ -2031,6 +2032,9 @@ const App = () => {
   const sessionsPerPage = 5;
 
   const [showAddStudent, setShowAddStudent] = useState(false);
+  const [showBulkProjectAssign, setShowBulkProjectAssign] = useState(false);
+  const [selectedStudentsForBulk, setSelectedStudentsForBulk] = useState<string[]>([]);
+  const [selectedProjectsForBulk, setSelectedProjectsForBulk] = useState<string[]>([]);
   const [showEditStudent, setShowEditStudent] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [editingProfileForm, setEditingProfileForm] = useState<any>(null);
@@ -2111,7 +2115,7 @@ const App = () => {
 
   useEffect(() => {
     if (userProfile) {
-      const isAdminEmail = (user?.email === 'luisedgar.gutierrez17@gmail.com');
+      const isAdminEmail = (user?.email && SUPER_ADMIN_EMAILS.includes(user.email));
       setUserRole(isAdminEmail ? 'admin' : (userProfile.role || 'user'));
       setCurrentUserId(userProfile.uid || null);
       
@@ -2254,6 +2258,7 @@ const App = () => {
             return {
               id: doc.id,
               ...data,
+              workStatus: (data.projectIds && data.projectIds.length > 0) ? 'Asignado' : 'Sin asignar',
               name: `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || 'Sin nombre'
             };
           });
@@ -2285,6 +2290,7 @@ const App = () => {
               return {
                 id: doc.id,
                 ...data,
+                workStatus: (data.projectIds && data.projectIds.length > 0) ? 'Asignado' : 'Sin asignar',
                 name: `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || 'Sin nombre'
               };
             });
@@ -2376,7 +2382,7 @@ const App = () => {
 
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
-  const selectedStudent = useMemo(() => getStudentData(selectedStudentId), [students, selectedStudentId]);
+  const selectedStudent = useMemo(() => getStudentData(selectedStudentId), [studentsWithRecords, selectedStudentId, userProfile, user]);
 
   const projectTagsBank = useMemo(() => {
     const bank: any = {};
@@ -2408,12 +2414,12 @@ const App = () => {
     setActivityForm(prev => prev.hours !== calcHours ? { ...prev, hours: calcHours } : prev);
   }, [activityForm.startTime, activityForm.endTime, activityForm.status, view, activityForm.isManualHours]);
 
-  const uniqueCareers = useMemo(() => Array.from(new Set(students.map(s => s.career).filter(Boolean))).sort(), [students]);
-  const uniqueBrigades = useMemo(() => Array.from(new Set(students.map(s => s.brigadePeriod).filter(Boolean))).sort(), [students]);
+  const uniqueCareers = useMemo(() => Array.from(new Set(students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email)).map(s => s.career).filter(Boolean))).sort(), [students]);
+  const uniqueBrigades = useMemo(() => Array.from(new Set(students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email)).map(s => s.brigadePeriod).filter(Boolean))).sort(), [students]);
 
   const filteredStudents = useMemo(() => {
-    let result = students.filter(s => {
-      if ((s.email === 'luisedgar.gutierrez17@gmail.com')) return false;
+    let result = studentsWithRecords.filter(s => {
+      if (s.email && SUPER_ADMIN_EMAILS.includes(s.email)) return false;
       const matchStatus = filterStatus === 'Todos' || s.status === filterStatus;
       const matchWork = filterWork === 'Todos' || s.workStatus === filterWork;
       const matchProject = filterProject === 'Todos' || (s.projectIds || []).includes(filterProject);
@@ -2442,7 +2448,7 @@ const App = () => {
       });
     }
     return result;
-  }, [students, filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours]);
+  }, [studentsWithRecords, filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours]);
 
   useEffect(() => {
     setStudentPage(1);
@@ -2456,7 +2462,7 @@ const App = () => {
   const totalStudentPages = Math.ceil(filteredStudents.length / studentsPerPage);
 
   const allRecords = useMemo(() => {
-    let filtered = students;
+    let filtered = students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email));
     if (userRole === 'user' && currentUserId) {
       filtered = students.filter(s => s.id === currentUserId);
     }
@@ -2487,7 +2493,7 @@ const App = () => {
     });
     hoursByProject['General'] = { hours: 0, color: '#94a3b8', studentCount: 0 };
 
-    const validStudents = students.filter(s => s.email !== 'luisedgar.gutierrez17@gmail.com');
+    const validStudents = studentsWithRecords.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email));
 
     validStudents.forEach(s => {
       if (s.projectIds && s.projectIds.length > 0) {
@@ -2500,7 +2506,7 @@ const App = () => {
       }
 
       (s.records || []).forEach((r: any) => {
-        if (r.status === 'A') {
+        if (r.validationStatus === 'aprobado') {
           totalCompletedHours += r.hours;
           
           if (r.projectId) {
@@ -2539,7 +2545,7 @@ const App = () => {
     const avgHoursPerStudent = validStudents.length > 0 ? totalCompletedHours / validStudents.length : 0;
 
     return { projectChartData, categoryChartData, progressPerc, totalCompletedHours, totalRequired, avgHoursPerStudent, totalEnrolled: validStudents.length };
-  }, [students, projects, categories]);
+  }, [studentsWithRecords, projects, categories]);
 
   const [rejectingRecord, setRejectingRecord] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -2811,6 +2817,101 @@ const App = () => {
     }
   };
 
+  const handleBulkAssignProjects = async () => {
+    if (selectedStudentsForBulk.length === 0) {
+      showErrorToast("Selecciona al menos un alumno");
+      return;
+    }
+    if (selectedProjectsForBulk.length === 0) {
+      showErrorToast("Selecciona al menos un proyecto");
+      return;
+    }
+
+    const loadingToast = showLoadingToast("Asignando proyectos...");
+    try {
+      const batch = writeBatch(db);
+      
+      const newlyRegisteredNames: string[] = [];
+      const alreadyRegisteredNames: string[] = [];
+
+      for (const studentId of selectedStudentsForBulk) {
+        const student = students.find(s => s.id === studentId);
+        if (student) {
+          const currentProjectIds = student.projectIds || [];
+          
+          // Check if student already has ALL the selected projects
+          const hasAllSelected = selectedProjectsForBulk.every(pid => currentProjectIds.includes(pid));
+          
+          if (hasAllSelected) {
+            alreadyRegisteredNames.push(student.name);
+          } else {
+            newlyRegisteredNames.push(student.name);
+          }
+
+          const newProjectIds = Array.from(new Set([...currentProjectIds, ...selectedProjectsForBulk]));
+          
+          const docRef = doc(db, 'users', studentId);
+          batch.update(docRef, { projectIds: newProjectIds });
+          
+          const publicRef = doc(db, 'public_profiles', studentId);
+          batch.update(publicRef, { projectIds: newProjectIds });
+        }
+      }
+
+      await batch.commit();
+      setShowBulkProjectAssign(false);
+      setSelectedStudentsForBulk([]);
+      setSelectedProjectsForBulk([]);
+      toast.dismiss(loadingToast);
+
+      if (newlyRegisteredNames.length > 0 || alreadyRegisteredNames.length > 0) {
+        showSuccessToast(
+          <div className="flex flex-col gap-3 text-left">
+            {newlyRegisteredNames.length > 0 && (
+              <div>
+                <span className="font-black text-emerald-600 dark:text-emerald-400 block mb-1">Registrados con éxito:</span>
+                <span className="text-xs text-slate-600 dark:text-slate-300">
+                  {newlyRegisteredNames.join(', ')}
+                </span>
+              </div>
+            )}
+            {alreadyRegisteredNames.length > 0 && (
+              <div>
+                <span className="font-black text-amber-600 dark:text-amber-400 block mb-1">Ya se encontraban registrados:</span>
+                <span className="text-xs text-slate-600 dark:text-slate-300">
+                  {alreadyRegisteredNames.join(', ')}
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      }
+    } catch (error) {
+      console.error("Error bulk assigning projects:", error);
+      toast.dismiss(loadingToast);
+      handleFirestoreError(error, OperationType.UPDATE, 'users');
+    }
+  };
+
+  const handleAssignProjectToSelected = async (projectId: string) => {
+    if (selectedRecords.length === 0) return;
+    const loadingToast = showLoadingToast("Asignando proyecto...");
+    try {
+      const batch = writeBatch(db);
+      selectedRecords.forEach(recordId => {
+        batch.update(doc(db, 'sesiones', recordId), { projectId });
+      });
+      await batch.commit();
+      setSelectedRecords([]);
+      showSuccessToast("Proyecto asignado a sesiones");
+    } catch (error) {
+      console.error("Error asignando proyecto:", error);
+      handleFirestoreError(error, OperationType.UPDATE, 'sesiones');
+    } finally {
+      toast.dismiss(loadingToast);
+    }
+  };
+
   const handleDeleteSelected = (studentId: string) => {
     if (selectedRecords.length === 0) return;
     
@@ -3073,6 +3174,7 @@ const App = () => {
             endTime: activityForm.isManualHours ? '' : activityForm.endTime,
             horasCalculadas: sHrs,
             estado: 'aprobado', // Admins/Coordinators records are approved by default
+            status: sStat,
             evidenceLink: sLink,
             updatedBy: auth.currentUser?.uid,
             acknowledgedRejection: false
@@ -3224,7 +3326,7 @@ const App = () => {
                 setSelectedStudentId(e.target.value);
               }}>
                 <option value="">Seleccionar Alumno</option>
-                {students.map((s, idx) => <option key={`${s.id || 'student'}-${idx}`} value={s.id}>{s.name}</option>)}
+                {students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email)).map((s, idx) => <option key={`${s.id || 'student'}-${idx}`} value={s.id}>{s.name}</option>)}
               </select>
             </div>
           )}
@@ -3234,7 +3336,7 @@ const App = () => {
           <div className="space-y-4">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Participantes</label>
             <div className="grid grid-cols-1 gap-4 p-6 bg-slate-50 rounded-[2rem] border max-h-[300px] overflow-y-auto">
-              {students.map((s, idx) => {
+              {students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email)).map((s, idx) => {
                 const isSelected = activityForm.selectedStudentIds.includes(s.id);
                 const sStatus = activityForm.studentStatuses[s.id] || 'A';
                 return (
@@ -3411,7 +3513,7 @@ const App = () => {
   if (!user) return <Login />;
   if (!userProfile) return <ProfileForm user={user} onComplete={(profile) => {
     setUserProfile(profile);
-    const isAdminEmail = (user?.email === 'luisedgar.gutierrez17@gmail.com');
+    const isAdminEmail = (user?.email && SUPER_ADMIN_EMAILS.includes(user.email));
     setUserRole(isAdminEmail ? 'admin' : (profile.role || 'user'));
     setCurrentUserId(profile.uid || null);
     setView(profile.role === 'user' ? 'user-dashboard' : 'dashboard');
@@ -3552,10 +3654,10 @@ const App = () => {
               )}
             </div>
 
-            <div className="flex items-center gap-1 sm:gap-3">
+            <div className="flex items-center gap-2 sm:gap-4">
               <button 
                 onClick={() => setIsDarkMode(!isDarkMode)}
-                className={`p-2 rounded-xl transition-all ${isDarkMode ? 'text-yellow-400 hover:bg-white/5' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                className={`w-11 h-11 flex items-center justify-center rounded-xl transition-all ${isDarkMode ? 'text-yellow-400 hover:bg-white/5' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
                 title={isDarkMode ? "Modo Claro" : "Modo Oscuro"}
               >
                 {isDarkMode ? <Sun size={20} /> : <Moon size={20} />}
@@ -3563,11 +3665,11 @@ const App = () => {
 
               <button 
                 onClick={() => setIsNotificationCenterOpen(true)}
-                className={`p-2 rounded-xl transition-all relative group ${isDarkMode ? 'text-gray-400 hover:bg-white/5' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                className={`w-11 h-11 flex items-center justify-center rounded-xl transition-all relative group ${isDarkMode ? 'text-gray-400 hover:bg-white/5' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
               >
                 <Bell size={20} className="group-hover:rotate-12 transition-transform" />
                 {unreadCount > 0 && (
-                  <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-white text-[9px] font-black flex items-center justify-center rounded-full border-2 border-white shadow-sm">
+                  <span className="absolute top-2 right-2 w-4 h-4 bg-red-500 text-white text-[9px] font-black flex items-center justify-center rounded-full border-2 border-white shadow-sm">
                     {unreadCount > 9 ? '9+' : unreadCount}
                   </span>
                 )}
@@ -3576,7 +3678,7 @@ const App = () => {
               <div className="relative">
                 <button 
                   onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
-                  className="flex items-center gap-2 p-1 pr-3 hover:bg-slate-100 rounded-xl transition-all group"
+                  className="flex items-center gap-2 p-1.5 pr-4 hover:bg-slate-100 rounded-xl transition-all group min-h-[44px]"
                 >
                   <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white font-black text-xs">
                     {user?.displayName?.charAt(0) || 'U'}
@@ -3754,9 +3856,10 @@ const App = () => {
                   <button onClick={() => { setSelectedProjectId(null); setView('project-directory'); }} className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-sm transition-all active:scale-95 ${isDarkMode ? 'bg-white/5 text-white hover:bg-white/10' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}><Briefcase size={18} /> Directorio</button>
                   {userRole === 'admin' && (
                     <>
+                      <button onClick={() => { setShowBulkProjectAssign(true); setSelectedStudentsForBulk([]); setSelectedProjectsForBulk([]); }} className="w-full sm:w-auto bg-amber-500 text-white px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:bg-amber-600 transition-all active:scale-95"><Folder size={18} /> Asignar</button>
                       <button onClick={() => { setActivityForm(prev => ({...prev, selectedStudentIds: []})); setView('individual-activity'); }} className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-sm transition-all active:scale-95 ${isDarkMode ? 'bg-white/5 border-white/10 text-white hover:bg-white/10' : 'bg-white border-2 sm:border-4 border-slate-100 text-slate-700 hover:bg-slate-50'}`}><PlusCircle size={18} className="text-indigo-500" /> Individual</button>
                       <button onClick={() => setView('group-activity')} className="w-full sm:w-auto bg-emerald-600 text-white px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-emerald-600/20 hover:bg-emerald-700 transition-all active:scale-95"><Users size={18} /> Grupal</button>
-                      <button onClick={() => { setShowEditStudent(false); setStudentForm({ firstName: '', lastNamePaterno: '', lastNameMaterno: '', studentId: '', serviceType: 'Prestador', nickname: '', phone: '', emergencyPhone: '', email: '', brigadePeriod: '', brigade: '', skills: [], skillRatings: [], career: 'Arquitectura', status: 'En Curso', workStatus: 'Sin asignar', projectIds: [], projectTasks: {}, projectTaskHistory: {}, role: 'user' }); setStudentFormErrors({}); setShowAddStudent(true); }} className="w-full sm:w-auto bg-indigo-600 text-white px-6 py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-indigo-600/30 hover:bg-indigo-700 transition-all active:scale-95"><UserPlus size={18} /> Nuevo Alumno</button>
+                      <button onClick={() => { setShowEditStudent(false); setStudentForm({ firstName: '', lastNamePaterno: '', lastNameMaterno: '', studentId: '', serviceType: 'Prestador', nickname: '', phone: '', emergencyPhone: '', email: '', brigadePeriod: '', brigade: '', skills: [], skillRatings: [], career: 'Arquitectura', status: 'En Curso', workStatus: 'Sin asignar', projectIds: [], projectTasks: {}, projectTaskHistory: {}, role: 'user' }); setStudentFormErrors({}); setShowAddStudent(true); }} className="w-full sm:w-auto bg-indigo-600 text-white px-6 py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-indigo-600/30 hover:bg-indigo-700 transition-all active:scale-95"><UserPlus size={18} /> Alumno</button>
                     </>
                   )}
                 </div>
@@ -3908,7 +4011,7 @@ const App = () => {
                     <div className={`h-48 sm:h-64 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                   ) : (
                     <div className="h-48 sm:h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                         <BarChart data={chartData.projectChartData}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#333' : '#e2e8f0'} />
                           <XAxis dataKey="name" tick={{fontSize: 8, fill: isDarkMode ? '#666' : '#64748b'}} axisLine={false} tickLine={false} />
@@ -3931,7 +4034,7 @@ const App = () => {
                     <div className={`h-48 sm:h-64 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                   ) : (
                     <div className="h-48 sm:h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                         <BarChart data={chartData.projectChartData}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#333' : '#e2e8f0'} />
                           <XAxis dataKey="name" tick={{fontSize: 8, fill: isDarkMode ? '#666' : '#64748b'}} axisLine={false} tickLine={false} />
@@ -3954,7 +4057,7 @@ const App = () => {
                     <div className={`h-48 sm:h-64 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                   ) : (
                     <div className="h-48 sm:h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                         <BarChart data={chartData.projectChartData}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#333' : '#e2e8f0'} />
                           <XAxis dataKey="name" tick={{fontSize: 8, fill: isDarkMode ? '#666' : '#64748b'}} axisLine={false} tickLine={false} />
@@ -3977,7 +4080,7 @@ const App = () => {
                     <div className="h-48 sm:h-64 w-full bg-slate-50 rounded-2xl animate-pulse"></div>
                   ) : (
                     <div className="h-48 sm:h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                         <PieChart>
                           <Pie
                             data={chartData.categoryChartData}
@@ -4036,7 +4139,7 @@ const App = () => {
                   
                     return (
                       <div key={student.id} onClick={() => { setSelectedStudentId(student.id); setView('student-detail'); }} className={`p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm hover:shadow-md transition-all cursor-pointer relative overflow-hidden grid grid-cols-1 md:grid-cols-10 lg:grid-cols-[1fr_1.2fr_0.8fr] gap-4 sm:gap-6 ${isDarkMode ? 'bg-white/5 border-white/10 hover:border-indigo-500' : 'bg-white border-slate-200 hover:border-indigo-300'}`}>
-                        <div className={`absolute left-0 top-0 w-1.5 md:w-2 h-full transition-all duration-500 ${student.workStatus === 'Asignado' ? 'bg-green-500' : 'bg-orange-500'}`}></div>
+                        <div className={`absolute left-0 top-0 w-1.5 md:w-2 h-full transition-all duration-500 ${(student.projectIds && student.projectIds.length > 0) ? 'bg-green-500' : 'bg-orange-500'}`}></div>
                         
                         {/* Col 1: Identidad */}
                         <div className="md:col-span-6 lg:col-span-1 pl-3 flex flex-col justify-center order-1">
@@ -4125,8 +4228,8 @@ const App = () => {
                         {/* Col 2: Proyectos & Tareas */}
                         <div className={`md:col-span-10 lg:col-span-1 flex flex-col order-4 lg:order-2 md:p-0 lg:pl-8 lg:border-l ${isDarkMode ? 'border-white/10' : 'border-slate-100'}`}>
                           <div className="flex items-center justify-between mb-3 sm:mb-4">
-                             <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Proyectos & Tareas</p>
-                             <div className={`px-2 py-0.5 sm:px-3 sm:py-1 rounded-xl text-[8px] sm:text-[9px] font-black uppercase shadow-sm border ${(WORK_STATUS as any)[student.workStatus]?.color || 'bg-slate-500'}`}>{student.workStatus}</div>
+                             <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Proyectos y Habilidades</p>
+                             <div className={`px-2 py-0.5 sm:px-3 sm:py-1 rounded-xl text-[8px] sm:text-[9px] font-black uppercase shadow-sm border ${(WORK_STATUS as any)[(student.projectIds && student.projectIds.length > 0) ? 'Asignado' : 'Sin asignar']?.color || 'bg-slate-500'}`}>{(student.projectIds && student.projectIds.length > 0) ? 'Asignado' : 'Sin asignar'}</div>
                           </div>
                           <div className="flex flex-col sm:flex-row lg:flex-col gap-2 sm:gap-3 overflow-y-auto sm:overflow-x-auto lg:overflow-y-auto max-h-[120px] sm:max-h-none lg:max-h-[140px] pr-2 sm:pr-0 lg:pr-2 sm:pb-1 lg:pb-0 custom-scrollbar sm:snap-x sm:snap-mandatory flex-1">
                              {Array.from(new Set(student.projectIds || [])).map((pid: string) => {
@@ -4240,7 +4343,7 @@ const App = () => {
                                 <Shield size={20} />
                               </button>
                             )}
-                            {(user?.email === 'luisedgar.gutierrez17@gmail.com') && (selectedStudent.role === 'coordinator' || selectedStudent.role === 'admin') && (
+                            {(user?.email && SUPER_ADMIN_EMAILS.includes(user.email)) && (selectedStudent.role === 'coordinator' || selectedStudent.role === 'admin') && (
                               <button 
                                 onClick={() => showConfirmToast("¿Remover privilegios de este usuario?", () => handleDemoteUser(selectedStudent.id))} 
                                 className="p-3 sm:p-4 text-orange-600 bg-orange-50 rounded-xl sm:rounded-2xl border border-orange-100 shadow-sm hover:bg-orange-100 transition-all active:scale-95" 
@@ -4403,12 +4506,32 @@ const App = () => {
                    <span className="flex items-center gap-4"><History size={28} className="text-indigo-500" /> Cronología de Sesiones</span>
                    <div className="flex items-center gap-4 overflow-x-auto hide-scrollbar snap-x snap-mandatory w-full pb-2">
                      {selectedRecords.length > 0 && (
-                       <button 
-                         onClick={() => handleDeleteSelected(selectedStudent.id)} 
-                         className="flex items-center gap-3 bg-rose-50 hover:bg-rose-600 text-rose-600 hover:text-white border border-rose-100 px-6 py-3 rounded-[1.5rem] font-black transition-all shadow-sm shrink-0 snap-center"
-                       >
-                         <Trash2 size={16} /> Borrar Seleccionados
-                       </button>
+                       <>
+                         <div className="relative shrink-0 snap-center flex items-center">
+                           <select
+                             value=""
+                             onChange={(e) => {
+                               if(e.target.value) handleAssignProjectToSelected(e.target.value);
+                             }}
+                             className="appearance-none bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-6 py-3 pr-10 rounded-[1.5rem] font-black transition-all shadow-sm outline-none cursor-pointer text-xs sm:text-sm w-full max-w-[180px] sm:max-w-[220px] truncate"
+                           >
+                             <option value="" disabled>Asignar Proyecto...</option>
+                             <option value="p-general" className="text-slate-700 bg-white">General / Ninguno</option>
+                             {projects.filter(p => (selectedStudent.projectIds || []).includes(p.id)).map(p => (
+                               <option value={p.id} key={p.id} className="text-slate-700 bg-white truncate">{p.name}</option>
+                             ))}
+                           </select>
+                           <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-emerald-700">
+                             <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/></svg>
+                           </div>
+                         </div>
+                         <button 
+                           onClick={() => handleDeleteSelected(selectedStudent.id)} 
+                           className="flex items-center gap-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-5 py-3 rounded-[1.5rem] font-black transition-all shadow-sm shrink-0 snap-center text-xs sm:text-sm"
+                         >
+                           <Trash2 size={16} /> Borrar
+                         </button>
+                       </>
                      )}
                      <button onClick={handleDownloadReport} className="flex items-center gap-3 bg-white hover:bg-indigo-50 text-indigo-600 border border-indigo-100 px-6 py-3 rounded-[1.5rem] font-black transition-all shadow-sm shrink-0 snap-center"><Download size={16} /> Descargar Reporte</button>
                      <button 
@@ -4838,7 +4961,7 @@ const App = () => {
 
           {view === 'skill-map' && (
             <SkillMap 
-              users={students.map(s => ({
+              users={students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email)).map(s => ({
                 uid: s.id,
                 firstName: s.firstName || '',
                 lastNamePaterno: s.lastNamePaterno || '',
@@ -4917,7 +5040,7 @@ const App = () => {
                       <div className="space-y-2">
                          <label className={`text-[10px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>Color</label>
                          <div className={`flex items-center gap-4 p-3 rounded-2xl border shadow-inner ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-100'}`}>
-                            <input type="color" className="w-12 h-12 p-0 border-0 rounded-xl cursor-pointer bg-transparent shadow-sm" value={newInlineCat.color} onChange={e => setNewInlineCat({...newInlineCat, color: e.target.value})} />
+                            <input type="color" className="w-24 sm:w-12 h-12 p-0 border-0 rounded-xl cursor-pointer bg-transparent shadow-sm shrink-0" value={newInlineCat.color} onChange={e => setNewInlineCat({...newInlineCat, color: e.target.value})} />
                             <span className={`text-sm font-bold uppercase font-mono ${isDarkMode ? 'text-gray-300' : 'text-slate-600'}`}>{newInlineCat.color}</span>
                          </div>
                       </div>
@@ -4929,8 +5052,8 @@ const App = () => {
                       <div key={cat.id} className={`p-5 rounded-2xl border flex items-center justify-between group transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 hover:border-indigo-500' : 'bg-white border-slate-200 hover:border-indigo-300'}`}>
                         {editingCategory?.id === cat.id ? (
                           <div className="flex items-center gap-3 w-full">
-                            <input type="color" className="w-8 h-8 p-0 border-0 rounded-lg cursor-pointer bg-transparent shadow-sm shrink-0" value={editingCategory.color} onChange={e => setEditingCategory({...editingCategory, color: e.target.value})} />
-                            <input type="text" className={`flex-1 p-2 border rounded-xl font-bold outline-none text-sm ${isDarkMode ? 'border-white/10 bg-white/10 text-white focus:bg-white/20' : 'border-slate-200 bg-slate-50 text-slate-900 focus:bg-white'}`} value={editingCategory.name} onChange={e => setEditingCategory({...editingCategory, name: e.target.value})} />
+                            <input type="color" className="w-16 sm:w-8 h-8 p-0 border-0 rounded-lg cursor-pointer bg-transparent shadow-sm shrink-0" value={editingCategory.color} onChange={e => setEditingCategory({...editingCategory, color: e.target.value})} />
+                            <input type="text" className={`flex-1 min-w-0 p-2 border rounded-xl font-bold outline-none text-sm ${isDarkMode ? 'border-white/10 bg-white/10 text-white focus:bg-white/20' : 'border-slate-200 bg-slate-50 text-slate-900 focus:bg-white'}`} value={editingCategory.name} onChange={e => setEditingCategory({...editingCategory, name: e.target.value})} />
                             <button onClick={async () => {
                               setCategories(categories.map(c => c.id === cat.id ? editingCategory : c));
                               try {
@@ -5414,11 +5537,11 @@ const App = () => {
                         value={studentForm.role || 'user'} 
                         onChange={e => setStudentForm({...studentForm, role: e.target.value})}
                       >
-                        <option value="user" disabled={(user?.email !== 'luisedgar.gutierrez17@gmail.com') && (studentForm.role === 'admin' || studentForm.role === 'coordinator')}>Usuario</option>
-                        <option value="coordinator" disabled={(user?.email !== 'luisedgar.gutierrez17@gmail.com') && studentForm.role === 'admin'}>Coordinador</option>
-                        <option value="admin" disabled={(user?.email !== 'luisedgar.gutierrez17@gmail.com')}>Administrador</option>
+                        <option value="user" disabled={(!user?.email || !SUPER_ADMIN_EMAILS.includes(user.email)) && (studentForm.role === 'admin' || studentForm.role === 'coordinator')}>Usuario</option>
+                        <option value="coordinator" disabled={(!user?.email || !SUPER_ADMIN_EMAILS.includes(user.email)) && studentForm.role === 'admin'}>Coordinador</option>
+                        <option value="admin" disabled={(!user?.email || !SUPER_ADMIN_EMAILS.includes(user.email))}>Administrador</option>
                       </select>
-                      {(user?.email !== 'luisedgar.gutierrez17@gmail.com') && <p className="text-slate-400 text-[9px] font-bold ml-4 uppercase tracking-tighter">* Solo el superadmin puede destituir privilegios</p>}
+                      {(!user?.email || !SUPER_ADMIN_EMAILS.includes(user.email)) && <p className="text-slate-400 text-[9px] font-bold ml-4 uppercase tracking-tighter">* Solo el superadmin puede destituir privilegios</p>}
                     </div>
                   )}
                 </div>
@@ -5527,42 +5650,6 @@ const App = () => {
                               <div className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: p?.color || '#cbd5e1' }}></div>
                               <span className="font-black text-[11px] uppercase text-slate-900 tracking-tight truncate">{p?.name || 'Proyecto'}</span>
                            </div>
-                           
-                           <div className="flex gap-2">
-                              <div className="relative flex-1">
-                                 <input type="text" placeholder="Nueva tarea..." className="w-full px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold outline-none focus:bg-white shadow-inner"
-                                   value={currentInputValue}
-                                   onChange={(e) => { setTagInputs({...tagInputs, [pid]: e.target.value}); setActiveSuggestionProject(pid); }}
-                                   onFocus={() => setActiveSuggestionProject(pid)}
-                                   onBlur={() => setTimeout(() => setActiveSuggestionProject(null), 200)}
-                                   onKeyDown={(e) => {
-                                     if (e.key === 'Enter') {
-                                       e.preventDefault(); const val = currentInputValue.trim(); if (!val) return;
-                                       if (!currentTags.includes(val)) {
-                                         setStudentForm({ ...studentForm, projectTasks: { ...studentForm.projectTasks, [pid]: [...currentTags, val] } });
-                                       }
-                                       setTagInputs({...tagInputs, [pid]: ''}); setActiveSuggestionProject(null);
-                                     }
-                                   }}
-                                 />
-                                 {showSuggestions && (
-                                   <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-indigo-100 rounded-xl shadow-xl z-50 max-h-32 overflow-y-auto">
-                                     {Array.from(new Set(suggestions)).map((sugg: string) => (
-                                       <div key={sugg} className="p-3 hover:bg-indigo-50 cursor-pointer text-[10px] font-black uppercase text-slate-700 border-b last:border-0 transition-colors"
-                                         onClick={() => {
-                                           if (!currentTags.includes(sugg)) { setStudentForm({ ...studentForm, projectTasks: { ...studentForm.projectTasks, [pid]: [...currentTags, sugg] } }); }
-                                           setTagInputs({...tagInputs, [pid]: ''}); setActiveSuggestionProject(null);
-                                         }}> {String(sugg)} </div>
-                                     ))}
-                                   </div>
-                                 )}
-                              </div>
-                              <button type="button" onClick={() => {
-                                    const val = currentInputValue.trim(); if (!val) return;
-                                    if (!currentTags.includes(val)) { setStudentForm({ ...studentForm, projectTasks: { ...studentForm.projectTasks, [pid]: [...currentTags, val] } }); }
-                                    setTagInputs({...tagInputs, [pid]: ''});
-                              }} className="bg-slate-900 text-white p-3 rounded-xl hover:bg-black transition-all shadow-sm"><Plus size={18}/></button>
-                           </div>
 
                            <div className="flex flex-wrap gap-2 min-h-[40px] max-h-[120px] overflow-y-auto custom-scrollbar p-1">
                               {currentTags.map((tag: string, idx: number) => (
@@ -5639,6 +5726,10 @@ const App = () => {
               <h2 className={`text-2xl font-black mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Agregar Horas Manuales</h2>
               <div className="space-y-4">
                 <div>
+                  <label className={`block text-xs font-black uppercase mb-2 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Fecha</label>
+                  <input type="date" max={getCDMXDateString()} className={`w-full p-4 rounded-xl border outline-none transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white'}`} value={manualHoursForm.date} onChange={e => setManualHoursForm({...manualHoursForm, date: e.target.value})} />
+                </div>
+                <div>
                   <label className={`block text-xs font-black uppercase mb-2 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Horas</label>
                   <input type="number" className={`w-full p-4 rounded-xl border outline-none transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white'}`} value={manualHoursForm.hours} onChange={e => setManualHoursForm({...manualHoursForm, hours: parseFloat(e.target.value)})} />
                 </div>
@@ -5651,7 +5742,7 @@ const App = () => {
                 </div>
                 <div className="flex gap-4 mt-6">
                   <button onClick={() => setShowManualHours(false)} className={`flex-1 p-4 rounded-xl font-black transition-colors ${isDarkMode ? 'bg-white/5 text-white hover:bg-white/10' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>Cancelar</button>
-                  <button onClick={() => {
+                  <button onClick={async () => {
                     if (manualHoursForm.hours < 0.5) {
                       showErrorToast("El registro mínimo es de media hora");
                       return;
@@ -5660,19 +5751,32 @@ const App = () => {
                       showErrorToast("Un registro no puede exceder las 240 horas");
                       return;
                     }
-                    const newRecord = {
-                      id: Date.now().toString(),
-                      date: manualHoursForm.date,
-                      hours: manualHoursForm.hours,
+                    const recordId = `${Date.now()}-${selectedStudentId}`;
+                    const sessionData = {
+                      id: recordId,
+                      userId: selectedStudentId,
+                      projectId: 'p-general',
                       categoryId: manualHoursForm.category === 'Otra Brigada' ? 'cat-otra' : 'cat-nd',
                       description: 'Manual: ' + manualHoursForm.category,
+                      date: manualHoursForm.date,
+                      startTime: '',
+                      endTime: '',
+                      horasCalculadas: manualHoursForm.hours,
+                      estado: 'aprobado',
                       status: 'A',
-                      startTime: '00:00',
-                      endTime: '00:00'
+                      evidenceLink: '',
+                      updatedBy: auth.currentUser?.uid || 'admin',
+                      acknowledgedRejection: false
                     };
-                    setStudents(prev => prev.map(s => s.id === selectedStudentId ? { ...s, records: [...(s.records || []), newRecord] } : s));
-                    setShowManualHours(false);
-                    showSuccessToast("Horas manuales agregadas");
+                    
+                    try {
+                      await setDoc(doc(db, 'sesiones', recordId), sessionData);
+                      setShowManualHours(false);
+                      showSuccessToast("Horas manuales agregadas");
+                      setManualHoursForm({ hours: 0, category: 'Otra Brigada', date: getCDMXDateString() });
+                    } catch (error) {
+                      handleFirestoreError(error, OperationType.WRITE, `sesiones/${recordId}`);
+                    }
                   }} className="flex-1 p-4 bg-indigo-600 text-white rounded-xl font-black hover:bg-indigo-700 transition-all shadow-lg active:scale-95">Guardar</button>
                 </div>
               </div>
@@ -5680,6 +5784,108 @@ const App = () => {
           </div>
         )}
       </div>
+
+      {showBulkProjectAssign && (
+        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${isDarkMode ? 'bg-black/70' : 'bg-black/50'}`}>
+          <div className={`rounded-[2rem] p-6 sm:p-10 w-full max-w-4xl shadow-2xl border flex flex-col max-h-[90vh] ${isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-slate-200'}`}>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className={`text-2xl font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Asignación Masiva de Proyectos</h2>
+              <button onClick={() => setShowBulkProjectAssign(false)} className={`p-2 rounded-full transition-colors ${isDarkMode ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-slate-100 text-slate-500'}`}>
+                <X size={24} />
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 overflow-y-auto custom-scrollbar flex-1 pr-2">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className={`text-sm font-black uppercase tracking-widest ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>1. Seleccionar Alumnos</h3>
+                  <button 
+                    onClick={() => {
+                      if (selectedStudentsForBulk.length === students.length) {
+                        setSelectedStudentsForBulk([]);
+                      } else {
+                        setSelectedStudentsForBulk(students.map(s => s.id));
+                      }
+                    }}
+                    className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-indigo-400 hover:text-indigo-300' : 'text-indigo-600 hover:text-indigo-800'}`}
+                  >
+                    {selectedStudentsForBulk.length === students.length ? 'Deseleccionar Todos' : 'Seleccionar Todos'}
+                  </button>
+                </div>
+                <div className={`border rounded-[1.5rem] p-4 max-h-[400px] overflow-y-auto custom-scrollbar ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-slate-50'}`}>
+                  {students.map(s => (
+                    <label key={s.id} className="flex items-start gap-3 p-3 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl cursor-pointer transition-colors">
+                      <input 
+                        type="checkbox" 
+                        className="w-4 h-4 mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        checked={selectedStudentsForBulk.includes(s.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedStudentsForBulk([...selectedStudentsForBulk, s.id]);
+                          else setSelectedStudentsForBulk(selectedStudentsForBulk.filter(id => id !== s.id));
+                        }}
+                      />
+                      <div className="flex flex-col flex-1 min-w-0">
+                        <span className={`text-[11px] font-black uppercase truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{s.name}</span>
+                        <span className={`text-[9px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>{s.career}</span>
+                        {(s.projectIds && s.projectIds.length > 0) && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {s.projectIds.map(pid => {
+                              const proj = projects.find(pr => pr.id === pid);
+                              if (!proj) return null;
+                              return (
+                                <span key={pid} className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider" style={{backgroundColor: `${proj.color}20`, color: proj.color}}>
+                                  <div className="w-1.5 h-1.5 rounded-full" style={{backgroundColor: proj.color}}></div>
+                                  <span className="truncate max-w-[80px]">{proj.name}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <h3 className={`text-sm font-black uppercase tracking-widest ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>2. Seleccionar Proyectos a Asignar</h3>
+                <div className={`border rounded-[1.5rem] p-4 max-h-[400px] overflow-y-auto custom-scrollbar ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-slate-50'}`}>
+                  {projects.map(p => (
+                    <label key={p.id} className="flex items-center gap-3 p-3 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl cursor-pointer transition-colors">
+                      <input 
+                        type="checkbox" 
+                        className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                        checked={selectedProjectsForBulk.includes(p.id)}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedProjectsForBulk([...selectedProjectsForBulk, p.id]);
+                          else setSelectedProjectsForBulk(selectedProjectsForBulk.filter(id => id !== p.id));
+                        }}
+                      />
+                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }}></div>
+                      <span className={`flex-1 text-[11px] font-black uppercase truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{p.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-8 pt-6 border-t flex justify-end gap-4 border-slate-200 dark:border-white/10">
+              <button 
+                onClick={() => setShowBulkProjectAssign(false)} 
+                className={`px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-colors ${isDarkMode ? 'bg-white/5 text-white hover:bg-white/10' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+              >
+                Cancelar
+              </button>
+              <button 
+                onClick={handleBulkAssignProjects}
+                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg hover:bg-indigo-700 active:scale-95 transition-all"
+              >
+                Asignar a {selectedStudentsForBulk.length} Alumnos
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <NotificationCenter 
         isOpen={isNotificationCenterOpen}

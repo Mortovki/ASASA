@@ -11,15 +11,15 @@ export const useBreakpoint = () => {
 
   const getBreakpoint = (w: number): 'desktop' | 'tablet' | 'mobile' => {
     if (w < 768) return 'mobile';
-    if (w < 1024) return 'tablet';
+    if (w < 1280) return 'tablet';
     return 'desktop';
   };
 
   return {
     breakpoint: getBreakpoint(width),
     isMobile: width < 768,
-    isTablet: width >= 768 && width < 1024,
-    isDesktop: width >= 1024,
+    isTablet: width >= 768 && width < 1280,
+    isDesktop: width >= 1280,
     width
   };
 };

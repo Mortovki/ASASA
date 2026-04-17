@@ -59,7 +59,7 @@ export const StageNode: React.FC<StageNodeProps> = ({
   const progress = stage.spTotal > 0 ? (stage.spDone / stage.spTotal) * 100 : 0;
 
   return (
-    <div className="relative flex flex-col items-center min-w-[280px] group">
+    <div className="relative flex flex-col items-center min-w-[280px] group snap-center">
       {/* Línea conectora horizontal */}
       {!isFirst && (
         <div 

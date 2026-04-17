@@ -296,7 +296,7 @@ const SprintTable = ({
                       <div className={`p-3 rounded-xl border shadow-sm h-40 transition-colors ${
                         isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'
                       }`}>
-                        <ResponsiveContainer width="100%" height="100%">
+                        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                           <LineChart data={generateBurndownData(phaseTasks)} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? 'rgba(255,255,255,0.05)' : '#e2e8f0'} />
                             <XAxis dataKey="day" tick={{fontSize: 10, fill: isDarkMode ? '#666' : '#94a3b8'}} />
@@ -475,7 +475,7 @@ const SprintTable = ({
                       <tr>
                         <td colSpan={7} className={`p-0 border-b transition-colors ${isDarkMode ? 'bg-[#121212] border-white/10' : 'bg-white border-slate-200'}`}>
                           <div className="h-48 p-4 border-l-4 border-indigo-500">
-                            <ResponsiveContainer width="100%" height="100%">
+                            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                               <LineChart data={generateBurndownData(phaseTasks)} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? 'rgba(255,255,255,0.05)' : '#e2e8f0'} />
                                 <XAxis dataKey="day" tick={{fontSize: 10, fill: isDarkMode ? '#666' : '#94a3b8'}} />

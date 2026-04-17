@@ -20,6 +20,32 @@ export const StagePipeline: React.FC<StagePipelineProps> = ({
   isLoading = false
 }) => {
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  const [showLeftArrow, setShowLeftArrow] = React.useState(false);
+  const [showRightArrow, setShowRightArrow] = React.useState(true);
+
+  const handleScroll = () => {
+    if (scrollRef.current) {
+      const { scrollLeft, scrollWidth, clientWidth } = scrollRef.current;
+      setShowLeftArrow(scrollLeft > 0);
+      setShowRightArrow(scrollLeft < scrollWidth - clientWidth - 5);
+    }
+  };
+
+  React.useEffect(() => {
+    const ref = scrollRef.current;
+    if (ref) {
+      ref.addEventListener('scroll', handleScroll);
+      const timeoutId = setTimeout(handleScroll, 100);
+      const resizeObserver = new ResizeObserver(() => handleScroll());
+      resizeObserver.observe(ref);
+
+      return () => {
+        ref.removeEventListener('scroll', handleScroll);
+        clearTimeout(timeoutId);
+        resizeObserver.disconnect();
+      };
+    }
+  }, [stages]);
 
   const scroll = (direction: 'left' | 'right') => {
     if (scrollRef.current) {
@@ -66,13 +92,15 @@ export const StagePipeline: React.FC<StagePipelineProps> = ({
       {/* Botones de Navegación */}
       <button
         onClick={() => scroll('left')}
-        className="absolute left-0 top-1/2 -translate-y-1/2 z-20 p-2 bg-white rounded-full shadow-xl border border-slate-100 text-slate-400 hover:text-[#01696f] opacity-0 group-hover:opacity-100 transition-opacity"
+        className={`absolute left-0 top-1/2 -translate-y-1/2 z-20 p-2 bg-white rounded-full shadow-xl border border-slate-100 text-slate-400 hover:text-[#01696f] transition-all ${!showLeftArrow ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+        aria-hidden={!showLeftArrow}
       >
         <ChevronLeft size={24} />
       </button>
       <button
         onClick={() => scroll('right')}
-        className="absolute right-0 top-1/2 -translate-y-1/2 z-20 p-2 bg-white rounded-full shadow-xl border border-slate-100 text-slate-400 hover:text-[#01696f] opacity-0 group-hover:opacity-100 transition-opacity"
+        className={`absolute right-0 top-1/2 -translate-y-1/2 z-20 p-2 bg-white rounded-full shadow-xl border border-slate-100 text-slate-400 hover:text-[#01696f] transition-all ${!showRightArrow ? 'opacity-0 pointer-events-none' : 'opacity-100'}`}
+        aria-hidden={!showRightArrow}
       >
         <ChevronRight size={24} />
       </button>
@@ -80,7 +108,8 @@ export const StagePipeline: React.FC<StagePipelineProps> = ({
       {/* Contenedor del Pipeline */}
       <div 
         ref={scrollRef}
-        className="overflow-x-auto no-scrollbar pb-8 pt-12 px-4"
+        className="overflow-x-auto hide-scrollbar pb-8 pt-12 px-4 snap-x snap-mandatory"
+        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
       >
         {onReorder ? (
           <Reorder.Group
@@ -93,7 +122,7 @@ export const StagePipeline: React.FC<StagePipelineProps> = ({
               <Reorder.Item
                 key={stage.id}
                 value={stage}
-                className="cursor-grab active:cursor-grabbing"
+                className="cursor-grab active:cursor-grabbing snap-center"
               >
                 <StageNode
                   stage={stage}
