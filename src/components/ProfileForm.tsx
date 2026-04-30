@@ -93,7 +93,10 @@ const ProfileForm = ({ user, onComplete, isDarkMode }: ProfileFormProps) => {
           skills: profileData.skills,
           status: profileData.status,
           role: profileData.role,
-          uid: profileData.uid
+          uid: profileData.uid,
+          email: profileData.email,
+          phone: profileData.phone,
+          projectIds: profileData.projectIds || []
         };
         await setDoc(doc(db, 'public_profiles', user.uid), publicProfile, { merge: true });
         

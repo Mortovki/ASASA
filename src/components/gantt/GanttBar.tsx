@@ -34,11 +34,48 @@ export const GanttBar: React.FC<GanttBarProps> = ({
   const statusConfig = KANBAN_COLUMNS.find(c => c.id === task.status);
   const baseColor = statusConfig?.color.replace('bg-', '') || 'slate-500';
   
+  // Custom color support
+  const taskColor = task.color || null;
+  
   // Si es la ruta crítica, darle un borde o sombra especial
   const isCritical = task.isCritical;
+  const isMilestone = task.isMilestone;
 
   const displayStart = preview?.startDate || new Date(task.startDate || Date.now());
   const displayEnd = preview?.endDate || new Date(task.endDate || Date.now());
+
+  if (isMilestone) {
+    return (
+      <div 
+        className="relative group h-8 flex items-center justify-center"
+        style={{ 
+          position: 'absolute',
+          left: `${left}px`,
+          width: `${dayWidth}px`,
+          top: '8px'
+        }}
+      >
+        <motion.div
+          layoutId={`task-milestone-${task.id}`}
+          onClick={onClick}
+          onMouseDown={(e) => canEdit && onStartDrag(e, task.id, 'move')}
+          onTouchStart={(e) => canEdit && onStartDrag(e, task.id, 'move')}
+          className={`
+            w-6 h-6 rotate-45 cursor-pointer z-10 shadow-sm
+            ${isDragging ? 'shadow-lg ring-2 ring-indigo-400 scale-110' : 'hover:scale-110'}
+            ${isCritical ? 'ring-2 ring-red-500 ring-offset-2' : ''}
+          `}
+          style={{ 
+            backgroundColor: taskColor || (baseColor.includes('-') ? `var(--color-${baseColor})` : baseColor),
+          }}
+        />
+        {/* Milestone Label */}
+        <span className="absolute left-full ml-2 text-[10px] font-black whitespace-nowrap bg-white/80 dark:bg-black/40 px-1 rounded backdrop-blur-sm pointer-events-none group-hover:z-50">
+          {task.title}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div 
@@ -63,7 +100,7 @@ export const GanttBar: React.FC<GanttBarProps> = ({
           ${isCritical ? 'ring-1 ring-red-400' : ''}
         `}
         style={{ 
-          backgroundColor: `var(--color-${baseColor})`,
+          backgroundColor: taskColor || (baseColor.includes('-') ? `var(--color-${baseColor})` : baseColor),
           opacity: isDragging ? 0.9 : 1,
         }}
       >

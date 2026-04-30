@@ -17,6 +17,7 @@ interface UserProfile {
   role: string;
   status: string;
   studentId: string;
+  projectIds?: string[];
 }
 
 interface SkillsViewProps {
@@ -74,7 +75,10 @@ const SkillsView = ({ users, currentUserRole, currentUserId, projects, isDarkMod
         skills: editingSkills,
         status: user.status,
         role: user.role,
-        uid: user.id
+        uid: user.id,
+        email: user.email,
+        phone: user.phone,
+        projectIds: user.projectIds || []
       };
       await setDoc(doc(db, 'public_profiles', user.id), publicProfile, { merge: true });
       

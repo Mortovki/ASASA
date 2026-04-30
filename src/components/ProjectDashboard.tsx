@@ -1,11 +1,12 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart, Bar, ResponsiveContainer } from 'recharts';
-import { Target, CheckCircle2, AlertTriangle, Clock, Calendar, LayoutGrid, BarChart3, PieChart as PieChartIcon, Activity, Users, MessageSquare, ChevronRight } from 'lucide-react';
+import { Target, CheckCircle2, AlertTriangle, Clock, Calendar, LayoutGrid, BarChart3, PieChart as PieChartIcon, Activity, Users, MessageSquare, ChevronRight, Trash2, X } from 'lucide-react';
 import { formatName, formatFullName } from '../utils/formatters';
 import { db } from '../firebase';
-import { collectionGroup, query, where, orderBy, onSnapshot, limit } from 'firebase/firestore';
+import { collectionGroup, query, where, orderBy, onSnapshot, limit, updateDoc, doc, deleteDoc } from 'firebase/firestore';
 import ReactMarkdown from 'react-markdown';
 import { dedupeById } from '../utils/dedupe';
+import toast from 'react-hot-toast';
 
 import ProjectProgressAnalysis from './ProjectProgressAnalysis';
 
@@ -25,7 +26,7 @@ const STATUS_LABELS: Record<string, string> = {
   done: 'Completado',
 };
 
-const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: any) => {
+const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, userRole }: any) => {
   const [selectedStageId, setSelectedStageId] = useState<string>(
     project?.stages?.[project?.currentStageIndex || 0]?.id || 'all'
   );
@@ -74,6 +75,42 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: a
     if (selectedStageId === 'all') return tasks;
     return tasks.filter((t: any) => t.stageId === selectedStageId);
   }, [tasks, selectedStageId]);
+
+  const handleDeleteNote = async (noteId: string, taskId: string) => {
+    try {
+      const noteRef = doc(db, `projects/${projectId}/tasks/${taskId}/notes`, noteId);
+      await updateDoc(noteRef, {
+        isDeleted: true,
+        content: 'Este comentario ha sido eliminado.',
+        deletedAt: new Date().toISOString()
+      });
+      toast.success('Nota eliminada');
+    } catch (error) {
+      console.error("Error deleting note:", error);
+      toast.error('Error al eliminar nota');
+    }
+  };
+
+  const handleHardDeleteNote = async (noteId: string, taskId: string) => {
+    const isAdmin = userRole === 'admin' || userRole === 'coordinator';
+    if (!isAdmin) {
+      toast.error('No tienes permisos para esta acción');
+      return;
+    }
+
+    if (!window.confirm('¿Estás seguro de eliminar este comentario permanentemente? Esta acción no se puede deshacer.')) {
+      return;
+    }
+
+    try {
+      const noteRef = doc(db, `projects/${projectId}/tasks/${taskId}/notes`, noteId);
+      await deleteDoc(noteRef);
+      toast.success('Nota eliminada permanentemente');
+    } catch (error) {
+      console.error("Error hard deleting note:", error);
+      toast.error('Error al eliminar nota');
+    }
+  };
 
   const stats = useMemo(() => {
     const total = filteredTasks.length;
@@ -199,6 +236,13 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: a
       };
     }
   }, [project?.stages]);
+
+  const activeNotes = useMemo(() => {
+    return projectNotes.filter(note => {
+      if (note.isDeleted) return false;
+      return tasks.some((t: any) => t.id === note.taskId);
+    });
+  }, [projectNotes, tasks]);
 
   return (
     <div className="space-y-6">
@@ -416,13 +460,13 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: a
         </div>
 
         <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-          {projectNotes.length === 0 ? (
+          {activeNotes.length === 0 ? (
             <div className="text-center py-12">
               <MessageSquare size={48} className={`mx-auto mb-4 opacity-20 ${isDarkMode ? 'text-gray-400' : 'text-slate-400'}`} />
               <p className={`font-medium ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>No hay comentarios aún en este proyecto.</p>
             </div>
           ) : (
-            projectNotes.map((note) => (
+            activeNotes.map((note) => (
               <div key={note.id} className={`p-4 rounded-xl border transition-all ${isDarkMode ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-slate-50 border-slate-100 hover:bg-slate-100'}`}>
                 <div className="flex justify-between items-start mb-2">
                   <div className="flex items-center gap-2">
@@ -436,13 +480,37 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode }: a
                       </p>
                     </div>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right flex flex-col items-end gap-1">
                     <p className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>
                       Tarea: {note.taskTitle || 'Sin título'}
                     </p>
-                    {note.parentId && (
-                      <span className="text-[8px] font-black uppercase px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded ml-2">Respuesta</span>
-                    )}
+                    <div className="flex items-center gap-2">
+                      {note.parentId && (
+                        <span className="text-[8px] font-black uppercase px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">Respuesta</span>
+                      )}
+                      {(userRole === 'admin' || userRole === 'coordinator') && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              if(window.confirm('¿Estás seguro de ocultar este comentario?')) {
+                                handleDeleteNote(note.id, note.taskId);
+                              }
+                            }}
+                            className={`p-1 rounded-md transition-colors ${isDarkMode ? 'text-amber-400 hover:bg-amber-500/10' : 'text-amber-600 hover:bg-amber-50'}`}
+                            title="Ocultar Comentario (Soft Delete)"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                          <button
+                            onClick={() => handleHardDeleteNote(note.id, note.taskId)}
+                            className={`p-1 rounded-md transition-colors ${isDarkMode ? 'text-red-400 hover:bg-red-500/10' : 'text-red-500 hover:bg-red-50'}`}
+                            title="Eliminar Permanentemente (Hard Delete)"
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className={`prose prose-sm max-w-none ${isDarkMode ? 'text-slate-400 prose-invert' : 'text-slate-600'} line-clamp-3 text-xs`}>

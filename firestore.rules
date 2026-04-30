@@ -34,7 +34,7 @@
 //   - title: string (required)
 //   - status: string (required, enum: ['pending_approval', 'todo', 'working_on_it', 'waiting_review', 'stuck', 'done', 'rejected'])
 //   - priority: number (required, enum: [1, 2, 3, 4, 5])
-//   - type: string (required, enum: ['feature', 'bug', 'quality', 'security', 'operations'])
+//   - type: string (required, enum: ['LEVANTAMIENTO', 'DIAGNÓSTICO', 'SOCIAL / TALLER', 'REUNIÓN / COORDINACIÓN', 'DISEÑO / MODELADO', 'PLANOS EJECUTIVOS', 'COSTOS Y PRESUPUESTO', 'REVISIÓN / ENTREGA'])
 //   - createdAt: timestamp (required)
 //   - createdBy: string (required)
 //
@@ -58,20 +58,24 @@ service cloud.firestore {
     
     function isAdmin() {
       return isAuthenticated() &&
-        (request.auth.token.email == "luisedgar.gutierrez17@gmail.com" ||
+        (request.auth.token.email == "luisedgar.gutierrez17@gmail.com" || 
+         request.auth.token.email == "luisedgar.gutierrez1@gmail.com" || 
+         request.auth.token.email == "mortovki@gmail.com" ||
          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
     }
 
     function isCoordinator() {
       return isAuthenticated() &&
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordinator');
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordinator';
     }
 
     function isAtLeastCoordinator() {
       return isAuthenticated() && (
-        request.auth.token.email == "luisedgar.gutierrez17@gmail.com" ||
+        request.auth.token.email == "luisedgar.gutierrez17@gmail.com" || 
+        request.auth.token.email == "luisedgar.gutierrez1@gmail.com" || 
+        request.auth.token.email == "mortovki@gmail.com" ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'coordinator'])
       );
@@ -99,13 +103,14 @@ service cloud.firestore {
                data.status is string;
       }
 
-      allow read: if isOwner(uid) || isAtLeastCoordinator();
+      allow get: if isOwner(uid) || isAtLeastCoordinator();
+      allow list: if isAtLeastCoordinator();
       
       allow create: if isAuthenticated() && 
                       (isAdmin() || (isValidUser(request.resource.data) && isOwner(uid) && request.resource.data.role == 'user'));
                       
       allow update: if isAuthenticated() && 
-                      (isAdmin() || (
+                      (isAtLeastCoordinator() || (
                         isOwner(uid) && 
                         isValidUser(request.resource.data) && 
                         request.resource.data.role == resource.data.role &&

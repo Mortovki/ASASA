@@ -8,7 +8,10 @@ import {
   CheckCircle2, 
   XCircle,
   MoveHorizontal,
-  User
+  User,
+  Users,
+  Clock,
+  MapPin
 } from 'lucide-react';
 import { KanbanColumnId, KANBAN_COLUMNS } from '../config/kanbanColumns';
 import { formatName } from '../utils/formatters';
@@ -20,8 +23,9 @@ interface KanbanCardProps {
   userRole: string;
   permissions: any;
   draggedTask: string | null;
-  initials: string;
-  assignedStudent: any;
+  initials: string; // Not used as primary but kept for compatibility
+  assignedStudent: any; // Not used as primary but kept for compatibility
+  students?: any[]; // Added to find all assigned students
   onSelect: (taskId: string) => void;
   onDelete: (taskId: string) => void;
   onApprove: (task: any) => void;
@@ -33,27 +37,36 @@ interface KanbanCardProps {
 }
 
 const typeLabels: Record<string, string> = {
-  feature: 'Función',
-  bug: 'Error',
-  quality: 'Calidad',
-  security: 'Seguridad',
-  operations: 'Operación'
+  'LEVANTAMIENTO': 'LEVANTAMIENTO',
+  'DIAGNÓSTICO': 'DIAGNÓSTICO',
+  'SOCIAL / TALLER': 'SOCIAL/TALLER',
+  'REUNIÓN / COORDINACIÓN': 'REUNIÓN/COORD.',
+  'DISEÑO / MODELADO': 'DISEÑ/MOD.',
+  'PLANOS EJECUTIVOS': 'PLANOS EJEC.',
+  'COSTOS Y PRESUPUESTO': 'COSTOS/PRESUP.',
+  'REVISIÓN / ENTREGA': 'REV./ENTREGA'
 };
 
 const typeBadgeColors: Record<string, string> = {
-  feature: 'bg-purple-100 text-purple-700',
-  bug: 'bg-red-100 text-red-700',
-  quality: 'bg-blue-100 text-blue-700',
-  security: 'bg-slate-800 text-white',
-  operations: 'bg-emerald-100 text-emerald-700'
+  'LEVANTAMIENTO': 'bg-purple-100 text-purple-700',
+  'DIAGNÓSTICO': 'bg-blue-100 text-blue-700',
+  'SOCIAL / TALLER': 'bg-pink-100 text-pink-700',
+  'REUNIÓN / COORDINACIÓN': 'bg-indigo-100 text-indigo-700',
+  'DISEÑO / MODELADO': 'bg-emerald-100 text-emerald-700',
+  'PLANOS EJECUTIVOS': 'bg-slate-200 text-slate-700',
+  'COSTOS Y PRESUPUESTO': 'bg-amber-100 text-amber-700',
+  'REVISIÓN / ENTREGA': 'bg-rose-100 text-rose-700'
 };
 
 const darkTypeBadgeColors: Record<string, string> = {
-  feature: 'bg-purple-500/10 text-purple-400',
-  bug: 'bg-red-500/10 text-red-400',
-  quality: 'bg-blue-500/10 text-blue-400',
-  security: 'bg-white/10 text-white',
-  operations: 'bg-emerald-500/10 text-emerald-400'
+  'LEVANTAMIENTO': 'bg-purple-500/20 text-purple-300',
+  'DIAGNÓSTICO': 'bg-blue-500/20 text-blue-300',
+  'SOCIAL / TALLER': 'bg-pink-500/20 text-pink-300',
+  'REUNIÓN / COORDINACIÓN': 'bg-indigo-500/20 text-indigo-300',
+  'DISEÑO / MODELADO': 'bg-emerald-500/20 text-emerald-300',
+  'PLANOS EJECUTIVOS': 'bg-slate-400/20 text-slate-300',
+  'COSTOS Y PRESUPUESTO': 'bg-amber-500/20 text-amber-300',
+  'REVISIÓN / ENTREGA': 'bg-rose-500/20 text-rose-300'
 };
 
 const KanbanCard: React.FC<KanbanCardProps> = ({
@@ -71,20 +84,24 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
   onDragStart,
   onDragEnd,
   onMoveTask,
-  isDarkMode
+  isDarkMode,
+  students = []
 }) => {
   const isPending = task.status === 'pending_approval';
   const isCompact = layout === 'mobile';
   const [showMoveMenu, setShowMoveMenu] = React.useState(false);
 
+  const assignedUids = task.assignedUsers || (task.assignedTo ? [task.assignedTo] : []);
+  const assignedList = assignedUids.map((uid: string) => students.find(s => s.id === uid)).filter(Boolean);
+
   const renderPriority = (priority: number) => {
     if (isCompact) return <PriorityDot priority={priority} />;
     return (
-      <div className="flex gap-0.5">
+      <div className="flex gap-0.5 shrink-0 ml-auto">
         {Array.from({ length: 5 }).map((_, i) => (
           <Star 
             key={`star-${i}`} 
-            size={12} 
+            size={10} 
             className={i < (priority || 3) ? 'text-yellow-400 fill-yellow-400' : (isDarkMode ? 'text-gray-700' : 'text-slate-200')} 
           />
         ))}
@@ -112,11 +129,15 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         ${isDarkMode ? 'bg-[#1a1a1a]' : 'bg-white'}
         ${task.isCritical 
           ? (isDarkMode ? 'border-red-500/30 hover:border-red-500/50' : 'border-red-300 hover:border-red-400') 
-          : (isDarkMode ? 'border-white/5 hover:border-indigo-500/30' : 'border-slate-200 hover:border-indigo-300')
+          : (task.isMilestone 
+              ? (isDarkMode ? 'border-amber-500/30 hover:border-amber-500/50' : 'border-amber-300 hover:border-amber-400')
+              : (isDarkMode ? 'border-white/5 hover:border-indigo-500/30' : 'border-slate-200 hover:border-indigo-300')
+            )
         }
         ${draggedTask === task.id ? 'opacity-40 scale-90 grayscale' : ''}
         ${isPending ? (isDarkMode ? 'border-amber-500/30 bg-amber-500/5' : 'border-amber-200 bg-amber-50/30') : ''}
       `}
+      style={task.color ? { borderLeftWidth: '4px', borderLeftColor: task.color } : {}}
     >
       {permissions.canDeleteTask && !isPending && !isCompact && (
         <button 
@@ -130,96 +151,133 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         </button>
       )}
 
-      <div className="flex justify-between items-start mb-2">
-        <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-md ${isDarkMode ? (darkTypeBadgeColors[task.type] || 'bg-white/5 text-gray-400') : (typeBadgeColors[task.type] || 'bg-slate-100 text-slate-700')}`}>
-            {typeLabels[task.type] || task.type}
-          </span>
-          {task.isCritical && (
-            <span className={`flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-md ${isDarkMode ? 'text-red-400 bg-red-400/10' : 'text-red-600 bg-red-50'}`} title="Ruta Crítica">
-              <AlertTriangle size={10} /> CPM
-            </span>
-          )}
-        </div>
-        {renderPriority(task.priority)}
-      </div>
-      
-      <h4 className={`font-bold leading-tight mb-3 transition-colors ${isCompact ? 'text-sm' : 'text-base'} ${isDarkMode ? 'text-white group-hover:text-indigo-400' : 'text-slate-800 group-hover:text-indigo-600'}`}>
-        {task.title}
-      </h4>
-      
-      {isPending && userRole === 'admin' ? (
-        <div className="flex gap-2 mt-4">
-          <button 
-            onClick={(e) => { e.stopPropagation(); onApprove(task); }}
-            className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1 hover:bg-emerald-700 transition-colors"
-          >
-            <CheckCircle2 size={12} /> Aprobar
-          </button>
-          <button 
-            onClick={(e) => { e.stopPropagation(); onReject(task); }}
-            className={`flex-1 py-2 rounded-lg text-[10px] font-black uppercase flex items-center justify-center gap-1 transition-colors ${isDarkMode ? 'bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20' : 'bg-red-50 text-red-600 border border-red-100 hover:bg-red-100'}`}
-          >
-            <XCircle size={12} /> Rechazar
-          </button>
-        </div>
-      ) : (
-        <div className="flex justify-between items-end mt-auto">
-          <div className="flex items-center gap-2">
-            <div 
-              className={`${isCompact ? 'w-5 h-5' : 'w-6 h-6'} rounded-full flex items-center justify-center text-[10px] font-black border shadow-sm ${isDarkMode ? 'bg-indigo-500/20 text-indigo-300 border-white/10' : 'bg-indigo-100 text-indigo-700 border-white'}`} 
-              title={assignedStudent ? formatName(assignedStudent.firstName, assignedStudent.lastNamePaterno) : 'Sin asignar'}
+      <div className="flex flex-col gap-3">
+        {/* Header: Badges & Priority */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 overflow-hidden">
+            <span 
+              className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md truncate max-w-[90px] shadow-xs border ${!task.color ? (isDarkMode ? (darkTypeBadgeColors[task.type] || 'bg-white/5 text-gray-400 border-white/5') : (typeBadgeColors[task.type] || 'bg-slate-100 text-slate-700 border-slate-200')) : ''}`}
+              style={task.color ? { backgroundColor: `${task.color}15`, color: task.color, borderColor: `${task.color}30` } : {}}
             >
-              {initials}
-            </div>
-            <div className={`flex items-center gap-1 text-xs font-semibold ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
-              <MessageSquare size={12} />
-              <span>{task.noteCount || 0}</span>
-            </div>
+              {typeLabels[task.type] || task.type}
+            </span>
+            {task.isMilestone && (
+              <span className={`flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded-md shrink-0 border ${isDarkMode ? 'text-amber-400 bg-amber-400/10 border-amber-400/20' : 'text-amber-600 bg-amber-50 border-amber-100'}`} title="Hito">
+                <MapPin size={10} /> HITO
+              </span>
+            )}
+            {task.isCritical && (
+              <span className={`flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded-md shrink-0 border ${isDarkMode ? 'text-red-400 bg-red-400/10 border-red-400/20' : 'text-red-600 bg-red-50 border-red-100'}`} title="Ruta Crítica">
+                <AlertTriangle size={10} /> CPM
+              </span>
+            )}
           </div>
-          
-          <div className="flex items-center gap-2">
-            {(layout === 'tablet' || isCompact) && !isPending && (
-              <div className="relative">
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (isCompact) {
-                      onMoveTask?.(task.id, task.status);
-                    } else {
-                      setShowMoveMenu(!showMoveMenu);
-                    }
-                  }}
-                  className={`p-1 transition-colors ${isDarkMode ? 'text-gray-600 hover:text-indigo-400' : 'text-slate-400 hover:text-indigo-600'}`}
-                >
-                  <MoveHorizontal size={14} />
-                </button>
-                {showMoveMenu && !isCompact && (
-                  <div className={`absolute bottom-full right-0 mb-2 w-40 rounded-xl shadow-xl border py-1 z-50 overflow-hidden ${isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-slate-100'}`}>
-                    {KANBAN_COLUMNS.filter(c => c.id !== 'pending_approval' && c.id !== task.status).map(col => (
-                      <button
-                        key={col.id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onMoveTask?.(task.id, col.id);
-                          setShowMoveMenu(false);
-                        }}
-                        className={`w-full px-4 py-2 text-left text-[10px] font-bold transition-colors flex items-center gap-2 ${isDarkMode ? 'text-gray-400 hover:bg-white/5' : 'text-slate-600 hover:bg-slate-50'}`}
-                      >
-                        <div className={`w-2 h-2 rounded-full ${col.color}`} />
-                        Mover a {col.shortLabel}
-                      </button>
-                    ))}
+          {renderPriority(task.priority)}
+        </div>
+        
+        {/* Title */}
+        <h4 className={`font-bold leading-snug transition-colors line-clamp-2 min-h-[2.5rem] tracking-tight ${isCompact ? 'text-sm' : 'text-[15px]'} ${isDarkMode ? 'text-white group-hover:text-indigo-400' : 'text-slate-800 group-hover:text-indigo-600'}`}>
+          {task.title}
+        </h4>
+        
+        {/* Footer actions or display */}
+        {isPending && userRole === 'admin' ? (
+          <div className="flex gap-2 pt-2">
+            <button 
+              onClick={(e) => { e.stopPropagation(); onApprove(task); }}
+              className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-[9px] font-black uppercase flex items-center justify-center gap-1 hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/20"
+            >
+              <CheckCircle2 size={12} /> Aprobar
+            </button>
+            <button 
+              onClick={(e) => { e.stopPropagation(); onReject(task); }}
+              className={`flex-1 py-2 rounded-lg text-[9px] font-black uppercase flex items-center justify-center gap-1 transition-colors border ${isDarkMode ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20' : 'bg-red-50 text-red-600 border-red-100 hover:bg-red-100'}`}
+            >
+              <XCircle size={12} /> Rechazar
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3 pt-2 border-t border-slate-50 dark:border-white/5">
+            {/* Metadata Bottom Row */}
+            <div className="flex items-center justify-between">
+              {/* Left: Participants & Comments */}
+              <div className="flex items-center gap-2">
+                <div className="flex -space-x-1.5 overflow-hidden">
+                  {assignedList.length > 0 ? (
+                    assignedList.slice(0, 3).map((s: any, idx: number) => {
+                      const sInitials = `${s.firstName.charAt(0)}${s.lastNamePaterno.charAt(0)}`;
+                      return (
+                        <div 
+                          key={s.id || idx}
+                          className={`${isCompact ? 'w-5 h-5' : 'w-6 h-6'} rounded-full flex items-center justify-center text-[8px] font-black border-2 shadow-sm shrink-0 ${isDarkMode ? 'bg-indigo-500/20 text-indigo-300 border-[#1a1a1a]' : 'bg-indigo-100 text-indigo-700 border-white'}`} 
+                          title={formatName(s.firstName, s.lastNamePaterno)}
+                        >
+                          {sInitials}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div 
+                      className={`${isCompact ? 'w-5 h-5' : 'w-6 h-6'} rounded-full flex items-center justify-center text-[10px] font-black border shadow-sm shrink-0 ${isDarkMode ? 'bg-slate-500/20 text-gray-500 border-white/10' : 'bg-slate-100 text-slate-400 border-white'}`} 
+                      title="Sin asignar"
+                    >
+                      <User size={10} />
+                    </div>
+                  )}
+                  {assignedList.length > 3 && (
+                    <div className={`${isCompact ? 'w-5 h-5' : 'w-6 h-6'} rounded-full flex items-center justify-center text-[8px] font-black border-2 shrink-0 ${isDarkMode ? 'bg-slate-800 text-gray-300 border-[#1a1a1a]' : 'bg-slate-200 text-slate-600 border-white'}`}>
+                      +{assignedList.length - 3}
+                    </div>
+                  )}
+                </div>
+                {task.noteCount > 0 && (
+                  <div className={`flex items-center gap-1 text-[10px] font-bold ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
+                    <MessageSquare size={10} />
+                    <span>{task.noteCount}</span>
                   </div>
                 )}
               </div>
-            )}
-            <div className={`text-[10px] font-black px-2 py-1 rounded-md ${isDarkMode ? 'text-gray-400 bg-white/5' : 'text-slate-400 bg-slate-100'}`}>
-              SP: {task.estimatedSP || 0}
+              
+              {/* Right: Technical info */}
+              <div className="flex items-center gap-2">
+                <div className="flex flex-col items-end gap-1">
+                  <div className="flex items-center gap-1.5">
+                    {(task.startTime) && (
+                      <div className={`text-[8px] font-black px-1.5 py-0.5 rounded flex items-center gap-1 border ${isDarkMode ? 'text-indigo-400 bg-indigo-400/5 border-indigo-500/20' : 'text-indigo-600 bg-indigo-50 border-indigo-100'}`}>
+                        <Clock size={8} /> {task.startTime}
+                      </div>
+                    )}
+                    <div className={`text-[8px] font-black px-1.5 py-0.5 rounded border ${isDarkMode ? 'text-gray-400 bg-white/5 border-white/10' : 'text-slate-500 bg-slate-50 border-slate-200'}`}>
+                      {task.estimatedSP || 0} SP
+                    </div>
+                  </div>
+                  {task.totalActualHours > 0 && (
+                    <span className={`text-[8px] font-black italic ${isDarkMode ? 'text-emerald-400/60' : 'text-emerald-600/60'}`}>
+                      Total: {task.totalActualHours}h
+                    </span>
+                  )}
+                </div>
+                
+                {(layout === 'tablet' || isCompact) && !isPending && (
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isCompact) {
+                        onMoveTask?.(task.id, task.status);
+                      } else {
+                        setShowMoveMenu(!showMoveMenu);
+                      }
+                    }}
+                    className={`ml-1 p-1 rounded-md transition-colors ${isDarkMode ? 'text-gray-600 hover:text-indigo-400 hover:bg-white/5' : 'text-slate-400 hover:text-indigo-600 hover:bg-slate-100'}`}
+                  >
+                    <MoveHorizontal size={14} />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        ) }
+      </div>
     </motion.div>
   );
 };

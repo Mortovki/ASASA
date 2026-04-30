@@ -25,6 +25,7 @@ const GanttView = ({
   students,
   updateTaskStatus,
   updateTaskField,
+  updateTaskFields,
   updateTaskDates,
   deleteTask,
   permissions,
@@ -271,6 +272,9 @@ const GanttView = ({
               userRole={userRole}
               currentUser={currentUser}
               students={students}
+              updateTaskStatus={updateTaskStatus}
+              updateTaskField={updateTaskField}
+              updateTaskFields={updateTaskFields}
               deleteTask={deleteTask}
               isDarkMode={isDarkMode}
             />
@@ -521,6 +525,7 @@ const GanttView = ({
             students={students}
             updateTaskStatus={updateTaskStatus}
             updateTaskField={updateTaskField}
+            updateTaskFields={updateTaskFields}
             deleteTask={deleteTask}
             isDarkMode={isDarkMode}
           />

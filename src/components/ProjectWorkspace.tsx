@@ -125,6 +125,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
     loading: isLoading, 
     updateTaskStatus, 
     updateTaskField, 
+    updateTaskFields,
     updateTaskDates,
     deleteTask, 
     restoreTask, 
@@ -418,6 +419,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                 project={project}
                 students={students} 
                 isDarkMode={isDarkMode}
+                userRole={userRole}
               />
             )}
             {activeTab === 'kanban' && (
@@ -429,6 +431,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                 students={students}
                 updateTaskStatus={updateTaskStatus}
                 updateTaskField={updateTaskField}
+                updateTaskFields={updateTaskFields}
                 deleteTask={deleteTask}
                 addTask={addTask}
                 permissions={permissions}
@@ -447,6 +450,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                 students={students}
                 updateTaskStatus={updateTaskStatus}
                 updateTaskField={updateTaskField}
+                updateTaskFields={updateTaskFields}
                 updateTaskDates={updateTaskDates}
                 deleteTask={deleteTask}
                 permissions={permissions}
@@ -463,6 +467,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                 students={students}
                 updateTaskStatus={updateTaskStatus}
                 updateTaskField={updateTaskField}
+                updateTaskFields={updateTaskFields}
                 deleteTask={deleteTask}
                 addTask={addTask}
                 permissions={permissions}

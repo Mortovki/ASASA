@@ -240,7 +240,7 @@ function ResourceItem({
 
       <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${iconConfig.bg}`}>
         {iconConfig.logo ? (
-          <img src={iconConfig.logo} alt={resource.type} className="w-6 h-6" />
+          <img src={iconConfig.logo} alt={resource.type} className="w-6 h-6" referrerPolicy="no-referrer" />
         ) : (
           <LayoutGrid className={`w-6 h-6 ${iconConfig.color}`} />
         )}

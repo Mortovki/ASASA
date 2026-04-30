@@ -118,7 +118,7 @@ export function AddResourceModal({
                 {formData.url && (
                   <div className={`p-1.5 rounded-lg ${RESOURCE_ICONS[formData.type].bg}`}>
                     {RESOURCE_ICONS[formData.type].logo ? (
-                      <img src={RESOURCE_ICONS[formData.type].logo!} alt={formData.type} className="w-4 h-4" />
+                      <img src={RESOURCE_ICONS[formData.type].logo!} alt={formData.type} className="w-4 h-4" referrerPolicy="no-referrer" />
                     ) : (
                       <ExternalLink size={14} className={RESOURCE_ICONS[formData.type].color} />
                     )}
@@ -177,7 +177,7 @@ export function AddResourceModal({
                   title={RESOURCE_ICONS[type].label}
                 >
                   {RESOURCE_ICONS[type].logo ? (
-                    <img src={RESOURCE_ICONS[type].logo!} alt={type} className="w-5 h-5" />
+                    <img src={RESOURCE_ICONS[type].logo!} alt={type} className="w-5 h-5" referrerPolicy="no-referrer" />
                   ) : (
                     <LinkIcon size={16} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
                   )}

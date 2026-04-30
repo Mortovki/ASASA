@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Star, ChevronDown, ChevronRight, Filter, User, AlertTriangle, Plus, Send, Loader2 } from 'lucide-react';
+import { Star, ChevronDown, ChevronRight, Filter, User, AlertTriangle, Plus, Send, Loader2, MapPin } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
 import TaskSidePanel from './TaskSidePanel';
@@ -20,6 +20,7 @@ const SprintTable = ({
   students,
   updateTaskStatus,
   updateTaskField,
+  updateTaskFields,
   deleteTask,
   addTask,
   permissions,
@@ -53,7 +54,6 @@ const SprintTable = ({
     }
     try {
       await updateTaskField(taskId, 'priority', priority, oldPriority);
-      toast.success('Prioridad actualizada');
     } catch (error) {
       console.error("Error updating priority:", error);
       toast.error('Error al actualizar prioridad');
@@ -81,7 +81,7 @@ const SprintTable = ({
         projectId,
         priority: 3,
         effort: 1,
-        type: 'feature',
+        type: 'LEVANTAMIENTO',
         assignedTo: isUser ? currentUser?.uid : '',
         startDate: stage?.startDate || new Date().toISOString(),
         endDate: stage?.endDate || new Date(Date.now() + 86400000).toISOString(),
@@ -106,7 +106,12 @@ const SprintTable = ({
   const filteredTasks = useMemo(() => {
     return cpmTasks.filter((t: any) => {
       if (t.status === 'pending_approval' || t.status === 'rejected') return false;
-      if (filterUser && t.assignedTo !== filterUser) return false;
+      
+      if (filterUser) {
+        const uids = t.assignedUsers || (t.assignedTo ? [t.assignedTo] : []);
+        if (!uids.includes(filterUser)) return false;
+      }
+      
       if (filterStatus && t.status !== filterStatus) return false;
       return true;
     });
@@ -168,9 +173,19 @@ const SprintTable = ({
         } border-y border-r ${
           isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'
         }`}
+        style={task.color ? { borderLeftColor: task.color } : {}}
       >
         <div className="flex justify-between items-start mb-2">
-          <StatusBadge status={task.status} size="sm" />
+          <div className="flex gap-1.5 flex-wrap">
+            <StatusBadge status={task.status} size="sm" />
+            {task.isMilestone && (
+              <span className={`flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-md ${
+                isDarkMode ? 'bg-amber-400/10 text-amber-400' : 'bg-amber-50 text-amber-600'
+              }`} title="Hito">
+                <MapPin size={10} /> HITO
+              </span>
+            )}
+          </div>
           {renderStars(task.id, task.priority || 3)}
         </div>
         <div className="flex items-center gap-2 mb-1">
@@ -511,10 +526,17 @@ const SprintTable = ({
                         >
                           <td className="p-4 relative">
                             {/* Status Indicator Bar */}
-                            <div className={`absolute left-0 top-0 bottom-0 w-1 ${task.isCritical ? 'bg-red-500' : borderColor}`} />
+                            <div className={`absolute left-0 top-0 bottom-0 w-1 ${task.isCritical ? 'bg-red-500' : borderColor}`} style={task.color ? { backgroundColor: task.color } : {}} />
                             
                             <div className="flex items-center gap-2">
                               <div className={`font-bold text-sm ${textColor}`}>{task.title}</div>
+                              {task.isMilestone && (
+                                <span className={`flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-md ${
+                                  isDarkMode ? 'bg-amber-400/10 text-amber-400' : 'bg-amber-50 text-amber-600'
+                                }`} title="Hito">
+                                  <MapPin size={10} /> HITO
+                                </span>
+                              )}
                               {task.isCritical && (
                                 <span className={`flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-md ${
                                   isDarkMode ? 'bg-red-500/20 text-red-400' : 'bg-red-50 text-red-600'
@@ -527,35 +549,24 @@ const SprintTable = ({
                           </td>
                           <td className="p-4" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-2">
-                              <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${
-                                isDarkMode ? 'bg-white/10 text-white' : 'bg-slate-200 text-slate-600'
-                              }`}>
-                                {assignedStudent ? `${assignedStudent.firstName.charAt(0)}${assignedStudent.lastNamePaterno.charAt(0)}` : '?'}
-                              </div>
-                              <select
-                                value={task.assignedTo || ''}
-                                onChange={async (e) => {
-                                  if (!permissions.canEditTask) return;
-                                  const newUserId = e.target.value;
-                                  try {
-                                    await updateTaskField(task.id, 'assignedTo', newUserId, task.assignedTo);
-                                    toast.success('Responsable actualizado');
-                                  } catch (error) {
-                                    toast.error('Error al actualizar responsable');
-                                  }
-                                }}
-                                disabled={!permissions.canEditTask}
-                                className={`bg-transparent border-none text-sm font-semibold outline-none focus:ring-0 cursor-pointer transition-colors ${
-                                  isDarkMode ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-indigo-600'
-                                }`}
-                              >
-                                <option value="" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Sin asignar</option>
-                                {students.map((s: any) => (
-                                  <option key={s.id} value={s.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>
-                                    {formatName(s.firstName, s.lastNamePaterno)}
-                                  </option>
-                                ))}
-                              </select>
+                              {(() => {
+                                const uids = task.assignedUsers || (task.assignedTo ? [task.assignedTo] : []);
+                                const firstUid = uids[0];
+                                const assignedStudent = students.find((s: any) => s.id === firstUid);
+                                return (
+                                  <div className="flex items-center gap-2">
+                                    <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${
+                                      isDarkMode ? 'bg-white/10 text-white' : 'bg-slate-200 text-slate-600'
+                                    }`}>
+                                      {assignedStudent ? `${assignedStudent.firstName.charAt(0)}${assignedStudent.lastNamePaterno.charAt(0)}` : '?'}
+                                    </div>
+                                    <span className={`text-xs font-semibold ${isDarkMode ? 'text-gray-400' : 'text-slate-600'}`}>
+                                      {assignedStudent ? formatName(assignedStudent.firstName, assignedStudent.lastNamePaterno) : 'Sin asignar'}
+                                      {uids.length > 1 && <span className="ml-1 text-indigo-500">+{uids.length - 1}</span>}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           </td>
                           <td className="p-4" onClick={e => e.stopPropagation()}>
@@ -566,7 +577,6 @@ const SprintTable = ({
                                 const newStatus = e.target.value;
                                 try {
                                   await updateTaskStatus(task.id, newStatus, task.status);
-                                  toast.success('Estado actualizado');
                                 } catch (error) {
                                   toast.error('Error al actualizar estado');
                                 }
@@ -590,26 +600,33 @@ const SprintTable = ({
                           </td>
                           <td className="p-4" onClick={e => e.stopPropagation()}>
                             <select
-                              value={task.type || 'feature'}
+                              value={task.type || 'LEVANTAMIENTO'}
                               onChange={async (e) => {
                                 if (!permissions.canEditTask) return;
                                 const newType = e.target.value;
                                 try {
                                   await updateTaskField(task.id, 'type', newType, task.type);
-                                  toast.success('Tipo actualizado');
                                 } catch (error) {
                                   toast.error('Error al actualizar tipo');
                                 }
                               }}
                               disabled={!permissions.canEditTask}
-                              className={`bg-transparent border-none text-xs font-bold capitalize outline-none focus:ring-0 cursor-pointer transition-colors ${
+                              className={`bg-transparent border-none text-[10px] font-black uppercase outline-none focus:ring-0 cursor-pointer transition-colors max-w-[120px] truncate ${
                                 isDarkMode ? 'text-gray-500 hover:text-white' : 'text-slate-500 hover:text-indigo-600'
                               }`}
                             >
-                              <option value="feature" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Feature</option>
-                              <option value="bug" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Bug</option>
-                              <option value="chore" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Chore</option>
-                              <option value="documentation" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Doc</option>
+                              {[
+                                'LEVANTAMIENTO',
+                                'DIAGNÓSTICO',
+                                'SOCIAL / TALLER',
+                                'REUNIÓN / COORDINACIÓN',
+                                'DISEÑO / MODELADO',
+                                'PLANOS EJECUTIVOS',
+                                'COSTOS Y PRESUPUESTO',
+                                'REVISIÓN / ENTREGA'
+                              ].map(t => (
+                                <option key={t} value={t} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{t}</option>
+                              ))}
                             </select>
                           </td>
                           <td className={`p-4 text-sm font-bold ${isDarkMode ? 'text-gray-400' : 'text-slate-700'}`}>{task.effort || 0}</td>
@@ -671,7 +688,7 @@ const SprintTable = ({
                           </div>
                         </td>
                         <td className="p-4">
-                          <span className={`text-xs font-bold ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>feature</span>
+                          <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>LEVANTAMIENTO</span>
                         </td>
                         <td className={`p-4 text-sm font-bold ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>1</td>
                         <td className={`p-4 text-sm font-bold ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>1</td>
@@ -704,6 +721,7 @@ const SprintTable = ({
             students={students}
             updateTaskStatus={updateTaskStatus}
             updateTaskField={updateTaskField}
+            updateTaskFields={updateTaskFields}
             deleteTask={deleteTask}
             isDarkMode={isDarkMode}
           />

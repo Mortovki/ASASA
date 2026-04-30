@@ -21,7 +21,34 @@ import { useNotifications } from './hooks/useNotifications';
 import { useBreakpoint } from './hooks/useBreakpoint';
 import { motion, AnimatePresence } from 'motion/react';
 import { ConfirmModal } from './components/ui/ConfirmModal';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Label } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Label, LabelList } from 'recharts';
+
+const CustomXAxisTick = ({ x, y, payload, isDarkMode, isMobile }: any) => {
+  if (!payload || !payload.value) return null;
+  const value = String(payload.value);
+
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text 
+        x={0} 
+        y={0} 
+        dy={6}
+        dx={-6}
+        textAnchor="end" 
+        transform="rotate(-45)"
+        fill={isDarkMode ? '#888' : '#64748b'} 
+        style={{
+          fontSize: isMobile ? '7px' : '9px', 
+          fontWeight: '500', 
+          textTransform: 'uppercase', 
+          letterSpacing: '0.025em'
+        }}
+      >
+        {value.length > 25 ? value.substring(0, 22) + '...' : value}
+      </text>
+    </g>
+  );
+};
 import { showSuccessToast, showErrorToast, showLoadingToast, showConfirmToast } from './utils/toastUtils';
 
 import { ProfileSkillMap } from './components/ProfileSkillMap';
@@ -33,7 +60,7 @@ import { PREDEFINED_SKILLS } from './constants/skills';
 import { notifyProjectAssigned } from './services/notificationService';
 
 const TOTAL_REQUIRED_HOURS = 480;
-const SUPER_ADMIN_EMAILS = ["luisedgar.gutierrez17@gmail.com", "luisedgar.gutierrez1@gmail.com"];
+const SUPER_ADMIN_EMAILS = ["luisedgar.gutierrez17@gmail.com", "luisedgar.gutierrez1@gmail.com", "mortovki@gmail.com"];
 
 class ErrorBoundary extends React.Component<any, any> {
   state: { hasError: boolean, error: any };
@@ -513,9 +540,8 @@ const Sidebar = ({
         </div>
 
         <div className={`p-4 border-t ${isDarkMode ? 'border-white/5' : 'border-slate-800'} ${isRail && !isExpanded ? 'flex flex-col items-center' : ''}`}>
-          <button 
-            onClick={() => { onOpenProfile(); if (isRail) setIsExpanded(false); if (isMobile) setIsMobileMenuOpen(false); }}
-            className={`w-full flex items-center gap-3 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all group ${isRail && !isExpanded ? 'justify-center' : ''}`}
+          <div 
+            className={`w-full flex items-center gap-3 p-2 rounded-xl text-slate-400 group ${isRail && !isExpanded ? 'justify-center' : ''}`}
           >
             <div className="w-8 h-8 rounded-lg bg-indigo-500 flex items-center justify-center text-white font-black text-xs flex-shrink-0 relative">
               {user?.displayName?.charAt(0) || 'U'}
@@ -524,10 +550,21 @@ const Sidebar = ({
             {(!isRail || isExpanded) && (
               <div className="flex-1 text-left min-w-0">
                 <p className="text-xs font-bold truncate">{user?.displayName || 'Usuario'}</p>
-                <p className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>{userRole}</p>
+                <div className="flex items-center gap-2">
+                  <p className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>{userRole}</p>
+                  {userRole !== 'user' && (
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); onOpenProfile(); if (isRail) setIsExpanded(false); if (isMobile) setIsMobileMenuOpen(false); }}
+                      className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                      title="Editar Perfil"
+                    >
+                      <Edit2 size={10} />
+                    </button>
+                  )}
+                </div>
               </div>
             )}
-          </button>
+          </div>
           
           {isRail && !isExpanded && (
             <button 
@@ -1405,44 +1442,31 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                         <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-widest truncate">{collab.career}</p>
                       </div>
                       
-                      {commonProjects.length > 0 && collab.role !== 'coordinator' && collab.role !== 'admin' && (
-                        <div className="flex flex-wrap gap-1">
-                          {Array.from(new Set(commonProjects)).map((pid: string) => {
-                            const p = projects.find((proj: any) => proj.id === pid);
-                            return (
-                              <span 
-                                key={pid} 
-                                className="text-[8px] font-black px-2 py-0.5 rounded-full uppercase tracking-tighter"
-                                style={{ 
-                                  backgroundColor: `${p?.color || '#6366f1'}15`, 
-                                  color: p?.color || '#6366f1' 
-                                }}
-                              >
-                                {p?.name || pid}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
+                      <div className="space-y-2 pt-1">
+                        {collab.email && (
+                          <a href={`mailto:${collab.email}`} className="flex items-center gap-2 text-slate-500 group/link hover:text-indigo-600 transition-colors">
+                            <div className="p-1.5 bg-white border border-slate-100 rounded-lg shadow-sm group-hover/link:border-indigo-100 group-hover/link:bg-indigo-50/30 transition-all">
+                              <Mail size={12} className="text-indigo-500" />
+                            </div>
+                            <span className="text-[10px] sm:text-[11px] font-bold truncate">{collab.email}</span>
+                          </a>
+                        )}
+                        {collab.phone && (
+                          <a href={`tel:${collab.phone}`} className="flex items-center gap-2 text-slate-500 group/link hover:text-emerald-600 transition-colors">
+                            <div className="p-1.5 bg-white border border-slate-100 rounded-lg shadow-sm group-hover/link:border-emerald-100 group-hover/link:bg-emerald-50/30 transition-all">
+                              <Phone size={12} className="text-emerald-500" />
+                            </div>
+                            <span className="text-[10px] sm:text-[11px] font-bold truncate">{collab.phone}</span>
+                          </a>
+                        )}
+                      </div>
 
                       {latestRecord && (
-                        <div className="bg-white/50 p-2 sm:p-3 rounded-xl border border-slate-100 overflow-hidden">
+                        <div className="bg-white/50 p-2 sm:p-3 rounded-xl border border-slate-100 overflow-hidden mt-3">
                           <p className="text-[8px] sm:text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 truncate">Última Actividad</p>
                           <p className="text-[10px] sm:text-[11px] font-bold text-slate-600 line-clamp-1 italic break-words">"{latestRecord.description}"</p>
                         </div>
                       )}
-                      <div className="flex gap-3 pt-1">
-                        {collab.email && (
-                          <a href={`mailto:${collab.email}`} className="p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm">
-                            <Mail size={14} />
-                          </a>
-                        )}
-                        {collab.phone && (
-                          <a href={`tel:${collab.phone}`} className="p-2 bg-white border border-slate-200 rounded-lg text-slate-400 hover:text-emerald-600 hover:border-emerald-200 transition-all shadow-sm">
-                            <Phone size={14} />
-                          </a>
-                        )}
-                      </div>
                     </div>
                   </div>
                 );
@@ -2010,6 +2034,7 @@ const App = () => {
   }, [userProfile]);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null); // To identify the logged-in user
   const [calendarMode, setCalendarMode] = useState('grid');
+  const [calendarFilterAll, setCalendarFilterAll] = useState(true);
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
   const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
@@ -2025,6 +2050,7 @@ const App = () => {
   const [filterBrigade, setFilterBrigade] = useState('Todos');
   const [sortHours, setSortHours] = useState<'none' | 'asc' | 'desc'>('none');
   const [calendarDateFilter, setCalendarDateFilter] = useState('');
+  const [calendarStudentFilter, setCalendarStudentFilter] = useState('');
   const [studentPage, setStudentPage] = useState(1);
   const studentsPerPage = 10;
   const [sessionPage, setSessionPage] = useState(1);
@@ -2462,13 +2488,20 @@ const App = () => {
   const totalStudentPages = Math.ceil(filteredStudents.length / studentsPerPage);
 
   const allRecords = useMemo(() => {
-    let filtered = students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email));
-    if (userRole === 'user' && currentUserId) {
-      filtered = students.filter(s => s.id === currentUserId);
+    let base = studentsWithRecords.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email));
+    
+    // Si es un usuario normal O si el admin tiene activado el filtro personal
+    const isSpecialRole = userRole === 'admin' || userRole === 'coordinator';
+    if (userRole === 'user' || (isSpecialRole && !calendarFilterAll)) {
+      base = base.filter(s => s.id === (user?.uid || currentUserId));
+    } else if (isSpecialRole && calendarFilterAll && calendarStudentFilter) {
+      // Filtro específico por alumno (solo para admins en modo general)
+      base = base.filter(s => s.id === calendarStudentFilter);
     }
-    const flat = filtered.flatMap(s => (s.records || []).map((r: any) => ({ ...r, studentName: s.name, studentId: s.id })));
+    
+    const flat = base.flatMap(s => (s.records || []).map((r: any) => ({ ...r, studentName: s.name, studentId: s.id })));
     return dedupeById(flat);
-  }, [students, userRole, currentUserId]);
+  }, [studentsWithRecords, userRole, currentUserId, user?.uid, calendarFilterAll, calendarStudentFilter]);
 
   const paginatedSessions = useMemo(() => {
     if (!selectedStudent) return [];
@@ -2728,7 +2761,10 @@ const App = () => {
             skills: updatedData.skills,
             status: updatedData.status,
             role: updatedData.role,
-            uid: updatedData.uid
+            uid: updatedData.uid,
+            email: updatedData.email,
+            phone: updatedData.phone,
+            projectIds: updatedData.projectIds || []
           };
           await setDoc(doc(db, 'public_profiles', selectedStudentId!), publicProfile, { merge: true });
 
@@ -2785,7 +2821,10 @@ const App = () => {
             skills: newStudentData.skills,
             status: newStudentData.status,
             role: newStudentData.role,
-            uid: newStudentData.uid
+            uid: newStudentData.uid,
+            email: newStudentData.email,
+            phone: newStudentData.phone,
+            projectIds: newStudentData.projectIds || []
           };
           await setDoc(doc(db, 'public_profiles', newId), publicProfile);
 
@@ -2806,6 +2845,7 @@ const App = () => {
       const sessionRef = doc(db, 'sesiones', recordId);
       await updateDoc(sessionRef, {
         estado: 'aprobado',
+        status: 'A',
         updatedBy: user.uid
       });
       showSuccessToast("Registro aprobado");
@@ -2899,13 +2939,55 @@ const App = () => {
     try {
       const batch = writeBatch(db);
       selectedRecords.forEach(recordId => {
-        batch.update(doc(db, 'sesiones', recordId), { projectId });
+        batch.update(doc(db, 'sesiones', recordId), { projectId, updatedBy: auth.currentUser?.uid });
       });
       await batch.commit();
       setSelectedRecords([]);
       showSuccessToast("Proyecto asignado a sesiones");
     } catch (error) {
       console.error("Error asignando proyecto:", error);
+      handleFirestoreError(error, OperationType.UPDATE, 'sesiones');
+    } finally {
+      toast.dismiss(loadingToast);
+    }
+  };
+
+  const handleUpdateValidationSelected = async (newEstado: string) => {
+    if (selectedRecords.length === 0) return;
+    const loadingToast = showLoadingToast("Actualizando validación...");
+    try {
+      const batch = writeBatch(db);
+      selectedRecords.forEach(recordId => {
+        const updateData: any = { estado: newEstado, updatedBy: auth.currentUser?.uid };
+        if (newEstado === 'aprobado') {
+          updateData.status = 'A';
+        }
+        batch.update(doc(db, 'sesiones', recordId), updateData);
+      });
+      await batch.commit();
+      setSelectedRecords([]);
+      showSuccessToast("Validación actualizada");
+    } catch (error) {
+      console.error("Error actualizando validación:", error);
+      handleFirestoreError(error, OperationType.UPDATE, 'sesiones');
+    } finally {
+      toast.dismiss(loadingToast);
+    }
+  };
+
+  const handleUpdateAttendanceSelected = async (newStatus: string) => {
+    if (selectedRecords.length === 0) return;
+    const loadingToast = showLoadingToast("Actualizando asistencia...");
+    try {
+      const batch = writeBatch(db);
+      selectedRecords.forEach(recordId => {
+        batch.update(doc(db, 'sesiones', recordId), { status: newStatus, updatedBy: auth.currentUser?.uid });
+      });
+      await batch.commit();
+      setSelectedRecords([]);
+      showSuccessToast("Asistencia actualizada");
+    } catch (error) {
+      console.error("Error actualizando asistencia:", error);
       handleFirestoreError(error, OperationType.UPDATE, 'sesiones');
     } finally {
       toast.dismiss(loadingToast);
@@ -3223,24 +3305,24 @@ const App = () => {
       <div className="space-y-8">
         <div className="grid grid-cols-1 gap-4 sm:gap-6">
           <div className="space-y-1">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Fecha</label>
-            <input type="date" max={getCDMXDateString()} required className="w-full p-3 sm:p-4 border border-slate-200 rounded-2xl bg-white text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" value={activityForm.date || ''} onChange={e => setActivityForm({...activityForm, date: e.target.value})} />
+            <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Fecha</label>
+            <input type="date" max={getCDMXDateString()} required className={`w-full p-3 sm:p-4 border rounded-2xl text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`} value={activityForm.date || ''} onChange={e => setActivityForm({...activityForm, date: e.target.value})} />
           </div>
           {!activityForm.isManualHours ? (
             <>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Entrada</label>
-                <input type="text" placeholder="HH:MM" maxLength={5} className="w-full p-3 sm:p-4 border border-slate-200 rounded-2xl bg-white text-sm font-black text-center focus:ring-2 focus:ring-indigo-500 outline-none" value={activityForm.startTime || ''} onChange={e => setActivityForm({...activityForm, startTime: e.target.value})} />
+                <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Entrada</label>
+                <input type="text" placeholder="HH:MM" maxLength={5} className={`w-full p-3 sm:p-4 border rounded-2xl text-sm font-black text-center focus:ring-2 focus:ring-indigo-500 outline-none ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`} value={activityForm.startTime || ''} onChange={e => setActivityForm({...activityForm, startTime: e.target.value})} />
               </div>
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Salida</label>
-                <input type="text" placeholder="HH:MM" maxLength={5} className="w-full p-3 sm:p-4 border border-slate-200 rounded-2xl bg-white text-sm font-black text-center focus:ring-2 focus:ring-indigo-500 outline-none" value={activityForm.endTime || ''} onChange={e => setActivityForm({...activityForm, endTime: e.target.value})} />
+                <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Salida</label>
+                <input type="text" placeholder="HH:MM" maxLength={5} className={`w-full p-3 sm:p-4 border rounded-2xl text-sm font-black text-center focus:ring-2 focus:ring-indigo-500 outline-none ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`} value={activityForm.endTime || ''} onChange={e => setActivityForm({...activityForm, endTime: e.target.value})} />
               </div>
             </>
           ) : (
             <div className="space-y-1 lg:col-span-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Horas Acumuladas</label>
-              <input type="number" min="0" step="0.5" className="w-full p-3 sm:p-4 border border-slate-200 rounded-2xl bg-white text-sm font-black text-center focus:ring-2 focus:ring-indigo-500 outline-none" value={activityForm.hours || 0} onChange={e => setActivityForm({...activityForm, hours: Number(e.target.value)})} />
+              <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Horas Acumuladas</label>
+              <input type="number" min="0" step="0.5" className={`w-full p-3 sm:p-4 border rounded-2xl text-sm font-black text-center focus:ring-2 focus:ring-indigo-500 outline-none ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`} value={activityForm.hours || 0} onChange={e => setActivityForm({...activityForm, hours: Number(e.target.value)})} />
             </div>
           )}
         </div>
@@ -3260,59 +3342,59 @@ const App = () => {
 
         <div className="flex items-center gap-2">
           <input type="checkbox" id="manualHours" checked={activityForm.isManualHours} onChange={e => setActivityForm({...activityForm, isManualHours: e.target.checked, hours: e.target.checked ? 0 : activityForm.hours})} className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500" />
-          <label htmlFor="manualHours" className="text-xs font-bold text-slate-600 cursor-pointer">Registrar horas acumuladas / extra manualmente</label>
+          <label htmlFor="manualHours" className={`text-xs font-bold cursor-pointer ${isDarkMode ? 'text-gray-400' : 'text-slate-600'}`}>Registrar horas acumuladas / extra manualmente</label>
         </div>
 
         <div className="grid grid-cols-1 gap-8">
           {(!isGroup) && (
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Proyecto (Opcional)</label>
+              <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Proyecto (Opcional)</label>
               <div className="flex gap-3">
-                <select className="flex-1 p-4 border border-slate-200 rounded-2xl bg-white text-slate-900 text-sm font-bold" value={activityForm.projectId || ''} onChange={e => setActivityForm({...activityForm, projectId: e.target.value})}>
-                  <option value="">General / Sin especificar</option>
+                <select className={`flex-1 p-4 border rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`} value={activityForm.projectId || ''} onChange={e => setActivityForm({...activityForm, projectId: e.target.value})}>
+                  <option value="" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>General / Sin especificar</option>
                   {(() => {
                      const sId = activityForm.selectedStudentIds[0] || selectedStudentId;
                      const student = getStudentData(sId);
                      if (!student) return null;
                      return Array.from(new Set(student.projectIds || [])).map((pid: string) => {
                        const p = projects.find(pr => pr.id === pid);
-                       return <option key={pid} value={pid}>{p?.name}</option>;
+                       return <option key={pid} value={pid} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{p?.name}</option>;
                      });
                   })()}
                 </select>
                 {activityForm.projectId && (
                   <button type="button" onClick={() => {
                     setActivityForm(prev => ({ ...prev, projectId: '' }));
-                  }} className="p-4 bg-slate-100 rounded-2xl hover:bg-slate-200 text-slate-500"><X size={20}/></button>
+                  }} className={`p-4 rounded-2xl transition-all ${isDarkMode ? 'bg-white/5 hover:bg-white/10 text-gray-400' : 'bg-slate-100 hover:bg-slate-200 text-slate-500'}`}><X size={20}/></button>
                 )}
               </div>
             </div>
           )}
 
           <div className="space-y-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Categoría</label>
+            <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Categoría</label>
             {!showNewCatInput ? (
               <div className="flex gap-3">
-                <select className="flex-1 p-4 border border-slate-200 rounded-2xl bg-white text-slate-900 text-sm font-bold" value={activityForm.categoryId || ''} onChange={e => setActivityForm({...activityForm, categoryId: e.target.value})}>
-                  <option value="" disabled>Seleccionar categoría...</option>
-                  {categories.map(cat => <option key={cat.id} value={cat.id}>{cat.name}</option>)}
+                <select className={`flex-1 p-4 border rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`} value={activityForm.categoryId || ''} onChange={e => setActivityForm({...activityForm, categoryId: e.target.value})}>
+                  <option value="" disabled className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Seleccionar categoría...</option>
+                  {categories.map(cat => <option key={cat.id} value={cat.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{cat.name}</option>)}
                 </select>
-                <button type="button" onClick={() => setShowNewCatInput(true)} className="p-4 bg-slate-100 rounded-2xl hover:bg-slate-200 text-indigo-600"><Plus size={20}/></button>
+                <button type="button" onClick={() => setShowNewCatInput(true)} className={`p-4 rounded-2xl transition-all ${isDarkMode ? 'bg-white/5 hover:bg-white/10 text-indigo-400' : 'bg-slate-100 hover:bg-slate-200 text-indigo-600'}`}><Plus size={20}/></button>
               </div>
             ) : (
               <div className="flex gap-2">
-                <input type="text" className="flex-1 p-4 border rounded-2xl text-sm" value={newInlineCat.name} onChange={e => setNewInlineCat({...newInlineCat, name: e.target.value})} />
-                <button type="button" onClick={handleCreateInlineCat} className="px-4 bg-indigo-600 text-white rounded-2xl">Ok</button>
+                <input type="text" className={`flex-1 p-4 border rounded-2xl text-sm outline-none focus:ring-2 focus:ring-indigo-500 ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`} value={newInlineCat.name} onChange={e => setNewInlineCat({...newInlineCat, name: e.target.value})} />
+                <button type="button" onClick={handleCreateInlineCat} className="px-6 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-indigo-700 transition-all">Ok</button>
               </div>
             )}
           </div>
           
           {activityForm.categoryId && !isGroup && !isUser && (
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Asistencia</label>
+              <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Asistencia</label>
               <div className="grid grid-cols-4 gap-2">
                 {Object.keys(ATTENDANCE_STATUS).map(k => (
-                  <button key={k} type="button" onClick={() => setActivityForm({...activityForm, status: k})} className={`p-3 rounded-2xl text-[10px] font-black border-2 ${activityForm.status === k ? 'border-indigo-600 bg-indigo-50 text-indigo-700' : 'border-slate-100 bg-white text-slate-400'}`}>{k}</button>
+                  <button key={k} type="button" onClick={() => setActivityForm({...activityForm, status: k})} className={`p-3 rounded-2xl text-[10px] font-black border-2 transition-all ${activityForm.status === k ? (isDarkMode ? 'border-indigo-400 bg-indigo-500/20 text-indigo-400' : 'border-indigo-600 bg-indigo-50 text-indigo-700') : (isDarkMode ? 'border-white/5 bg-white/5 text-gray-500' : 'border-slate-100 bg-white text-slate-400')}`}>{k}</button>
                 ))}
               </div>
             </div>
@@ -3320,13 +3402,13 @@ const App = () => {
           
           {activityForm.categoryId && !isGroup && (
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Alumno</label>
-              <select className="w-full p-4 border border-slate-200 rounded-2xl bg-white text-slate-900 text-sm font-bold" value={activityForm.selectedStudentIds[0] || selectedStudentId || ''} onChange={e => {
+              <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Alumno</label>
+              <select className={`w-full p-4 border rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`} value={activityForm.selectedStudentIds[0] || selectedStudentId || ''} onChange={e => {
                 setActivityForm({...activityForm, selectedStudentIds: [e.target.value]});
                 setSelectedStudentId(e.target.value);
               }}>
-                <option value="">Seleccionar Alumno</option>
-                {students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email)).map((s, idx) => <option key={`${s.id || 'student'}-${idx}`} value={s.id}>{s.name}</option>)}
+                <option value="" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Seleccionar Alumno</option>
+                {students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email)).map((s, idx) => <option key={`${s.id || 'student'}-${idx}`} value={s.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{s.name}</option>)}
               </select>
             </div>
           )}
@@ -3334,13 +3416,13 @@ const App = () => {
 
         {activityForm.categoryId && isGroup && (
           <div className="space-y-4">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Participantes</label>
-            <div className="grid grid-cols-1 gap-4 p-6 bg-slate-50 rounded-[2rem] border max-h-[300px] overflow-y-auto">
+            <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Participantes</label>
+            <div className={`grid grid-cols-1 gap-4 p-6 rounded-[2rem] border max-h-[300px] overflow-y-auto ${isDarkMode ? 'bg-white/2 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
               {students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email)).map((s, idx) => {
                 const isSelected = activityForm.selectedStudentIds.includes(s.id);
                 const sStatus = activityForm.studentStatuses[s.id] || 'A';
                 return (
-                  <div key={`${s.id || 'student'}-${idx}`} className={`p-4 rounded-xl border-2 ${isSelected ? 'bg-white border-emerald-500' : 'bg-transparent border-transparent'}`}>
+                  <div key={`${s.id || 'student'}-${idx}`} className={`p-4 rounded-xl border-2 transition-all ${isSelected ? (isDarkMode ? 'bg-white/10 border-emerald-500/50' : 'bg-white border-emerald-500') : 'bg-transparent border-transparent'}`}>
                     <label className="flex items-center gap-3 cursor-pointer">
                       <input type="checkbox" checked={isSelected} onChange={e => {
                         const checked = e.target.checked;
@@ -3348,13 +3430,13 @@ const App = () => {
                         const newStatuses = { ...activityForm.studentStatuses };
                         if (checked) newStatuses[s.id] = 'A'; else delete newStatuses[s.id];
                         setActivityForm({...activityForm, selectedStudentIds: ids, studentStatuses: newStatuses});
-                      }} />
-                      <span className="text-sm font-bold">{s.name}</span>
+                      }} className="w-4 h-4 text-emerald-500 rounded focus:ring-emerald-500" />
+                      <span className={`text-sm font-bold ${isDarkMode ? (isSelected ? 'text-white' : 'text-gray-400') : (isSelected ? 'text-slate-900' : 'text-slate-600')}`}>{s.name}</span>
                     </label>
                     {isSelected && (
-                      <div className="flex gap-1 mt-2">
+                      <div className="flex gap-1 mt-3">
                         {Object.keys(ATTENDANCE_STATUS).map(k => (
-                          <button key={k} type="button" onClick={() => setActivityForm(prev => ({...prev, studentStatuses: {...prev.studentStatuses, [s.id]: k}}))} className={`text-[9px] font-black p-1 border rounded flex-1 ${sStatus === k ? 'bg-indigo-600 text-white' : 'bg-white text-slate-400'}`}>{k}</button>
+                          <button key={k} type="button" onClick={() => setActivityForm(prev => ({...prev, studentStatuses: {...prev.studentStatuses, [s.id]: k}}))} className={`text-[9px] font-black p-1 to-t border rounded flex-1 transition-all ${sStatus === k ? 'bg-indigo-600 border-indigo-600 text-white' : (isDarkMode ? 'bg-white/5 border-white/10 text-gray-500 hover:bg-white/10' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50')}`}>{k}</button>
                         ))}
                       </div>
                     )}
@@ -3368,17 +3450,51 @@ const App = () => {
         {activityForm.categoryId && (
           <div className="space-y-6">
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Evidencia</label>
-              <input type="url" disabled={isAbsence} placeholder="Link..." className="w-full p-4 border rounded-2xl" value={activityForm.evidenceLink || ''} onChange={e => setActivityForm({...activityForm, evidenceLink: e.target.value})} />
+              <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Evidencia</label>
+              <input type="url" disabled={isAbsence} placeholder="Link de evidencia (Drive, OneDrive, etc)..." className={`w-full p-4 border rounded-2xl text-sm transition-all focus:ring-2 focus:ring-indigo-500 outline-none ${isDarkMode ? 'bg-white/5 border-white/10 text-white disabled:opacity-30' : 'bg-white border-slate-200 text-slate-900 disabled:bg-slate-50'}`} value={activityForm.evidenceLink || ''} onChange={e => setActivityForm({...activityForm, evidenceLink: e.target.value})} />
             </div>
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Descripción</label>
-              <textarea disabled={isAbsence} className="w-full p-5 border rounded-2xl h-32" value={activityForm.description || ''} onChange={e => setActivityForm({...activityForm, description: e.target.value})}></textarea>
+              <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Descripción de actividades</label>
+              <textarea disabled={isAbsence} className={`w-full p-5 border rounded-2xl h-32 text-sm transition-all focus:ring-2 focus:ring-indigo-500 outline-none ${isDarkMode ? 'bg-white/5 border-white/10 text-white disabled:opacity-30' : 'bg-white border-slate-200 text-slate-900 disabled:bg-slate-50'}`} value={activityForm.description || ''} onChange={e => setActivityForm({...activityForm, description: e.target.value})}></textarea>
             </div>
           </div>
         )}
       </div>
     );
+  };
+
+  const handleSyncPublicProfiles = async () => {
+    const loadingToast = showLoadingToast("Sincronizando perfiles públicos...");
+    try {
+      let syncCount = 0;
+      for (const student of students) {
+        if (!student.id) continue;
+        
+        // Skip super admins if needed, or sync everyone
+        const publicProfile = {
+          firstName: student.firstName || '',
+          lastNamePaterno: student.lastNamePaterno || '',
+          lastNameMaterno: student.lastNameMaterno || '',
+          career: student.career || 'Arquitectura',
+          skills: student.skills || [],
+          status: student.status || 'En Curso',
+          role: student.role || 'user',
+          uid: student.id,
+          email: student.email || '',
+          phone: student.phone || '',
+          projectIds: student.projectIds || []
+        };
+        
+        await setDoc(doc(db, 'public_profiles', student.id), publicProfile, { merge: true });
+        syncCount++;
+      }
+      toast.dismiss(loadingToast);
+      showSuccessToast(`Se sincronizaron ${syncCount} perfiles públicos`);
+    } catch (error) {
+      toast.dismiss(loadingToast);
+      console.error("Error syncing public profiles:", error);
+      showErrorToast("Error al sincronizar perfiles");
+    }
   };
 
   const handleDeleteStudent = (studentId: string) => {
@@ -3458,7 +3574,10 @@ const App = () => {
         skills: updatedProfile.skills,
         status: updatedProfile.status,
         role: updatedProfile.role,
-        uid: updatedProfile.uid
+        uid: updatedProfile.uid,
+        email: updatedProfile.email,
+        phone: updatedProfile.phone,
+        projectIds: updatedProfile.projectIds || []
       };
       await setDoc(doc(db, 'public_profiles', user.uid), publicProfile, { merge: true });
       
@@ -3488,7 +3607,10 @@ const App = () => {
         skills: updatedProfile.skills,
         status: updatedProfile.status,
         role: updatedProfile.role,
-        uid: updatedProfile.uid
+        uid: updatedProfile.uid,
+        email: updatedProfile.email,
+        phone: updatedProfile.phone,
+        projectIds: updatedProfile.projectIds || []
       };
       await setDoc(doc(db, 'public_profiles', user.uid), publicProfile, { merge: true });
       
@@ -3701,30 +3823,32 @@ const App = () => {
                         exit={{ opacity: 0, y: 10, scale: 0.95 }}
                         className="absolute right-0 mt-2 w-48 bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden z-50"
                       >
-                        <button 
-                          onClick={() => {
-                            setIsProfileMenuOpen(false);
-                            setEditingProfileForm({
-                              ...userProfile,
-                              firstName: userProfile.firstName || '',
-                              lastNamePaterno: userProfile.lastNamePaterno || '',
-                              lastNameMaterno: userProfile.lastNameMaterno || '',
-                              email: userProfile.email || '',
-                              phone: userProfile.phone || '',
-                              emergencyPhone: userProfile.emergencyPhone || '',
-                              skills: userProfile.skills || [],
-                              skillRatings: userProfile.skillRatings || [],
-                              brigadePeriod: userProfile.brigadePeriod || '',
-                              studentId: userProfile.studentId || '',
-                              career: userProfile.career || '',
-                              status: userProfile.status || 'En Curso',
-                            });
-                            setShowProfileModal(true);
-                          }}
-                          className="w-full text-left px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-indigo-600 transition-colors flex items-center gap-2"
-                        >
-                          <User size={16} /> Mi Perfil
-                        </button>
+                        {userRole !== 'user' && (
+                          <button 
+                            onClick={() => {
+                              setIsProfileMenuOpen(false);
+                              setEditingProfileForm({
+                                ...userProfile,
+                                firstName: userProfile.firstName || '',
+                                lastNamePaterno: userProfile.lastNamePaterno || '',
+                                lastNameMaterno: userProfile.lastNameMaterno || '',
+                                email: userProfile.email || '',
+                                phone: userProfile.phone || '',
+                                emergencyPhone: userProfile.emergencyPhone || '',
+                                skills: userProfile.skills || [],
+                                skillRatings: userProfile.skillRatings || [],
+                                brigadePeriod: userProfile.brigadePeriod || '',
+                                studentId: userProfile.studentId || '',
+                                career: userProfile.career || '',
+                                status: userProfile.status || 'En Curso',
+                              });
+                              setShowProfileModal(true);
+                            }}
+                            className="w-full text-left px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-indigo-600 transition-colors flex items-center gap-2"
+                          >
+                            <User size={16} /> Mi Perfil
+                          </button>
+                        )}
                         <button 
                           onClick={() => {
                             setIsProfileMenuOpen(false);
@@ -3854,11 +3978,12 @@ const App = () => {
                 </div>
                 <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 w-full sm:w-auto">
                   <button onClick={() => { setSelectedProjectId(null); setView('project-directory'); }} className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-sm transition-all active:scale-95 ${isDarkMode ? 'bg-white/5 text-white hover:bg-white/10' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}><Briefcase size={18} /> Directorio</button>
-                  {userRole === 'admin' && (
+                  {(userRole === 'admin' || userRole === 'coordinator') && (
                     <>
                       <button onClick={() => { setShowBulkProjectAssign(true); setSelectedStudentsForBulk([]); setSelectedProjectsForBulk([]); }} className="w-full sm:w-auto bg-amber-500 text-white px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:bg-amber-600 transition-all active:scale-95"><Folder size={18} /> Asignar</button>
                       <button onClick={() => { setActivityForm(prev => ({...prev, selectedStudentIds: []})); setView('individual-activity'); }} className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-sm transition-all active:scale-95 ${isDarkMode ? 'bg-white/5 border-white/10 text-white hover:bg-white/10' : 'bg-white border-2 sm:border-4 border-slate-100 text-slate-700 hover:bg-slate-50'}`}><PlusCircle size={18} className="text-indigo-500" /> Individual</button>
                       <button onClick={() => setView('group-activity')} className="w-full sm:w-auto bg-emerald-600 text-white px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-emerald-600/20 hover:bg-emerald-700 transition-all active:scale-95"><Users size={18} /> Grupal</button>
+                      <button onClick={handleSyncPublicProfiles} className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-sm transition-all active:scale-95 ${isDarkMode ? 'bg-white/5 border-white/10 text-white hover:bg-white/10' : 'bg-white border-2 border-indigo-100 text-indigo-600 hover:bg-indigo-50'}`}><RefreshCw size={18} /> Sincronizar</button>
                       <button onClick={() => { setShowEditStudent(false); setStudentForm({ firstName: '', lastNamePaterno: '', lastNameMaterno: '', studentId: '', serviceType: 'Prestador', nickname: '', phone: '', emergencyPhone: '', email: '', brigadePeriod: '', brigade: '', skills: [], skillRatings: [], career: 'Arquitectura', status: 'En Curso', workStatus: 'Sin asignar', projectIds: [], projectTasks: {}, projectTaskHistory: {}, role: 'user' }); setStudentFormErrors({}); setShowAddStudent(true); }} className="w-full sm:w-auto bg-indigo-600 text-white px-6 py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-indigo-600/30 hover:bg-indigo-700 transition-all active:scale-95"><UserPlus size={18} /> Alumno</button>
                     </>
                   )}
@@ -3881,44 +4006,44 @@ const App = () => {
                   <div className="space-y-1 sm:space-y-2">
                     <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Proyecto</span>
                     <select className={`w-full px-3 py-2 sm:px-4 sm:py-3 rounded-lg sm:rounded-[1.2rem] border text-[9px] sm:text-[10px] font-black uppercase outline-none transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white'}`} value={filterProject} onChange={e => setFilterProject(e.target.value)}>
-                      <option value="Todos">TODOS</option>
-                      {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODOS</option>
+                      {projects.map(p => <option key={p.id} value={p.id} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{p.name}</option>)}
                     </select>
                   </div>
                   <div className="space-y-1 sm:space-y-2">
                     <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Carrera</span>
                     <select className={`w-full px-3 py-2 sm:px-4 sm:py-3 rounded-lg sm:rounded-[1.2rem] border text-[9px] sm:text-[10px] font-black uppercase outline-none transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white'}`} value={filterCareer} onChange={e => setFilterCareer(e.target.value)}>
-                      <option value="Todos">TODAS</option>
-                      {uniqueCareers.map(c => <option key={c} value={c}>{c}</option>)}
+                      <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODAS</option>
+                      {uniqueCareers.map(c => <option key={c} value={c} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{c}</option>)}
                     </select>
                   </div>
                   <div className="space-y-1 sm:space-y-2">
                     <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Brigada</span>
                     <select className={`w-full px-3 py-2 sm:px-4 sm:py-3 rounded-lg sm:rounded-[1.2rem] border text-[9px] sm:text-[10px] font-black uppercase outline-none transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white'}`} value={filterBrigade} onChange={e => setFilterBrigade(e.target.value)}>
-                      <option value="Todos">TODAS</option>
-                      {uniqueBrigades.map(b => <option key={b} value={b}>{b}</option>)}
+                      <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODAS</option>
+                      {uniqueBrigades.map(b => <option key={b} value={b} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{b}</option>)}
                     </select>
                   </div>
                   <div className="space-y-1 sm:space-y-2">
                     <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Estatus Acad.</span>
                     <select className={`w-full px-3 py-2 sm:px-4 sm:py-3 rounded-lg sm:rounded-[1.2rem] border text-[9px] sm:text-[10px] font-black uppercase outline-none transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white'}`} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-                      <option value="Todos">TODOS</option>
-                      {Object.keys(STUDENT_STATUS).map(s => <option key={s} value={s}>{s}</option>)}
+                      <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODOS</option>
+                      {Object.keys(STUDENT_STATUS).map(s => <option key={s} value={s} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{s}</option>)}
                     </select>
                   </div>
                   <div className="space-y-1 sm:space-y-2">
                     <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Carga Trabajo</span>
                     <select className={`w-full px-3 py-2 sm:px-4 sm:py-3 rounded-lg sm:rounded-[1.2rem] border text-[9px] sm:text-[10px] font-black uppercase outline-none transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white'}`} value={filterWork} onChange={e => setFilterWork(e.target.value)}>
-                      <option value="Todos">TODOS</option>
-                      {Object.keys(WORK_STATUS).map(w => <option key={w} value={w}>{w}</option>)}
+                      <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODOS</option>
+                      {Object.keys(WORK_STATUS).map(w => <option key={w} value={w} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{w}</option>)}
                     </select>
                   </div>
                   <div className="space-y-1 sm:space-y-2">
                     <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Ordenar</span>
                     <select className={`w-full px-3 py-2 sm:px-4 sm:py-3 rounded-lg sm:rounded-[1.2rem] border text-[9px] sm:text-[10px] font-black uppercase outline-none transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white'}`} value={sortHours} onChange={e => setSortHours(e.target.value as any)}>
-                      <option value="none">SIN ORDENAR</option>
-                      <option value="desc">MAYOR HORAS</option>
-                      <option value="asc">MENOR HORAS</option>
+                      <option value="none" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>SIN ORDENAR</option>
+                      <option value="desc" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>MAYOR HORAS</option>
+                      <option value="asc" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>MENOR HORAS</option>
                     </select>
                   </div>
                 </div>
@@ -4008,19 +4133,20 @@ const App = () => {
                 <div className={`p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
                   <h3 className={`text-lg sm:text-xl font-black tracking-tight mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Horas por Proyecto</h3>
                   {isLoadingStudents ? (
-                    <div className={`h-48 sm:h-64 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
+                    <div className={`h-64 sm:h-80 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                   ) : (
-                    <div className="h-48 sm:h-64 w-full">
+                    <div className="h-64 sm:h-80 w-full">
                       <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                        <BarChart data={chartData.projectChartData}>
+                        <BarChart data={chartData.projectChartData} margin={{ bottom: 40 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#333' : '#e2e8f0'} />
-                          <XAxis dataKey="name" tick={{fontSize: 8, fill: isDarkMode ? '#666' : '#64748b'}} axisLine={false} tickLine={false} />
+                          <XAxis dataKey="name" tick={<CustomXAxisTick isDarkMode={isDarkMode} isMobile={breakpoint === 'mobile'} />} axisLine={false} tickLine={false} height={100} interval={0} />
                           <YAxis tick={{fontSize: 8, fill: isDarkMode ? '#666' : '#64748b'}} axisLine={false} tickLine={false} />
                           <Tooltip cursor={{fill: isDarkMode ? 'rgba(255,255,255,0.05)' : '#f8fafc'}} contentStyle={{borderRadius: '0.75rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '10px', backgroundColor: isDarkMode ? '#1a1a1a' : '#fff', color: isDarkMode ? '#fff' : '#000'}} />
                           <Bar dataKey="hours" radius={[4, 4, 0, 0]}>
                             {chartData.projectChartData.map((entry, index) => (
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
+                            <LabelList dataKey="hours" position="top" style={{ fill: isDarkMode ? '#999' : '#64748b', fontSize: breakpoint === 'mobile' ? '7px' : '9px', fontWeight: '500' }} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -4031,19 +4157,20 @@ const App = () => {
                 <div className={`p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
                   <h3 className={`text-lg sm:text-xl font-black tracking-tight mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Promedio Horas/Alumno por Proyecto</h3>
                   {isLoadingStudents ? (
-                    <div className={`h-48 sm:h-64 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
+                    <div className={`h-64 sm:h-80 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                   ) : (
-                    <div className="h-48 sm:h-64 w-full">
+                    <div className="h-64 sm:h-80 w-full">
                       <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                        <BarChart data={chartData.projectChartData}>
+                        <BarChart data={chartData.projectChartData} margin={{ bottom: 40 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#333' : '#e2e8f0'} />
-                          <XAxis dataKey="name" tick={{fontSize: 8, fill: isDarkMode ? '#666' : '#64748b'}} axisLine={false} tickLine={false} />
+                          <XAxis dataKey="name" tick={<CustomXAxisTick isDarkMode={isDarkMode} isMobile={breakpoint === 'mobile'} />} axisLine={false} tickLine={false} height={100} interval={0} />
                           <YAxis tick={{fontSize: 8, fill: isDarkMode ? '#666' : '#64748b'}} axisLine={false} tickLine={false} />
                           <Tooltip cursor={{fill: isDarkMode ? 'rgba(255,255,255,0.05)' : '#f8fafc'}} contentStyle={{borderRadius: '0.75rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '10px', backgroundColor: isDarkMode ? '#1a1a1a' : '#fff', color: isDarkMode ? '#fff' : '#000'}} />
                           <Bar dataKey="avgHours" radius={[4, 4, 0, 0]}>
                             {chartData.projectChartData.map((entry, index) => (
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
+                            <LabelList dataKey="avgHours" position="top" style={{ fill: isDarkMode ? '#999' : '#64748b', fontSize: breakpoint === 'mobile' ? '7px' : '9px', fontWeight: '500' }} formatter={(val: number) => val.toFixed(1)} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -4054,19 +4181,20 @@ const App = () => {
                 <div className={`p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
                   <h3 className={`text-lg sm:text-xl font-black tracking-tight mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Distribución de Alumnos por Proyecto</h3>
                   {isLoadingStudents ? (
-                    <div className={`h-48 sm:h-64 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
+                    <div className={`h-64 sm:h-80 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                   ) : (
-                    <div className="h-48 sm:h-64 w-full">
+                    <div className="h-64 sm:h-80 w-full">
                       <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
-                        <BarChart data={chartData.projectChartData}>
+                        <BarChart data={chartData.projectChartData} margin={{ bottom: 40 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#333' : '#e2e8f0'} />
-                          <XAxis dataKey="name" tick={{fontSize: 8, fill: isDarkMode ? '#666' : '#64748b'}} axisLine={false} tickLine={false} />
+                          <XAxis dataKey="name" tick={<CustomXAxisTick isDarkMode={isDarkMode} isMobile={breakpoint === 'mobile'} />} axisLine={false} tickLine={false} height={100} interval={0} />
                           <YAxis tick={{fontSize: 8, fill: isDarkMode ? '#666' : '#64748b'}} axisLine={false} tickLine={false} />
                           <Tooltip cursor={{fill: isDarkMode ? 'rgba(255,255,255,0.05)' : '#f8fafc'}} contentStyle={{borderRadius: '0.75rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '10px', backgroundColor: isDarkMode ? '#1a1a1a' : '#fff', color: isDarkMode ? '#fff' : '#000'}} />
                           <Bar dataKey="studentCount" radius={[4, 4, 0, 0]}>
                             {chartData.projectChartData.map((entry, index) => (
                               <Cell key={`cell-${index}`} fill={entry.color} />
                             ))}
+                            <LabelList dataKey="studentCount" position="top" style={{ fill: isDarkMode ? '#999' : '#64748b', fontSize: breakpoint === 'mobile' ? '7px' : '9px', fontWeight: '500' }} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -4120,11 +4248,11 @@ const App = () => {
                     </div>
                   ))
                 ) : paginatedStudents.length === 0 ? (
-                  <div className="bg-white p-20 rounded-[4rem] border-4 border-dashed border-slate-100 text-center space-y-6">
-                    <div className="w-24 h-24 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-200">
+                  <div className={`p-20 rounded-[4rem] border-4 border-dashed text-center space-y-6 ${isDarkMode ? 'bg-white/2 border-white/5' : 'bg-white border-slate-100'}`}>
+                    <div className={`w-24 h-24 rounded-full flex items-center justify-center mx-auto ${isDarkMode ? 'bg-white/5 text-gray-500' : 'bg-slate-50 text-slate-200'}`}>
                       <Users size={48} />
                     </div>
-                    <p className="text-slate-400 font-black uppercase tracking-widest text-sm">No se encontraron alumnos con los filtros aplicados</p>
+                    <p className={`font-black uppercase tracking-widest text-sm ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>No se encontraron alumnos con los filtros aplicados</p>
                   </div>
                 ) : (
                   paginatedStudents.map(student => {
@@ -4147,8 +4275,15 @@ const App = () => {
                             <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-1">
                               <h3 className={`font-black text-xl sm:text-3xl tracking-tight leading-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{getDisplayName(student)}</h3>
                               <div className="flex flex-wrap items-center gap-2">
-                                <span className={`px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-[8px] sm:text-[9px] font-black uppercase border shadow-sm ${(STUDENT_STATUS as any)[student.status]?.color || 'bg-slate-100'}`}>{student.status}</span>
-                                <span className="hidden sm:flex lg:hidden items-center gap-1.5 text-indigo-600 bg-indigo-50 px-3 py-1 rounded-xl border border-indigo-100 text-[9px] font-black uppercase tracking-widest"><GraduationCap size={12}/> {student.career}</span>
+                                <span className={`px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-[8px] sm:text-[9px] font-black uppercase border shadow-sm 
+                                  ${isDarkMode ? 
+                                    (student.status === 'En Curso' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                                     student.status === 'Finalizada' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                                     student.status === 'Pausada' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
+                                     'bg-red-500/10 text-red-400 border-red-500/20') : 
+                                    ((STUDENT_STATUS as any)[student.status]?.color || 'bg-slate-100')
+                                  }`}>{student.status}</span>
+                                <span className={`hidden sm:flex lg:hidden items-center gap-1.5 px-3 py-1 rounded-xl border text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}><GraduationCap size={12}/> {student.career}</span>
                               </div>
                             </div>
                             <p className="text-[10px] sm:text-sm text-slate-400 italic font-medium">{getFullName(student)}</p>
@@ -4171,7 +4306,7 @@ const App = () => {
                                   setShowEditStudent(true);
                                   setShowAddStudent(true);
                                 }}
-                                className="p-1.5 sm:px-3 sm:py-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all flex items-center gap-2"
+                                className={`p-1.5 sm:px-3 sm:py-2 rounded-xl transition-all flex items-center gap-2 ${isDarkMode ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
                                 title="Editar Estudiante"
                               >
                                 <Edit2 size={14} className="sm:w-4 sm:h-4" />
@@ -4182,7 +4317,7 @@ const App = () => {
                                   e.stopPropagation();
                                   handleDeleteStudent(student.id);
                                 }}
-                                className="p-1.5 sm:px-3 sm:py-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all flex items-center gap-2"
+                                className={`p-1.5 sm:px-3 sm:py-2 rounded-xl transition-all flex items-center gap-2 ${isDarkMode ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'}`}
                                 title="Eliminar Estudiante"
                               >
                                 <Trash2 size={14} className="sm:w-4 sm:h-4" />
@@ -4191,19 +4326,25 @@ const App = () => {
                             </div>
                             
                             <div className="hidden lg:flex flex-wrap gap-3 text-[10px] font-black uppercase tracking-widest">
-                              <span className="flex items-center gap-1.5 text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-xl border border-indigo-100"><GraduationCap size={14}/> {student.career}</span>
+                              <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}><GraduationCap size={14}/> {student.career}</span>
                             </div>
                           </div>
 
-                          <div className="flex gap-4 mt-3 sm:mt-5">
+                          <div className="flex flex-col gap-1.5 mt-3 sm:mt-5">
                              {student.email ? (
-                               <a href={`mailto:${student.email}`} className="flex items-center gap-1.5 text-indigo-500 hover:text-indigo-700 font-bold text-[9px] sm:text-[10px] uppercase transition-colors" onClick={(e) => e.stopPropagation()}>
-                                 <Mail size={12}/> <span className="hidden xs:inline">ENVIAR CORREO</span><span className="xs:hidden">EMAIL</span>
+                               <a href={`mailto:${student.email}`} className={`flex items-center gap-2 font-bold text-[9px] sm:text-[10px] uppercase transition-colors ${isDarkMode ? 'text-gray-400 hover:text-indigo-400' : 'text-slate-500 hover:text-indigo-600'}`} onClick={(e) => e.stopPropagation()}>
+                                 <Mail size={12} className="text-indigo-400"/> {student.email}
                                </a>
                              ) : (
-                               <div className="flex items-center gap-1.5 text-slate-400 font-bold text-[9px] sm:text-[10px] uppercase"><Mail size={12}/> <span className="hidden xs:inline">SIN REGISTRO</span><span className="xs:hidden">SIN REG</span></div>
+                               <div className="flex items-center gap-2 text-slate-400 font-bold text-[9px] sm:text-[10px] uppercase"><Mail size={12}/> SIN REGISTRO CORREO</div>
                              )}
-                             <div className="flex items-center gap-1.5 text-slate-400 font-bold text-[9px] sm:text-[10px] uppercase"><Phone size={12}/> {student.phone ? 'ACTIVO' : 'SIN REG'}</div>
+                             {student.phone ? (
+                               <a href={`tel:${student.phone}`} className={`flex items-center gap-2 font-bold text-[9px] sm:text-[10px] uppercase transition-colors ${isDarkMode ? 'text-gray-400 hover:text-emerald-400' : 'text-slate-500 hover:text-emerald-600'}`} onClick={(e) => e.stopPropagation()}>
+                                 <Phone size={12} className="text-emerald-400"/> {student.phone}
+                               </a>
+                             ) : (
+                               <div className="flex items-center gap-2 text-slate-400 font-bold text-[9px] sm:text-[10px] uppercase"><Phone size={12}/> SIN REGISTRO TELÉFONO</div>
+                             )}
                           </div>
                         </div>
 
@@ -4229,7 +4370,11 @@ const App = () => {
                         <div className={`md:col-span-10 lg:col-span-1 flex flex-col order-4 lg:order-2 md:p-0 lg:pl-8 lg:border-l ${isDarkMode ? 'border-white/10' : 'border-slate-100'}`}>
                           <div className="flex items-center justify-between mb-3 sm:mb-4">
                              <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Proyectos y Habilidades</p>
-                             <div className={`px-2 py-0.5 sm:px-3 sm:py-1 rounded-xl text-[8px] sm:text-[9px] font-black uppercase shadow-sm border ${(WORK_STATUS as any)[(student.projectIds && student.projectIds.length > 0) ? 'Asignado' : 'Sin asignar']?.color || 'bg-slate-500'}`}>{(student.projectIds && student.projectIds.length > 0) ? 'Asignado' : 'Sin asignar'}</div>
+                             <div className={`px-2 py-0.5 sm:px-3 sm:py-1 rounded-xl text-[8px] sm:text-[9px] font-black uppercase shadow-sm border 
+                               ${(student.projectIds && student.projectIds.length > 0) ? 
+                                 (isDarkMode ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-green-500 text-white border-green-600') : 
+                                 (isDarkMode ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-orange-500 text-white border-orange-600')
+                               }`}>{(student.projectIds && student.projectIds.length > 0) ? 'Asignado' : 'Sin asignar'}</div>
                           </div>
                           <div className="flex flex-col sm:flex-row lg:flex-col gap-2 sm:gap-3 overflow-y-auto sm:overflow-x-auto lg:overflow-y-auto max-h-[120px] sm:max-h-none lg:max-h-[140px] pr-2 sm:pr-0 lg:pr-2 sm:pb-1 lg:pb-0 custom-scrollbar sm:snap-x sm:snap-mandatory flex-1">
                              {Array.from(new Set(student.projectIds || [])).map((pid: string) => {
@@ -4250,14 +4395,14 @@ const App = () => {
                                );
                              })}
                              {student.skills && student.skills.length > 0 && (
-                               <div className="bg-emerald-50/30 p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border border-emerald-100/50 shadow-sm sm:flex-shrink-0 sm:snap-start sm:min-w-[160px] lg:min-w-0">
+                               <div className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border shadow-sm sm:flex-shrink-0 sm:snap-start sm:min-w-[160px] lg:min-w-0 ${isDarkMode ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-emerald-50/30 border-emerald-100/50'}`}>
                                  <div className="flex items-center gap-2 mb-1.5 sm:mb-2">
                                    <Briefcase className="text-emerald-600" size={10} />
-                                   <span className="font-black text-[9px] sm:text-[10px] text-emerald-700 uppercase tracking-tight">Habilidades</span>
+                                   <span className={`font-black text-[9px] sm:text-[10px] uppercase tracking-tight ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>Habilidades</span>
                                  </div>
                                  <div className="flex flex-wrap gap-1 pl-1">
                                    {student.skills.map((skill: any, i: number) => (
-                                     <span key={`${typeof skill === 'string' ? skill : (skill.id || skill.name || 'skill')}-${i}`} className="text-[8px] sm:text-[9px] font-bold text-emerald-800 bg-white px-1.5 py-0.5 rounded-lg border border-emerald-100 shadow-sm">
+                                     <span key={`${typeof skill === 'string' ? skill : (skill.id || skill.name || 'skill')}-${i}`} className={`text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-lg border shadow-sm ${isDarkMode ? 'text-emerald-400 bg-black/20 border-emerald-500/30' : 'text-emerald-800 bg-white border-emerald-100'}`}>
                                        {typeof skill === 'string' ? skill : (skill.name || skill.id || 'Skill')}
                                      </span>
                                    ))}
@@ -4295,17 +4440,17 @@ const App = () => {
                   <button 
                     onClick={() => setStudentPage(p => Math.max(1, p - 1))} 
                     disabled={studentPage === 1}
-                    className="p-3 bg-white border border-slate-200 rounded-2xl shadow-sm disabled:opacity-50 hover:bg-slate-50 transition-all"
+                    className={`p-3 border rounded-2xl shadow-sm disabled:opacity-50 transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                   >
                     <ChevronLeft size={20} />
                   </button>
-                  <span className="text-sm font-black text-slate-500 uppercase tracking-widest">
+                  <span className={`text-sm font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
                     Página {studentPage} de {totalStudentPages}
                   </span>
                   <button 
                     onClick={() => setStudentPage(p => Math.min(totalStudentPages, p + 1))} 
                     disabled={studentPage === totalStudentPages}
-                    className="p-3 bg-white border border-slate-200 rounded-2xl shadow-sm disabled:opacity-50 hover:bg-slate-50 transition-all"
+                    className={`p-3 border rounded-2xl shadow-sm disabled:opacity-50 transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                   >
                     <ChevronRight size={20} />
                   </button>
@@ -4324,20 +4469,27 @@ const App = () => {
                 <div className="grid grid-cols-1 gap-8 sm:gap-16">
                   <div className="space-y-6 sm:space-y-10">
                     <div>
-                        <div className={`inline-flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-2.5 rounded-full text-[10px] sm:text-[12px] font-black uppercase border shadow-lg mb-6 sm:mb-8 ${(STUDENT_STATUS as any)[selectedStudent.status]?.color || 'bg-slate-100'}`}>
+                        <div className={`inline-flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-2.5 rounded-full text-[10px] sm:text-[12px] font-black uppercase border shadow-lg mb-6 sm:mb-8 
+                          ${isDarkMode ? 
+                            (selectedStudent.status === 'En Curso' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                             selectedStudent.status === 'Finalizada' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                             selectedStudent.status === 'Pausada' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
+                             'bg-red-500/10 text-red-400 border-red-500/20') : 
+                            ((STUDENT_STATUS as any)[selectedStudent.status]?.color || 'bg-slate-100')
+                          }`}>
                             <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full animate-pulse" style={{ backgroundColor: (STUDENT_STATUS as any)[selectedStudent.status]?.hex || '#ccc' }}></div>
                             {selectedStudent.status}
                         </div>
                         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-6">
                           <h2 className={`text-2xl sm:text-4xl md:text-6xl font-black leading-tight tracking-tighter ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{selectedStudent.name}</h2>
                           <div className="flex gap-2 sm:gap-3 w-full sm:w-auto">
-                            <button onClick={startEditStudent} className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-3 sm:px-6 sm:py-4 bg-slate-900 text-white rounded-xl sm:rounded-2xl font-black text-[9px] sm:text-[10px] uppercase tracking-widest hover:bg-black transition-all shadow-lg active:scale-95">
+                            <button onClick={startEditStudent} className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-3 sm:px-6 sm:py-4 rounded-xl sm:rounded-2xl font-black text-[9px] sm:text-[10px] uppercase tracking-widest transition-all shadow-lg active:scale-95 ${isDarkMode ? 'bg-white text-slate-900 hover:bg-gray-200' : 'bg-slate-900 text-white hover:bg-black'}`}>
                               <Edit2 size={16} /> Editar
                             </button>
                             {selectedStudent.role !== 'coordinator' && selectedStudent.role !== 'superadmin' && selectedStudent.role !== 'admin' && (
                               <button 
                                 onClick={() => showConfirmToast("¿Otorgar privilegios de coordinador a este alumno?", () => handleMakeCoordinator(selectedStudent.id))} 
-                                className="p-3 sm:p-4 text-emerald-600 bg-emerald-50 rounded-xl sm:rounded-2xl border border-emerald-100 shadow-sm hover:bg-emerald-100 transition-all active:scale-95" 
+                                className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 ${isDarkMode ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20 hover:bg-emerald-500/20' : 'text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-100'}`} 
                                 title="Hacer Coordinador"
                               >
                                 <Shield size={20} />
@@ -4346,18 +4498,18 @@ const App = () => {
                             {(user?.email && SUPER_ADMIN_EMAILS.includes(user.email)) && (selectedStudent.role === 'coordinator' || selectedStudent.role === 'admin') && (
                               <button 
                                 onClick={() => showConfirmToast("¿Remover privilegios de este usuario?", () => handleDemoteUser(selectedStudent.id))} 
-                                className="p-3 sm:p-4 text-orange-600 bg-orange-50 rounded-xl sm:rounded-2xl border border-orange-100 shadow-sm hover:bg-orange-100 transition-all active:scale-95" 
+                                className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 ${isDarkMode ? 'text-orange-400 bg-orange-500/10 border-orange-500/20 hover:bg-orange-500/20' : 'text-orange-600 bg-orange-50 border-orange-100 hover:bg-orange-100'}`} 
                                 title="Remover Privilegios"
                               >
                                 <ShieldOff size={20} />
                               </button>
                             )}
-                            <button onClick={() => setShowManualHours(true)} className="p-3 sm:p-4 text-indigo-600 bg-indigo-50 rounded-xl sm:rounded-2xl border border-indigo-100 shadow-sm hover:bg-indigo-100 transition-all active:scale-95" title="Agregar Horas Manuales">
+                            <button onClick={() => setShowManualHours(true)} className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 ${isDarkMode ? 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-600 bg-indigo-50 border-indigo-100 hover:bg-indigo-100'}`} title="Agregar Horas Manuales">
                               <Clock size={20} />
                             </button>
                             <button 
                               onClick={() => handleDeleteStudent(selectedStudent.id)} 
-                              className="p-3 sm:p-4 text-red-600 bg-red-50 rounded-xl sm:rounded-2xl border border-red-100 shadow-sm hover:bg-red-100 transition-all active:scale-95" 
+                              className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 ${isDarkMode ? 'text-red-400 bg-red-500/10 border-red-500/20 hover:bg-red-500/20' : 'text-red-600 bg-red-50 border-red-100 hover:bg-red-100'}`} 
                               title="Eliminar Estudiante"
                             >
                               <Trash2 size={20} />
@@ -4396,8 +4548,8 @@ const App = () => {
                   <div className="flex flex-col gap-8 sm:gap-12">
                     <div className="grid grid-cols-1 gap-6 sm:gap-10">
                         <div className="space-y-4 sm:space-y-6">
-                            <div className="text-[10px] sm:text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-3">
-                                <div className="w-8 h-1 bg-indigo-100"></div> Proyectos Asignados
+                            <div className={`text-[10px] sm:text-[11px] font-black uppercase tracking-[0.2em] flex items-center gap-3 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                <div className={`w-8 h-1 ${isDarkMode ? 'bg-indigo-500/40' : 'bg-indigo-100'}`}></div> Proyectos Asignados
                             </div>
                             <div className="space-y-3 sm:space-y-4 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
                                 {Array.from(new Set(selectedStudent.projectIds || [])).map((pid: string) => {
@@ -4424,24 +4576,24 @@ const App = () => {
                             </div>
                         </div>
                         <div className="space-y-4 sm:space-y-6">
-                            <div className="text-[10px] sm:text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-3">
-                                <div className="w-8 h-1 bg-emerald-100"></div> Habilidades
+                            <div className={`text-[10px] sm:text-[11px] font-black uppercase tracking-[0.2em] flex items-center gap-3 ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>
+                                <div className={`w-8 h-1 ${isDarkMode ? 'bg-emerald-500/40' : 'bg-emerald-100'}`}></div> Habilidades
                             </div>
                             <div className="flex flex-wrap gap-2 sm:gap-3">
                                 {(selectedStudent.skills || []).map((skill: string, i: number) => (
-                                    <span key={`${skill}-${i}`} className="bg-emerald-50 text-emerald-700 border border-emerald-100 px-4 py-2 rounded-xl text-[10px] sm:text-[11px] font-black uppercase shadow-sm">{skill}</span>
+                                    <span key={`${skill}-${i}`} className={`px-4 py-2 rounded-xl text-[10px] sm:text-[11px] font-black uppercase shadow-sm border ${isDarkMode ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-emerald-50 text-emerald-700 border-emerald-100'}`}>{skill}</span>
                                 ))}
                                 {(selectedStudent.skills || []).length === 0 && (
-                                    <div className="w-full p-8 text-center border-2 border-dashed border-emerald-50 rounded-[2rem] text-emerald-200 font-black uppercase text-[10px] tracking-widest">Sin habilidades registradas</div>
+                                    <div className={`w-full p-8 text-center border-2 border-dashed rounded-[2rem] font-black uppercase text-[10px] tracking-widest ${isDarkMode ? 'border-emerald-500/10 text-emerald-500/20' : 'border-emerald-50 text-emerald-200'}`}>Sin habilidades registradas</div>
                                 )}
                             </div>
                         </div>
                     </div>
 
-                    <div className="mt-auto bg-slate-900 rounded-[2rem] sm:rounded-[4rem] p-6 sm:p-12 text-white relative overflow-hidden shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-8">
-                        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
+                    <div className={`mt-auto rounded-[2rem] sm:rounded-[4rem] p-6 sm:p-12 text-white relative overflow-hidden shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-8 ${isDarkMode ? 'bg-[#121212] border border-white/5' : 'bg-slate-900 border-none'}`}>
+                        <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-32 -mt-32 blur-3xl ${isDarkMode ? 'bg-indigo-500/5' : 'bg-indigo-500/10'}`}></div>
                         <div className="relative z-10 flex flex-col items-center sm:items-start">
-                            <p className="text-[9px] sm:text-[11px] font-black text-indigo-400 uppercase tracking-[0.3em] mb-4">Horas Totales Reportadas</p>
+                            <p className={`text-[9px] sm:text-[11px] font-black uppercase tracking-[0.3em] mb-4 ${isDarkMode ? 'text-indigo-400/80' : 'text-indigo-400'}`}>Horas Totales Reportadas</p>
                             <div className="flex items-baseline gap-2 leading-none">
                                 <span className="text-4xl sm:text-7xl font-black tracking-tighter">
                                   {((selectedStudent.records || []).reduce((a: number, c: any) => {
@@ -4475,15 +4627,15 @@ const App = () => {
               </div>
 
               {/* Registro Actividad */}
-              <div className="bg-white p-6 sm:p-12 md:p-16 rounded-[2rem] sm:rounded-[5rem] border border-slate-200 shadow-sm relative overflow-hidden" id="entry-form">
+              <div className={`p-6 sm:p-12 md:p-16 rounded-[2rem] sm:rounded-[5rem] border shadow-sm relative overflow-hidden ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`} id="entry-form">
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-8 sm:mb-16 gap-4">
-                  <h3 className="text-2xl sm:text-5xl font-black text-slate-900 tracking-tighter flex items-center gap-4 sm:gap-6">
+                  <h3 className={`text-2xl sm:text-5xl font-black tracking-tighter flex items-center gap-4 sm:gap-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                       <div className={`p-2.5 sm:p-4 rounded-xl sm:rounded-[1.8rem] shadow-xl ${editingRecordId ? 'bg-amber-100 text-amber-600 shadow-amber-200/50' : 'bg-indigo-100 text-indigo-600 shadow-indigo-200/50'}`}>
                           {editingRecordId ? <Edit2 size={20} className="sm:w-9 sm:h-9" /> : <PlusCircle size={20} className="sm:w-9 sm:h-9" />}
                       </div>
                       {editingRecordId ? 'Actualizar Reporte' : 'Registrar Sesión'}
                   </h3>
-                  {editingRecordId && <button onClick={()=>setEditingRecordId(null)} className="text-[10px] sm:text-[11px] font-black text-red-500 bg-red-50 px-6 py-3 sm:px-8 sm:py-4 rounded-xl sm:rounded-[1.5rem] uppercase border-2 border-red-100 hover:bg-red-100 transition-all flex items-center gap-2 w-full sm:w-auto justify-center"><X size={16}/> Descartar</button>}
+                  {editingRecordId && <button onClick={()=>setEditingRecordId(null)} className={`text-[10px] sm:text-[11px] font-black px-6 py-3 sm:px-8 sm:py-4 rounded-xl sm:rounded-[1.5rem] uppercase border-2 transition-all flex items-center gap-2 w-full sm:w-auto justify-center ${isDarkMode ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20' : 'bg-red-50 text-red-500 border-red-100 hover:bg-red-100'}`}><X size={16}/> Descartar</button>}
                 </div>
                 <form onSubmit={saveActivity} className="space-y-8 sm:space-y-16 animate-in slide-in-from-bottom-12 duration-700">
                     {errorMessage && <div className="p-4 sm:p-6 bg-red-50 text-red-700 rounded-2xl sm:rounded-[2rem] border-2 sm:border-4 border-red-200 flex items-center gap-3 sm:gap-5 font-black text-[11px] sm:text-[13px] uppercase animate-bounce shadow-xl"><AlertCircle size={24} className="sm:w-7 sm:h-7"/> {errorMessage}</div>}
@@ -4501,42 +4653,77 @@ const App = () => {
               </div>
 
               {/* Bitácora Histórica */}
-              <div className="bg-white rounded-[5rem] border border-slate-200 shadow-sm overflow-hidden">
-                <div className="p-12 border-b border-slate-100 font-black bg-slate-50 flex flex-col gap-6 text-xs text-slate-500 uppercase tracking-[0.3em] shadow-sm">
+              <div className={`rounded-[3rem] sm:rounded-[5rem] border shadow-sm overflow-hidden ${isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-slate-200'}`}>
+                <div className={`p-6 sm:p-12 border-b font-black flex flex-col gap-6 text-[10px] sm:text-xs uppercase tracking-[0.3em] shadow-sm ${isDarkMode ? 'bg-white/2 border-white/5 text-gray-400' : 'bg-slate-50 border-slate-100 text-slate-500'}`}>
                    <span className="flex items-center gap-4"><History size={28} className="text-indigo-500" /> Cronología de Sesiones</span>
                    <div className="flex items-center gap-4 overflow-x-auto hide-scrollbar snap-x snap-mandatory w-full pb-2">
                      {selectedRecords.length > 0 && (
                        <>
+                          <div className="relative shrink-0 snap-center flex items-center">
+                            <select
+                              value=""
+                              onChange={(e) => {
+                                if(e.target.value) handleUpdateValidationSelected(e.target.value);
+                              }}
+                              className={`appearance-none px-6 py-3 pr-10 rounded-[1.5rem] font-black transition-all shadow-sm outline-none cursor-pointer text-xs sm:text-sm w-full max-w-[180px] sm:max-w-[220px] truncate border ${isDarkMode ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-200'}`}
+                            >
+                              <option value="" disabled className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Validación...</option>
+                              {Object.entries(VALIDATION_STATUS || {}).map(([key, val]: [string, any]) => (
+                                <option value={key} key={key} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : 'text-slate-700 bg-white'}>{val.label}</option>
+                              ))}
+                            </select>
+                            <div className={`pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 ${isDarkMode ? 'text-amber-400' : 'text-amber-700'}`}>
+                              <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/></svg>
+                            </div>
+                          </div>
+
+                          <div className="relative shrink-0 snap-center flex items-center">
+                            <select
+                              value=""
+                              onChange={(e) => {
+                                if(e.target.value) handleUpdateAttendanceSelected(e.target.value);
+                              }}
+                              className={`appearance-none px-6 py-3 pr-10 rounded-[1.5rem] font-black transition-all shadow-sm outline-none cursor-pointer text-xs sm:text-sm w-full max-w-[180px] sm:max-w-[220px] truncate border ${isDarkMode ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200'}`}
+                            >
+                              <option value="" disabled className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Asistencia...</option>
+                              {Object.entries(ATTENDANCE_STATUS || {}).map(([key, val]: [string, any]) => (
+                                <option value={key} key={key} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : 'text-slate-700 bg-white'}>{val.label}</option>
+                              ))}
+                            </select>
+                            <div className={`pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 ${isDarkMode ? 'text-blue-400' : 'text-blue-700'}`}>
+                              <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/></svg>
+                            </div>
+                          </div>
                          <div className="relative shrink-0 snap-center flex items-center">
                            <select
                              value=""
                              onChange={(e) => {
                                if(e.target.value) handleAssignProjectToSelected(e.target.value);
                              }}
-                             className="appearance-none bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-6 py-3 pr-10 rounded-[1.5rem] font-black transition-all shadow-sm outline-none cursor-pointer text-xs sm:text-sm w-full max-w-[180px] sm:max-w-[220px] truncate"
+                             className={`appearance-none px-6 py-3 pr-10 rounded-[1.5rem] font-black transition-all shadow-sm outline-none cursor-pointer text-xs sm:text-sm w-full max-w-[180px] sm:max-w-[220px] truncate border ${isDarkMode ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200'}`}
                            >
-                             <option value="" disabled>Asignar Proyecto...</option>
-                             <option value="p-general" className="text-slate-700 bg-white">General / Ninguno</option>
+                             <option value="" disabled className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Asignar Proyecto...</option>
+                             <option value="p-general" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : 'text-slate-700 bg-white'}>General / Ninguno</option>
                              {projects.filter(p => (selectedStudent.projectIds || []).includes(p.id)).map(p => (
-                               <option value={p.id} key={p.id} className="text-slate-700 bg-white truncate">{p.name}</option>
+                               <option value={p.id} key={p.id} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : 'text-slate-700 bg-white truncate'}>{p.name}</option>
                              ))}
                            </select>
-                           <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 text-emerald-700">
+                           <div className={`pointer-events-none absolute inset-y-0 right-0 flex items-center px-4 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>
                              <svg className="w-4 h-4 fill-current" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/></svg>
                            </div>
                          </div>
                          <button 
                            onClick={() => handleDeleteSelected(selectedStudent.id)} 
-                           className="flex items-center gap-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-5 py-3 rounded-[1.5rem] font-black transition-all shadow-sm shrink-0 snap-center text-xs sm:text-sm"
+                           className={`flex items-center gap-2 border px-5 py-3 rounded-[1.5rem] font-black transition-all shadow-sm shrink-0 snap-center text-xs sm:text-sm ${isDarkMode ? 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20' : 'bg-red-50 hover:bg-red-100 text-red-700 border-red-200'}`}
                          >
                            <Trash2 size={16} /> Borrar
                          </button>
                        </>
                      )}
-                     <button onClick={handleDownloadReport} className="flex items-center gap-3 bg-white hover:bg-indigo-50 text-indigo-600 border border-indigo-100 px-6 py-3 rounded-[1.5rem] font-black transition-all shadow-sm shrink-0 snap-center"><Download size={16} /> Descargar Reporte</button>
+                     <button onClick={handleDownloadReport} className={`flex items-center gap-3 border px-6 py-3 rounded-[1.5rem] font-black transition-all shadow-sm shrink-0 snap-center ${isDarkMode ? 'bg-white/5 text-indigo-400 border-white/10 hover:bg-white/10 shadow-none' : 'bg-white hover:bg-indigo-50 text-indigo-600 border-indigo-100'}`}><Download size={16} /> Descargar Reporte</button>
                      <button 
                        onClick={() => setSessionSortOrder(prev => prev === 'desc' ? 'asc' : 'desc')}
-                       className="p-3 rounded-[1.5rem] border font-black transition-all shadow-sm flex items-center justify-center bg-white text-slate-400 border-slate-200 hover:bg-slate-50 shrink-0 snap-center"
+                       className={`p-3 rounded-[1.5rem] border font-black transition-all shadow-sm flex items-center justify-center shrink-0 snap-center ${isDarkMode ? 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50'}`}
                        title={`Ordenar: ${sessionSortOrder === 'desc' ? 'Más recientes primero' : 'Más antiguos primero'}`}
                      >
                        <ArrowDownUp size={20} className={sessionSortOrder === 'asc' ? 'rotate-180 transition-transform' : 'transition-transform'} />
@@ -4547,19 +4734,19 @@ const App = () => {
                          if (selectedRecords.length === records.length) setSelectedRecords([]);
                          else setSelectedRecords(records.map((r: any) => r.id));
                        }}
-                       className={`p-3 rounded-[1.5rem] border font-black transition-all shadow-sm flex items-center justify-center shrink-0 snap-center ${selectedRecords.length > 0 && selectedRecords.length === (selectedStudent.records || []).length ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50'}`}
+                       className={`p-3 rounded-[1.5rem] border font-black transition-all shadow-sm flex items-center justify-center shrink-0 snap-center ${selectedRecords.length > 0 && selectedRecords.length === (selectedStudent.records || []).length ? 'bg-indigo-600 text-white border-indigo-600' : (isDarkMode ? 'bg-white/5 text-gray-400 border-white/10 hover:bg-white/10' : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50')}`}
                        title={selectedRecords.length > 0 && selectedRecords.length === (selectedStudent.records || []).length ? 'Deseleccionar Todo' : 'Seleccionar Todo'}
                      >
                        {selectedRecords.length > 0 && selectedRecords.length === (selectedStudent.records || []).length ? <X size={20} /> : <CheckSquare size={20} />}
                      </button>
-                     <div className="bg-white px-8 py-3 rounded-[1.5rem] border border-slate-200 font-black text-slate-400 shrink-0 snap-center"> {(selectedStudent.records || []).length} SESIONES TOTALES </div>
+                     <div className={`px-8 py-3 rounded-[1.5rem] border font-black shrink-0 snap-center ${isDarkMode ? 'bg-[#2a2a2a] border-white/5 text-gray-500' : 'bg-white border-slate-200 text-slate-400'}`}> {(selectedStudent.records || []).length} SESIONES TOTALES </div>
                    </div>
                 </div>
-                <div className="divide-y divide-slate-100">
+                <div className={`divide-y ${isDarkMode ? 'divide-white/5' : 'divide-slate-100'}`}>
                   {(selectedStudent.records || []).length === 0 ? (
-                    <div className="p-40 text-center flex flex-col items-center gap-10 opacity-30">
-                       <div className="p-14 bg-white rounded-full border-8 border-slate-100 shadow-2xl"><CalendarIcon size={100} className="text-slate-300" /></div>
-                       <p className="text-xl font-black uppercase tracking-[0.4em] text-slate-500">Expediente Vacío</p>
+                    <div className="p-20 sm:p-40 text-center flex flex-col items-center gap-6 sm:gap-10 opacity-30">
+                       <div className={`p-8 sm:p-14 rounded-full border-4 sm:border-8 shadow-2xl ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}><CalendarIcon size={64} className="sm:w-24 sm:h-24 text-slate-300" /></div>
+                       <p className="text-sm sm:text-xl font-black uppercase tracking-[0.4em] text-slate-500">Expediente Vacío</p>
                     </div>
                   ) : (
                     paginatedSessions.map((r: any) => {
@@ -4571,29 +4758,41 @@ const App = () => {
                           onClick={() => {
                             setSelectedRecords(prev => isSelected ? prev.filter(id => id !== r.id) : [...prev, r.id]);
                           }}
-                          className={`p-12 sm:p-16 transition-all relative group/item cursor-pointer ${editingRecordId === r.id ? 'bg-amber-50/40' : isSelected ? 'bg-indigo-50/50' : 'hover:bg-indigo-50/20'}`}
+                          className={`p-12 sm:p-16 transition-all relative group/item cursor-pointer ${editingRecordId === r.id ? 'bg-amber-500/10' : isSelected ? (isDarkMode ? 'bg-indigo-500/10' : 'bg-indigo-50/50') : (isDarkMode ? 'hover:bg-white/5' : 'hover:bg-indigo-50/20')}`}
                         >
                           {editingRecordId === r.id && <div className="absolute top-0 left-0 w-3 h-full bg-amber-500"></div>}
                         <div className="flex flex-col md:flex-row justify-between items-center gap-8">
                             <div className="space-y-6 flex-1 w-full">
                               <div className="flex items-center gap-4 flex-wrap">
-                                 <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-slate-200'}`}>
+                                 <div className={`w-6 h-6 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600' : (isDarkMode ? 'border-white/10 bg-black/20' : 'border-slate-200 bg-white')}`}>
                                    {isSelected && <Check size={14} className="text-white" />}
                                  </div>
-                                 <span className="text-2xl sm:text-4xl font-black text-slate-900 tracking-tighter leading-none">{r.date}</span>
+                                 <span className={`text-2xl sm:text-4xl font-black tracking-tighter leading-none ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{r.date}</span>
                                  {r.startTime && r.endTime ? (
-                                   <div className="flex items-center gap-2 text-[11px] font-black bg-slate-50 border border-slate-100 px-4 py-2 rounded-xl text-slate-500 shadow-sm"><Clock size={14} className="text-indigo-400" /> {r.startTime} - {r.endTime}</div>
+                                   <div className={`flex items-center gap-2 text-[11px] font-black border px-4 py-2 rounded-xl shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400' : 'bg-slate-50 border-slate-100 text-slate-500'}`}><Clock size={14} className="text-indigo-400" /> {r.startTime} - {r.endTime}</div>
                                  ) : (
-                                   <div className="flex items-center gap-2 text-[11px] font-black bg-slate-50 border border-slate-100 px-4 py-2 rounded-xl text-slate-500 shadow-sm"><Clock size={14} className="text-indigo-400" /> Manual</div>
+                                   <div className={`flex items-center gap-2 text-[11px] font-black border px-4 py-2 rounded-xl shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400' : 'bg-slate-50 border-slate-100 text-slate-500'}`}><Clock size={14} className="text-indigo-400" /> Manual</div>
                                  )}
                                  <span className="px-4 py-1.5 rounded-xl text-[10px] font-black text-white uppercase shadow-md" style={{ backgroundColor: cat?.color }}>{cat?.name || 'Categoría'}</span>
                                  {r.projectId && (() => {
                                    const p = projects.find(pr => pr.id === r.projectId);
                                    return p ? <span className="px-4 py-1.5 rounded-xl text-[10px] font-black text-white uppercase shadow-md" style={{ backgroundColor: p.color }}>{p.name}</span> : null;
                                  })()}
-                                 <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase border shadow-sm ${(ATTENDANCE_STATUS as any)[r.status]?.color || 'bg-slate-100'}`}>{(ATTENDANCE_STATUS as any)[r.status]?.label || 'Status'}</span>
+                                 <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase border shadow-sm 
+                                   ${isDarkMode ? 
+                                     (r.status === 'A' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                                      r.status === 'N' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                                      'bg-blue-500/10 text-blue-400 border-blue-500/20') :
+                                     ((ATTENDANCE_STATUS as any)[r.status]?.color || 'bg-slate-100')
+                                   }`}>{(ATTENDANCE_STATUS as any)[r.status]?.label || 'Status'}</span>
                                  {r.validationStatus && (
-                                   <div className={`flex items-center gap-2 px-4 py-1.5 rounded-full border text-[10px] font-black uppercase shadow-sm ${(VALIDATION_STATUS as any)[r.validationStatus]?.color || 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                                   <div className={`flex items-center gap-2 px-4 py-1.5 rounded-full border text-[10px] font-black uppercase shadow-sm 
+                                     ${isDarkMode ? 
+                                       (r.validationStatus === 'aprobado' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                                        r.validationStatus === 'rechazado' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
+                                        'bg-amber-500/10 text-amber-400 border-amber-500/20') : 
+                                       ((VALIDATION_STATUS as any)[r.validationStatus]?.color || 'bg-slate-50 text-slate-400 border-slate-100')
+                                     }`}>
                                      {(() => {
                                        const Icon = (VALIDATION_STATUS as any)[r.validationStatus]?.icon || Clock;
                                        return <Icon size={14} />;
@@ -4603,10 +4802,10 @@ const App = () => {
                                  )}
                               </div>
                               <div className="relative pl-6">
-                                <div className="absolute top-0 left-0 w-1 h-full bg-indigo-100 group-hover/item:bg-indigo-300 transition-colors rounded-full"></div>
-                                <p className="text-slate-600 font-bold text-lg leading-relaxed italic break-words">"{r.description || 'Sin detalles.'}"</p>
+                                <div className={`absolute top-0 left-0 w-1 h-full rounded-full transition-colors ${isDarkMode ? (isSelected ? 'bg-indigo-500' : 'bg-white/10 group-hover/item:bg-white/20') : 'bg-indigo-100 group-hover/item:bg-indigo-300'}`}></div>
+                                <p className={`font-bold text-lg leading-relaxed italic break-words ${isDarkMode ? 'text-gray-300' : 'text-slate-600'}`}>"{r.description || 'Sin detalles.'}"</p>
                               </div>
-                              {r.evidenceLink && <a href={r.evidenceLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-3 text-[10px] text-indigo-600 font-black bg-indigo-50 border border-indigo-100 px-6 py-3 rounded-2xl shadow-sm uppercase tracking-widest hover:bg-indigo-600 hover:text-white transition-all"><LinkIcon size={14}/> Comprobante</a>}
+                              {r.evidenceLink && <a href={r.evidenceLink} target="_blank" rel="noreferrer" className={`inline-flex items-center gap-3 text-[10px] font-black border px-6 py-3 rounded-2xl shadow-sm uppercase tracking-widest hover:transition-all ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20 hover:bg-indigo-600 hover:text-white' : 'bg-indigo-50 text-indigo-600 border-indigo-100 hover:bg-indigo-600 hover:text-white'}`}><LinkIcon size={14}/> Comprobante</a>}
                             </div>
                             
                             <div className="flex items-center gap-8 shrink-0">
@@ -4616,14 +4815,14 @@ const App = () => {
                                     e.stopPropagation();
                                     handleApproveRecord(selectedStudent.id, r.id);
                                   }}
-                                  className="p-3 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-600 hover:text-white transition-all shadow-sm"
+                                  className={`p-3 rounded-xl transition-all shadow-sm ${isDarkMode ? 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-600 hover:text-white' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white'}`}
                                   title="Aprobar registro"
                                 >
                                   <Check size={20} />
                                 </button>
                               )}
-                              <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-xl flex flex-col items-center min-w-[120px]">
-                                  <span className="text-[9px] font-black uppercase text-indigo-400 tracking-widest mb-1 opacity-70">Horas</span>
+                              <div className={`p-6 rounded-[2rem] shadow-xl flex flex-col items-center min-w-[120px] ${isDarkMode ? 'bg-black/20 border border-white/5 text-white' : 'bg-slate-900 text-white'}`}>
+                                  <span className={`text-[9px] font-black uppercase tracking-widest mb-1 opacity-70 ${isDarkMode ? 'text-indigo-400' : 'text-indigo-400'}`}>Horas</span>
                                   <div className="flex items-baseline gap-1 leading-none"><span className="text-4xl font-black">{Number(r.hours.toFixed(2))}</span><span className="text-xs font-black text-indigo-500 uppercase">H</span></div>
                               </div>
                               <div className="flex flex-col gap-3">
@@ -4634,6 +4833,7 @@ const App = () => {
                                           try {
                                             await updateDoc(doc(db, 'sesiones', r.id), {
                                               estado: 'aprobado',
+                                              status: 'A',
                                               updatedBy: auth.currentUser?.uid
                                             });
                                             showSuccessToast("Sesión aprobada");
@@ -4641,21 +4841,21 @@ const App = () => {
                                             handleFirestoreError(error, OperationType.UPDATE, `sesiones/${r.id}`);
                                           }
                                         }}
-                                        className="p-3 text-emerald-600 bg-emerald-50 hover:bg-emerald-600 hover:text-white rounded-xl border border-emerald-100 shadow-sm transition-all"
+                                        className={`p-3 rounded-xl border shadow-sm transition-all ${isDarkMode ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-600 hover:text-white' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-600 hover:text-white border-emerald-100'}`}
                                         title="Aprobar"
                                       >
                                         <CheckCircle2 size={18} />
                                       </button>
                                       <button 
                                         onClick={() => setRejectingRecord(r)}
-                                        className="p-3 text-rose-600 bg-rose-50 hover:bg-rose-600 hover:text-white rounded-xl border border-rose-100 shadow-sm transition-all"
+                                        className={`p-3 rounded-xl border shadow-sm transition-all ${isDarkMode ? 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-600 hover:text-white' : 'bg-rose-50 text-rose-600 hover:bg-rose-600 hover:text-white border-rose-100'}`}
                                         title="Rechazar"
                                       >
                                         <XCircle size={18} />
                                       </button>
                                     </div>
                                   )}
-                                  <button onClick={()=>{startEditRecord(r); window.scrollTo({top:0, behavior:'smooth'});}} className="p-4 flex items-center justify-center text-slate-400 hover:text-amber-600 hover:bg-amber-50 bg-white rounded-2xl border border-slate-100 shadow-sm transition-all" title="Editar"><Edit2 size={20}/></button>
+                                  <button onClick={(e)=>{ e.stopPropagation(); startEditRecord(r); window.scrollTo({top:0, behavior:'smooth'});}} className={`p-4 flex items-center justify-center rounded-2xl border shadow-sm transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:text-amber-400 hover:bg-white/10' : 'bg-white border-slate-100 text-slate-400 hover:text-amber-600 hover:bg-amber-50'}`} title="Editar"><Edit2 size={20}/></button>
                                   <button type="button" onClick={(e)=>{e.preventDefault(); e.stopPropagation(); showConfirmToast("¿Estás seguro de que deseas eliminar esta sesión?", async () => { 
                                     try {
                                       await deleteDoc(doc(db, 'sesiones', r.id));
@@ -4663,7 +4863,7 @@ const App = () => {
                                     } catch (error) {
                                       handleFirestoreError(error, OperationType.DELETE, `sesiones/${r.id}`);
                                     }
-                                  }); }} className="p-4 flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-red-50 bg-white rounded-2xl border border-slate-100 shadow-sm transition-all" title="Eliminar"><Trash2 size={20}/></button>
+                                  }); }} className={`p-4 flex items-center justify-center rounded-2xl border shadow-sm transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:text-red-400 hover:bg-white/10' : 'bg-white border-slate-100 text-slate-400 hover:text-red-500 hover:bg-red-50'}`} title="Eliminar"><Trash2 size={20}/></button>
                               </div>
                             </div>
                         </div>
@@ -4675,21 +4875,21 @@ const App = () => {
                 
                 {/* Session Pagination Controls */}
                 {totalSessionPages > 1 && (
-                  <div className="flex justify-center items-center gap-4 p-8 border-t border-slate-100 bg-slate-50">
+                  <div className={`flex justify-center items-center gap-4 p-8 border-t ${isDarkMode ? 'bg-white/2 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
                     <button 
                       onClick={() => setSessionPage(p => Math.max(1, p - 1))} 
                       disabled={sessionPage === 1}
-                      className="p-3 bg-white border border-slate-200 rounded-2xl shadow-sm disabled:opacity-50 hover:bg-slate-50 transition-all"
+                      className={`p-3 border rounded-2xl shadow-sm disabled:opacity-50 transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                     >
                       <ChevronLeft size={20} />
                     </button>
-                    <span className="text-sm font-black text-slate-500 uppercase tracking-widest">
+                    <span className={`text-sm font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
                       Página {sessionPage} de {totalSessionPages}
                     </span>
                     <button 
                       onClick={() => setSessionPage(p => Math.min(totalSessionPages, p + 1))} 
                       disabled={sessionPage === totalSessionPages}
-                      className="p-3 bg-white border border-slate-200 rounded-2xl shadow-sm disabled:opacity-50 hover:bg-slate-50 transition-all"
+                      className={`p-3 border rounded-2xl shadow-sm disabled:opacity-50 transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
                     >
                       <ChevronRight size={20} />
                     </button>
@@ -4730,10 +4930,43 @@ const App = () => {
             <div className={`space-y-6 sm:space-y-10 animate-in fade-in zoom-in-95 duration-700 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
                <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 sm:gap-8">
                  <div className="w-full lg:w-auto">
-                    <h2 className={`text-3xl sm:text-5xl font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Calendario</h2>
+                    <h2 className={`text-3xl sm:text-5xl font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{calendarFilterAll ? 'Calendario General' : 'Mi Calendario'}</h2>
                     <p className={`font-black uppercase tracking-[0.2em] text-[8px] sm:text-[10px] mt-2 flex items-center gap-2 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Cronograma Mensual de Actividades</p>
                  </div>
                  <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 w-full lg:w-auto">
+                    {(userRole === 'admin' || userRole === 'coordinator') && (
+                      <div className={`p-1 sm:p-2 rounded-xl sm:rounded-2xl border shadow-sm flex items-center ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
+                        <button 
+                          onClick={() => setCalendarFilterAll(true)} 
+                          className={`px-3 py-2 sm:px-4 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold transition-all flex items-center gap-2 ${calendarFilterAll ? (isDarkMode ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-100 text-emerald-700') : (isDarkMode ? 'text-gray-500 hover:bg-white/5' : 'text-slate-400 hover:bg-slate-50')}`}
+                        >
+                          <Users size={14} /> 
+                          <span className="hidden xs:inline">Todos</span>
+                        </button>
+                        <button 
+                          onClick={() => setCalendarFilterAll(false)} 
+                          className={`px-3 py-2 sm:px-4 sm:py-2 rounded-lg sm:rounded-xl text-[10px] sm:text-xs font-bold transition-all flex items-center gap-2 ${!calendarFilterAll ? (isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-100 text-indigo-700') : (isDarkMode ? 'text-gray-500 hover:bg-white/5' : 'text-slate-400 hover:bg-slate-50')}`}
+                        >
+                          <User size={14} /> 
+                          <span className="hidden xs:inline">Personal</span>
+                        </button>
+                      </div>
+                    )}
+                    {(userRole === 'admin' || userRole === 'coordinator') && calendarFilterAll && (
+                      <div className={`flex items-center gap-2 p-2 rounded-xl sm:rounded-2xl border shadow-sm flex-1 sm:flex-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
+                        <GraduationCap size={16} className={isDarkMode ? 'text-gray-500 ml-2' : 'text-slate-400 ml-2'} />
+                        <select 
+                          value={calendarStudentFilter} 
+                          onChange={(e) => setCalendarStudentFilter(e.target.value)}
+                          className={`p-2 text-[10px] sm:text-xs font-bold outline-none bg-transparent w-full ${isDarkMode ? 'text-white cursor-pointer' : 'text-slate-600 cursor-pointer'}`}
+                        >
+                          <option value="" className={isDarkMode ? 'bg-slate-900' : 'bg-white'}>Todos los Alumnos</option>
+                          {students.filter((s: any) => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email)).sort((a: any, b: any) => (a.name || '').localeCompare(b.name || '')).map((s: any) => (
+                            <option key={s.id} value={s.id} className={isDarkMode ? 'bg-slate-900' : 'bg-white'}>{s.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className={`flex items-center gap-2 p-2 rounded-xl sm:rounded-2xl border shadow-sm flex-1 sm:flex-none ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
                        <Filter size={16} className={isDarkMode ? 'text-gray-500 ml-2' : 'text-slate-400 ml-2'} />
                        <input type="date" className={`p-2 text-[10px] sm:text-xs font-bold outline-none bg-transparent w-full ${isDarkMode ? 'text-white' : 'text-slate-600'}`} value={calendarDateFilter} onChange={e => {
@@ -4890,6 +5123,7 @@ const App = () => {
                                        <div className="flex items-center gap-4 sm:gap-6 w-full md:w-auto">
                                           <div className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl shadow-sm border text-center min-w-[80px] sm:min-w-[100px] ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}>
                                            <p className="text-lg sm:text-xl font-black text-indigo-600 leading-none">{group.startTime}</p>
+                                            {group.hours && <p className={`text-[8px] sm:text-[10px] font-black uppercase tracking-widest mt-2 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>{group.hours} Hrs</p>}
                                          </div>
                                          <div className="space-y-2 sm:space-y-3 flex-1">
                                            <div className="flex flex-wrap items-center gap-2">
@@ -4938,6 +5172,7 @@ const App = () => {
                                  <div className="flex items-center gap-6 w-full md:w-auto">
                                    <div className={`p-4 rounded-2xl shadow-sm border text-center min-w-[100px] ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}>
                                      <p className="text-xl font-black text-indigo-600 leading-none">{group.startTime || 'Manual'}</p>
+                                      {group.hours && <p className={`text-[10px] font-black uppercase tracking-widest mt-2 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>{group.hours} Hrs</p>}
                                    </div>
                                    <div className="space-y-3">
                                      <div className="flex flex-wrap items-center gap-2">
@@ -5238,38 +5473,37 @@ const App = () => {
             </div>
           )}
           {rejectedNotifications.length > 0 && (
-            <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-3xl flex items-center justify-center p-4 z-[100] overflow-y-auto">
-              <div className="bg-white rounded-[2.5rem] sm:rounded-[5rem] p-6 sm:p-12 md:p-20 w-full max-w-2xl shadow-2xl my-auto border-t-[8px] sm:border-t-[16px] border-red-600 animate-in zoom-in-95 duration-500 relative">
+            <div className={`fixed inset-0 backdrop-blur-3xl flex items-center justify-center p-4 z-[100] overflow-y-auto ${isDarkMode ? 'bg-black/90' : 'bg-slate-900/95'}`}>
+              <div className={`rounded-[2.5rem] sm:rounded-[5rem] p-6 sm:p-12 md:p-20 w-full max-w-2xl shadow-2xl my-auto border-t-[8px] sm:border-t-[16px] border-red-600 animate-in zoom-in-95 duration-500 relative ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white'}`}>
                 <div className="flex flex-col items-center text-center gap-6">
-                  <div className="w-24 h-24 bg-red-100 rounded-full flex items-center justify-center text-red-600 mb-4">
+                  <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-4 ${isDarkMode ? 'bg-red-500/10 text-red-400' : 'bg-red-100 text-red-600'}`}>
                     <AlertCircle size={48} />
                   </div>
-                  <h2 className="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight">Horas Rechazadas</h2>
-                  <p className="text-lg text-slate-600 max-w-lg">
+                  <h2 className={`text-3xl sm:text-4xl font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Horas Rechazadas</h2>
+                  <p className={`text-lg max-w-lg font-medium opacity-80 ${isDarkMode ? 'text-gray-300' : 'text-slate-600'}`}>
                     Se han rechazado horas que habías registrado. Por favor, revisa el motivo a continuación.
                   </p>
                   
                   <div className="w-full mt-8 space-y-6">
                     {rejectedNotifications.map((notification, index) => (
-                      <div key={`${notification.id || 'notif'}-${index}`} className="bg-slate-50 border border-slate-200 rounded-3xl p-6 text-left">
+                      <div key={`${notification.id || 'notif'}-${index}`} className={`border rounded-3xl p-6 text-left ${isDarkMode ? 'bg-white/2 border-white/5' : 'bg-slate-50 border-slate-200'}`}>
                         <div className="flex flex-col sm:flex-row justify-between items-start mb-4 gap-4">
                           <div className="min-w-0 w-full">
-                            <h3 className="font-semibold text-slate-900 text-xl">{notification.date}</h3>
-                            <p className="text-slate-500 break-words">{notification.hours} horas - {notification.description}</p>
+                            <h3 className={`font-black uppercase tracking-widest text-lg ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{notification.date}</h3>
+                            <p className={`font-medium break-words mt-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>{notification.hours} horas - {notification.description}</p>
                           </div>
-                          <span className="bg-red-100 text-red-700 px-4 py-1.5 rounded-full text-sm font-medium shrink-0">Rechazado</span>
+                          <span className={`px-4 py-1.5 rounded-full text-xs font-black uppercase tracking-widest shrink-0 ${isDarkMode ? 'bg-red-500/10 text-red-400' : 'bg-red-100 text-red-700'}`}>Rechazado</span>
                         </div>
-                        <div className="bg-white border border-red-100 rounded-2xl p-5 mt-4">
-                          <h4 className="text-sm font-semibold text-red-800 uppercase tracking-wider mb-2">Motivo del rechazo:</h4>
-                          <p className="text-slate-700 whitespace-pre-wrap break-words">{notification.rejectReason || 'No se especificó un motivo.'}</p>
+                        <div className={`border rounded-2xl p-5 mt-4 ${isDarkMode ? 'bg-red-500/5 border-red-500/10' : 'bg-white border-red-100'}`}>
+                          <h4 className={`text-xs font-black uppercase tracking-widest mb-2 ${isDarkMode ? 'text-red-400' : 'text-red-800'}`}>Motivo del rechazo:</h4>
+                          <p className={`font-medium italic leading-relaxed break-words ${isDarkMode ? 'text-gray-400' : 'text-slate-700'}`}>{notification.rejectReason || 'No se especificó un motivo.'}</p>
                         </div>
                         <div className="mt-6 flex justify-end">
                           <button
                             onClick={() => handleAcknowledgeRejection(notification.id)}
-                            className="bg-slate-900 hover:bg-slate-800 text-white px-8 py-3 rounded-full font-medium transition-all hover:scale-105 active:scale-95 flex items-center gap-2"
+                            className={`px-8 py-3 rounded-full font-black uppercase text-xs tracking-[0.2em] transition-all hover:scale-105 active:scale-95 flex items-center gap-2 ${isDarkMode ? 'bg-white text-black hover:bg-gray-200' : 'bg-slate-900 text-white hover:bg-slate-800'}`}
                           >
-                            <Check size={20} />
-                            Entendido
+                            <Check size={20} /> Entendido
                           </button>
                         </div>
                       </div>
@@ -5280,26 +5514,26 @@ const App = () => {
             </div>
           )}
           {rejectingRecord && selectedStudentId && (
-            <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-              <div className="bg-white rounded-[2rem] p-8 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200">
+            <div className={`fixed inset-0 backdrop-blur-sm z-50 flex items-center justify-center p-4 ${isDarkMode ? 'bg-black/60' : 'bg-slate-900/50'}`}>
+              <div className={`rounded-[2rem] p-8 max-w-md w-full shadow-2xl animate-in fade-in zoom-in duration-200 ${isDarkMode ? 'bg-[#1a1a1a] border border-white/10' : 'bg-white'}`}>
                 <div className="flex justify-between items-center mb-6">
-                  <h3 className="text-xl font-black text-slate-900">Rechazar Registro</h3>
-                  <button onClick={() => { setRejectingRecord(null); setRejectReason(''); }} className="text-slate-400 hover:text-slate-600 transition-colors">
+                  <h3 className={`text-xl font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Rechazar Registro</h3>
+                  <button onClick={() => { setRejectingRecord(null); setRejectReason(''); }} className={`transition-colors ${isDarkMode ? 'text-gray-500 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}>
                     <X size={24} />
                   </button>
                 </div>
                 
                 <div className="space-y-6">
-                  <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                    <p className="text-sm font-bold text-slate-700">{selectedStudent?.name}</p>
-                    <p className="text-xs text-slate-500 mt-1">{rejectingRecord.date} • {Number(rejectingRecord.hours.toFixed(2))}h</p>
-                    <p className="text-xs text-slate-600 mt-2 italic">"{rejectingRecord.description}"</p>
+                  <div className={`p-4 rounded-2xl border ${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+                    <p className={`text-sm font-black uppercase tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-700'}`}>{selectedStudent?.name}</p>
+                    <p className={`text-xs mt-1 font-bold ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>{rejectingRecord.date} • {Number(rejectingRecord.hours.toFixed(2))}h</p>
+                    <p className={`text-xs mt-2 italic font-medium ${isDarkMode ? 'text-gray-400' : 'text-slate-600'}`}>"{rejectingRecord.description}"</p>
                   </div>
 
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Motivo del Rechazo (Se enviará por correo)</label>
+                    <label className={`text-[10px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Motivo del Rechazo (Se enviará por correo)</label>
                     <textarea 
-                      className="w-full p-4 border border-slate-200 rounded-2xl bg-slate-50 font-bold outline-none focus:bg-white focus:border-rose-300 transition-all text-sm shadow-inner resize-none h-32"
+                      className={`w-full p-4 rounded-2xl font-bold outline-none border transition-all text-sm shadow-inner resize-none h-32 ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-rose-400/50' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-rose-300'}`}
                       placeholder="Explica por qué se rechazan estas horas..."
                       value={rejectReason}
                       onChange={(e) => setRejectReason(e.target.value)}
@@ -5309,14 +5543,14 @@ const App = () => {
                   <div className="flex gap-3 pt-2">
                     <button 
                       onClick={() => { setRejectingRecord(null); setRejectReason(''); }}
-                      className="flex-1 py-4 rounded-2xl font-black uppercase text-xs bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all"
+                      className={`flex-1 py-4 rounded-2xl font-black uppercase text-xs transition-all ${isDarkMode ? 'bg-white/5 text-gray-400 hover:bg-white/10' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
                     >
                       Cancelar
                     </button>
                     <button 
                       onClick={handleRejectRecordProfile}
                       disabled={!rejectReason.trim()}
-                      className="flex-1 py-4 rounded-2xl font-black uppercase text-xs bg-rose-600 text-white hover:bg-rose-700 transition-all shadow-lg shadow-rose-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                      className={`flex-1 py-4 rounded-2xl font-black uppercase text-xs transition-all shadow-lg flex items-center justify-center gap-2 ${isDarkMode ? 'bg-rose-500 text-white hover:bg-rose-600 shadow-rose-900/20 disabled:opacity-30' : 'bg-rose-600 text-white hover:bg-rose-700 shadow-rose-200 disabled:opacity-50'}`}
                     >
                       <Send size={16} /> Enviar y Rechazar
                     </button>
@@ -5627,93 +5861,12 @@ const App = () => {
                     ))}
                   </div>
                 </div>
-
-                {/* Gestión de Etiquetas */}
-                <div className="space-y-6">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-4">Tareas y Etiquetas por Proyecto</label>
-                  <div className="grid grid-cols-1 gap-6">
-                    {(studentForm.projectIds || []).length === 0 ? (
-                      <div className="col-span-full p-12 text-center bg-slate-50 rounded-[2rem] border-2 border-dashed border-slate-200">
-                         <p className="text-slate-300 font-black uppercase tracking-widest text-[10px]">Asigna proyectos para gestionar sus tareas</p>
-                      </div>
-                    ) : Array.from(new Set(studentForm.projectIds || [])).map(pid => {
-                      const p = projects.find(pr => pr.id === pid);
-                      const currentTags = (studentForm.projectTasks && studentForm.projectTasks[pid]) || [];
-                      const currentInputValue = tagInputs[pid] || '';
-                      const bankForProject = projectTagsBank[pid] || [];
-                      const suggestions = Array.from(new Set(bankForProject.filter((t: string) => t.toLowerCase().includes(currentInputValue.toLowerCase()) && !currentTags.includes(t))));
-                      const showSuggestions = activeSuggestionProject === pid && currentInputValue.length > 0 && suggestions.length > 0;
-
-                       return (
-                        <div key={pid} className="bg-white p-6 rounded-[2rem] border border-slate-200 space-y-4 shadow-sm relative overflow-hidden transition-all hover:border-indigo-200">
-                           <div className="flex items-center gap-3 pb-3 border-b border-slate-50">
-                              <div className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: p?.color || '#cbd5e1' }}></div>
-                              <span className="font-black text-[11px] uppercase text-slate-900 tracking-tight truncate">{p?.name || 'Proyecto'}</span>
-                           </div>
-
-                           <div className="flex flex-wrap gap-2 min-h-[40px] max-h-[120px] overflow-y-auto custom-scrollbar p-1">
-                              {currentTags.map((tag: string, idx: number) => (
-                                <div key={`${tag}-${idx}`} onClick={() => {
-                                      const removedTag = currentTags[idx];
-                                      const updatedTagsForProj = currentTags.filter((_: any, i: number) => i !== idx);
-                                      const currentHistory = studentForm.projectTaskHistory?.[pid] || [];
-                                      if (!currentHistory.includes(removedTag)) {
-                                        setStudentForm({ 
-                                          ...studentForm, 
-                                          projectTasks: { ...studentForm.projectTasks, [pid]: updatedTagsForProj },
-                                          projectTaskHistory: { ...studentForm.projectTaskHistory, [pid]: [...currentHistory, removedTag] }
-                                        });
-                                      } else {
-                                        setStudentForm({ ...studentForm, projectTasks: { ...studentForm.projectTasks, [pid]: updatedTagsForProj } });
-                                      }
-                                }} className="bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg text-[9px] font-black flex items-center gap-2 transition-all hover:bg-red-50 hover:text-red-600 hover:border-red-100 cursor-pointer border border-indigo-100 shadow-sm uppercase italic">
-                                   <span className="truncate max-w-[100px]">{String(tag)}</span> <X size={12}/>
-                                </div>
-                              ))}
-                           </div>
-                           
-                           {studentForm.projectTaskHistory?.[pid]?.length > 0 && (
-                             <div className="mt-4 pt-4 border-t border-slate-50">
-                               <div className="flex justify-between items-center mb-2">
-                                 <label className="text-[8px] font-black text-slate-400 uppercase tracking-widest">Historial</label>
-                                 <button type="button" onClick={() => {
-                                   const historyTags = (studentForm.projectTaskHistory && studentForm.projectTaskHistory[pid]) || [];
-                                   const csvContent = ['Actividad'].concat(historyTags).join('\n');
-                                   const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-                                   const url = URL.createObjectURL(blob);
-                                   const link = document.createElement('a');
-                                   link.setAttribute('href', url);
-                                   link.setAttribute('download', `Reporte_${p?.name.replace(/\s+/g, '_')}_${studentForm.firstName || 'Alumno'}.csv`);
-                                   document.body.appendChild(link);
-                                   link.click();
-                                   document.body.removeChild(link);
-                                 }} className="text-[8px] font-black text-indigo-500 uppercase tracking-widest hover:text-indigo-700 flex items-center gap-1"><Download size={10}/> Reporte</button>
-                               </div>
-                               <div className="flex flex-wrap gap-1 max-h-[80px] overflow-y-auto custom-scrollbar pr-1">
-                                 {((studentForm.projectTaskHistory && studentForm.projectTaskHistory[pid]) || []).map((tag: string, idx: number) => (
-                                   <div key={`${tag}-${idx}`} className="flex items-center gap-1 bg-slate-50 text-slate-400 px-2 py-1 rounded-lg text-[8px] font-black uppercase tracking-tight">
-                                     <span className="truncate max-w-[80px]">{String(tag)}</span>
-                                     <button type="button" onClick={() => {
-                                       const currentHistory = (studentForm.projectTaskHistory && studentForm.projectTaskHistory[pid]) || [];
-                                        const updatedHistory = currentHistory.filter((_: any, i: number) => i !== idx);
-                                       setStudentForm({ ...studentForm, projectTaskHistory: { ...studentForm.projectTaskHistory, [pid]: updatedHistory } });
-                                     }} className="ml-1 hover:text-red-500 transition-colors"><X size={10}/></button>
-                                   </div>
-                                 ))}
-                               </div>
-                             </div>
-                           )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
             </div>
             
             <div className="flex flex-col sm:flex-row gap-4 sm:gap-10 mt-10 sm:mt-20">
-              <button onClick={() => { setShowAddStudent(false); setStudentFormErrors({}); }} className="flex-1 px-6 py-4 sm:px-10 sm:py-8 border-4 sm:border-8 border-slate-50 rounded-2xl sm:rounded-[3rem] font-black uppercase text-[10px] sm:text-xs text-slate-300 shadow-lg hover:bg-slate-50 transition-all">Cancelar</button>
-              <button onClick={handleAddStudent} className="flex-2 px-6 py-4 sm:px-20 sm:py-8 bg-slate-900 text-white rounded-2xl sm:rounded-[3rem] font-black uppercase text-[10px] sm:text-xs shadow-2xl hover:bg-black active:scale-[0.98] transition-all">
+              <button onClick={() => { setShowAddStudent(false); setStudentFormErrors({}); }} className={`flex-1 px-6 py-4 sm:px-10 sm:py-8 border-4 sm:border-8 rounded-2xl sm:rounded-[3rem] font-black uppercase text-[10px] sm:text-xs shadow-lg transition-all ${isDarkMode ? 'bg-white/5 border-white/5 text-gray-500 hover:bg-white/10' : 'bg-slate-50 border-slate-50 text-slate-300 hover:bg-slate-100'}`}>Cancelar</button>
+              <button onClick={handleAddStudent} className={`flex-2 px-6 py-4 sm:px-20 sm:py-8 rounded-2xl sm:rounded-[3rem] font-black uppercase text-[10px] sm:text-xs shadow-2xl active:scale-[0.98] transition-all ${isDarkMode ? 'bg-white text-black hover:bg-gray-200 shadow-white/5' : 'bg-slate-900 text-white hover:bg-black shadow-slate-900/20'}`}>
                 {showEditStudent ? (studentForm.status === 'Finalizada' ? 'Certificar y Guardar' : 'Guardar Cambios') : 'Registrar Prestador'}
               </button>
             </div>
@@ -5721,27 +5874,27 @@ const App = () => {
         </div>
       )}
         {showManualHours && (
-          <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${isDarkMode ? 'bg-black/70' : 'bg-black/50'}`}>
+          <div className={`fixed inset-0 backdrop-blur-sm z-50 flex items-center justify-center p-4 ${isDarkMode ? 'bg-black/70' : 'bg-black/50'}`}>
             <div className={`rounded-[2rem] p-8 max-w-md w-full shadow-2xl border ${isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-slate-200'}`}>
               <h2 className={`text-2xl font-black mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Agregar Horas Manuales</h2>
               <div className="space-y-4">
                 <div>
-                  <label className={`block text-xs font-black uppercase mb-2 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Fecha</label>
-                  <input type="date" max={getCDMXDateString()} className={`w-full p-4 rounded-xl border outline-none transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white'}`} value={manualHoursForm.date} onChange={e => setManualHoursForm({...manualHoursForm, date: e.target.value})} />
+                  <label className={`block text-[10px] font-black uppercase mb-2 ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Fecha</label>
+                  <input type="date" max={getCDMXDateString()} className={`w-full p-4 rounded-xl border outline-none transition-all font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-indigo-400' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-indigo-500'}`} value={manualHoursForm.date} onChange={e => setManualHoursForm({...manualHoursForm, date: e.target.value})} />
                 </div>
                 <div>
-                  <label className={`block text-xs font-black uppercase mb-2 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Horas</label>
-                  <input type="number" className={`w-full p-4 rounded-xl border outline-none transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white'}`} value={manualHoursForm.hours} onChange={e => setManualHoursForm({...manualHoursForm, hours: parseFloat(e.target.value)})} />
+                  <label className={`block text-[10px] font-black uppercase mb-2 ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Horas</label>
+                  <input type="number" className={`w-full p-4 rounded-xl border outline-none transition-all font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-indigo-400' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-indigo-500'}`} value={manualHoursForm.hours} onChange={e => setManualHoursForm({...manualHoursForm, hours: parseFloat(e.target.value)})} />
                 </div>
                 <div>
-                  <label className={`block text-xs font-black uppercase mb-2 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Categoría</label>
-                  <select className={`w-full p-4 rounded-xl border outline-none transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white'}`} value={manualHoursForm.category} onChange={e => setManualHoursForm({...manualHoursForm, category: e.target.value})}>
-                    <option value="Otra Brigada">Otra Brigada</option>
-                    <option value="ND en Sistema">ND en Sistema</option>
+                  <label className={`block text-[10px] font-black uppercase mb-2 ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Categoría</label>
+                  <select className={`w-full p-4 rounded-xl border outline-none transition-all font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-indigo-400' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-indigo-500'}`} value={manualHoursForm.category} onChange={e => setManualHoursForm({...manualHoursForm, category: e.target.value})}>
+                    <option value="Otra Brigada" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>Otra Brigada</option>
+                    <option value="ND en Sistema" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>ND en Sistema</option>
                   </select>
                 </div>
-                <div className="flex gap-4 mt-6">
-                  <button onClick={() => setShowManualHours(false)} className={`flex-1 p-4 rounded-xl font-black transition-colors ${isDarkMode ? 'bg-white/5 text-white hover:bg-white/10' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}>Cancelar</button>
+                <div className="flex gap-4 mt-8">
+                  <button onClick={() => setShowManualHours(false)} className={`flex-1 p-4 rounded-xl font-black uppercase text-[10px] tracking-widest transition-colors ${isDarkMode ? 'bg-white/5 text-gray-500 hover:bg-white/10' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>Cancelar</button>
                   <button onClick={async () => {
                     if (manualHoursForm.hours < 0.5) {
                       showErrorToast("El registro mínimo es de media hora");
@@ -5777,7 +5930,7 @@ const App = () => {
                     } catch (error) {
                       handleFirestoreError(error, OperationType.WRITE, `sesiones/${recordId}`);
                     }
-                  }} className="flex-1 p-4 bg-indigo-600 text-white rounded-xl font-black hover:bg-indigo-700 transition-all shadow-lg active:scale-95">Guardar</button>
+                  }} className={`flex-1 p-4 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all shadow-lg active:scale-95 ${isDarkMode ? 'bg-white text-black hover:bg-gray-200 shadow-white/5' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/20'}`}>Guardar</button>
                 </div>
               </div>
             </div>
@@ -5786,19 +5939,26 @@ const App = () => {
       </div>
 
       {showBulkProjectAssign && (
-        <div className={`fixed inset-0 z-50 flex items-center justify-center p-4 ${isDarkMode ? 'bg-black/70' : 'bg-black/50'}`}>
-          <div className={`rounded-[2rem] p-6 sm:p-10 w-full max-w-4xl shadow-2xl border flex flex-col max-h-[90vh] ${isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-slate-200'}`}>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className={`text-2xl font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Asignación Masiva de Proyectos</h2>
-              <button onClick={() => setShowBulkProjectAssign(false)} className={`p-2 rounded-full transition-colors ${isDarkMode ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-slate-100 text-slate-500'}`}>
+        <div className={`fixed inset-0 backdrop-blur-3xl flex items-center justify-center p-4 z-[100] overflow-y-auto ${isDarkMode ? 'bg-black/90' : 'bg-slate-900/95'}`}>
+          <div className={`rounded-[2.5rem] sm:rounded-[4rem] p-6 sm:p-12 md:p-16 w-full max-w-5xl shadow-2xl my-auto border-t-[8px] sm:border-t-[16px] border-indigo-600 animate-in zoom-in-95 duration-500 relative flex flex-col max-h-[90vh] ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white'}`}>
+            <div className="flex justify-between items-center mb-10">
+              <div className="space-y-1">
+                <h2 className={`text-4xl font-black tracking-tighter ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Asignación Masiva</h2>
+                <div className={`font-black uppercase tracking-[0.4em] text-[10px] flex items-center gap-4 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
+                  <div className={`w-8 h-1 ${isDarkMode ? 'bg-white/10' : 'bg-indigo-100'}`}></div> Automatización de Proyectos
+                </div>
+              </div>
+              <button onClick={() => setShowBulkProjectAssign(false)} className={`p-4 rounded-full border shadow-inner transition-colors ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-500 hover:text-red-500' : 'bg-slate-50 border-slate-100 text-slate-300 hover:text-red-500'}`}>
                 <X size={24} />
               </button>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 overflow-y-auto custom-scrollbar flex-1 pr-2">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className={`text-sm font-black uppercase tracking-widest ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>1. Seleccionar Alumnos</h3>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 overflow-y-auto custom-scrollbar flex-1 pr-4">
+              <div className="space-y-6">
+                <div className="flex items-center justify-between px-2">
+                  <h3 className={`text-xs font-black uppercase tracking-widest flex items-center gap-3 ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>
+                    <div className="w-2 h-2 rounded-full bg-indigo-500"></div> 1. Seleccionar Alumnos
+                  </h3>
                   <button 
                     onClick={() => {
                       if (selectedStudentsForBulk.length === students.length) {
@@ -5807,78 +5967,86 @@ const App = () => {
                         setSelectedStudentsForBulk(students.map(s => s.id));
                       }
                     }}
-                    className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-indigo-400 hover:text-indigo-300' : 'text-indigo-600 hover:text-indigo-800'}`}
+                    className={`text-[9px] font-black uppercase tracking-widest transition-colors ${isDarkMode ? 'text-gray-500 hover:text-indigo-400' : 'text-slate-400 hover:text-indigo-600'}`}
                   >
                     {selectedStudentsForBulk.length === students.length ? 'Deseleccionar Todos' : 'Seleccionar Todos'}
                   </button>
                 </div>
-                <div className={`border rounded-[1.5rem] p-4 max-h-[400px] overflow-y-auto custom-scrollbar ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-slate-50'}`}>
-                  {students.map(s => (
-                    <label key={s.id} className="flex items-start gap-3 p-3 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl cursor-pointer transition-colors">
-                      <input 
-                        type="checkbox" 
-                        className="w-4 h-4 mt-0.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                        checked={selectedStudentsForBulk.includes(s.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) setSelectedStudentsForBulk([...selectedStudentsForBulk, s.id]);
-                          else setSelectedStudentsForBulk(selectedStudentsForBulk.filter(id => id !== s.id));
-                        }}
-                      />
-                      <div className="flex flex-col flex-1 min-w-0">
-                        <span className={`text-[11px] font-black uppercase truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{s.name}</span>
-                        <span className={`text-[9px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>{s.career}</span>
-                        {(s.projectIds && s.projectIds.length > 0) && (
-                          <div className="flex flex-wrap gap-1 mt-1.5">
-                            {s.projectIds.map(pid => {
-                              const proj = projects.find(pr => pr.id === pid);
-                              if (!proj) return null;
-                              return (
-                                <span key={pid} className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[8px] font-black uppercase tracking-wider" style={{backgroundColor: `${proj.color}20`, color: proj.color}}>
-                                  <div className="w-1.5 h-1.5 rounded-full" style={{backgroundColor: proj.color}}></div>
-                                  <span className="truncate max-w-[80px]">{proj.name}</span>
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </label>
-                  ))}
+                <div className={`border rounded-[2rem] p-4 max-h-[450px] overflow-y-auto custom-scrollbar shadow-inner ${isDarkMode ? 'border-white/5 bg-white/2' : 'border-slate-100 bg-slate-50/50'}`}>
+                  <div className="grid grid-cols-1 gap-2">
+                    {students.map(s => (
+                      <label key={s.id} className={`flex items-start gap-4 p-4 rounded-2xl cursor-pointer transition-all border ${selectedStudentsForBulk.includes(s.id) ? (isDarkMode ? 'bg-indigo-500/10 border-indigo-500/30' : 'bg-white border-indigo-200 shadow-sm ring-2 ring-indigo-500/5') : (isDarkMode ? 'bg-transparent border-transparent hover:bg-white/5' : 'bg-transparent border-transparent hover:bg-white hover:shadow-sm hover:border-slate-100')}`}>
+                        <div className="pt-1">
+                          <input 
+                            type="checkbox" 
+                            className="w-5 h-5 rounded-lg border-2 border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer transition-all"
+                            checked={selectedStudentsForBulk.includes(s.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) setSelectedStudentsForBulk([...selectedStudentsForBulk, s.id]);
+                              else setSelectedStudentsForBulk(selectedStudentsForBulk.filter(id => id !== s.id));
+                            }}
+                          />
+                        </div>
+                        <div className="flex flex-col flex-1 min-w-0">
+                          <span className={`text-[11px] font-black uppercase truncate tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{s.name}</span>
+                          <span className={`text-[9px] font-bold uppercase tracking-widest mt-0.5 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>{s.career}</span>
+                          {(s.projectIds && s.projectIds.length > 0) && (
+                            <div className="flex flex-wrap gap-1.5 mt-2.5">
+                              {s.projectIds.map(pid => {
+                                const proj = projects.find(pr => pr.id === pid);
+                                if (!proj) return null;
+                                return (
+                                  <span key={pid} className={`flex items-center gap-1.5 px-2 py-1 rounded-full text-[8px] font-black uppercase tracking-wider border ${isDarkMode ? 'border-white/5 bg-white/5' : 'bg-white border-slate-100 shadow-sm'}`} style={{ color: proj.color }}>
+                                    <div className="w-1.5 h-1.5 rounded-full shadow-sm" style={{ backgroundColor: proj.color }}></div>
+                                    <span className="truncate max-w-[100px]">{proj.name}</span>
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <h3 className={`text-sm font-black uppercase tracking-widest ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>2. Seleccionar Proyectos a Asignar</h3>
-                <div className={`border rounded-[1.5rem] p-4 max-h-[400px] overflow-y-auto custom-scrollbar ${isDarkMode ? 'border-white/10 bg-white/5' : 'border-slate-100 bg-slate-50'}`}>
-                  {projects.map(p => (
-                    <label key={p.id} className="flex items-center gap-3 p-3 hover:bg-black/5 dark:hover:bg-white/5 rounded-xl cursor-pointer transition-colors">
-                      <input 
-                        type="checkbox" 
-                        className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                        checked={selectedProjectsForBulk.includes(p.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) setSelectedProjectsForBulk([...selectedProjectsForBulk, p.id]);
-                          else setSelectedProjectsForBulk(selectedProjectsForBulk.filter(id => id !== p.id));
-                        }}
-                      />
-                      <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }}></div>
-                      <span className={`flex-1 text-[11px] font-black uppercase truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{p.name}</span>
-                    </label>
-                  ))}
+              <div className="space-y-6">
+                <h3 className={`text-xs font-black uppercase tracking-widest flex items-center gap-3 px-2 ${isDarkMode ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                  <div className="w-2 h-2 rounded-full bg-emerald-500"></div> 2. Proyectos a Asignar
+                </h3>
+                <div className={`border rounded-[2rem] p-4 max-h-[450px] overflow-y-auto custom-scrollbar shadow-inner ${isDarkMode ? 'border-white/5 bg-white/2' : 'border-slate-100 bg-slate-50/50'}`}>
+                  <div className="grid grid-cols-1 gap-2">
+                    {projects.map(p => (
+                      <label key={p.id} className={`flex items-center gap-4 p-5 rounded-2xl cursor-pointer transition-all border ${selectedProjectsForBulk.includes(p.id) ? (isDarkMode ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-white border-emerald-200 shadow-sm ring-2 ring-emerald-500/5') : (isDarkMode ? 'bg-transparent border-transparent hover:bg-white/5' : 'bg-transparent border-transparent hover:bg-white hover:shadow-sm hover:border-slate-100')}`}>
+                        <input 
+                          type="checkbox" 
+                          className="w-5 h-5 rounded-lg border-2 border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer transition-all"
+                          checked={selectedProjectsForBulk.includes(p.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedProjectsForBulk([...selectedProjectsForBulk, p.id]);
+                            else setSelectedProjectsForBulk(selectedProjectsForBulk.filter(id => id !== p.id));
+                          }}
+                        />
+                        <div className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: p.color }}></div>
+                        <span className={`flex-1 text-[11px] font-black uppercase truncate tracking-widest ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{p.name}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="mt-8 pt-6 border-t flex justify-end gap-4 border-slate-200 dark:border-white/10">
+            <div className={`mt-10 pt-8 border-t flex flex-col sm:flex-row justify-end gap-4 ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`}>
               <button 
                 onClick={() => setShowBulkProjectAssign(false)} 
-                className={`px-6 py-3 rounded-xl font-black text-xs uppercase tracking-widest transition-colors ${isDarkMode ? 'bg-white/5 text-white hover:bg-white/10' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+                className={`px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] transition-all border ${isDarkMode ? 'bg-white/5 border-white/5 text-gray-500 hover:bg-white/10' : 'bg-slate-100 border-slate-100 text-slate-400 hover:bg-slate-200'}`}
               >
                 Cancelar
               </button>
               <button 
                 onClick={handleBulkAssignProjects}
-                className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-black text-xs uppercase tracking-widest shadow-lg hover:bg-indigo-700 active:scale-95 transition-all"
+                className={`px-10 py-4 rounded-2xl font-black text-[10px] uppercase tracking-[0.2em] shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3 ${isDarkMode ? 'bg-white text-black hover:bg-gray-200 shadow-white/5' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/20'}`}
               >
                 Asignar a {selectedStudentsForBulk.length} Alumnos
               </button>

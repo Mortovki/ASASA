@@ -32,6 +32,7 @@ const KanbanBoard = ({
   students, 
   updateTaskStatus, 
   updateTaskField, 
+  updateTaskFields,
   deleteTask, 
   addTask, 
   permissions, 
@@ -53,7 +54,7 @@ const KanbanBoard = ({
   const [proposalForm, setProposalForm] = useState({
     title: '',
     description: '',
-    type: 'feature',
+    type: 'LEVANTAMIENTO',
     effort: 1,
     startDate: currentStage?.startDate || new Date().toISOString(),
     endDate: currentStage?.endDate || new Date(Date.now() + 86400000).toISOString()
@@ -145,8 +146,9 @@ const KanbanBoard = ({
         status: statusId,
         priority: 3,
         effort: 1,
-        type: 'feature',
+        type: 'LEVANTAMIENTO',
         assignedTo: '',
+        assignedUsers: [],
         startDate: currentStage?.startDate || new Date().toISOString(),
         endDate: currentStage?.endDate || new Date(Date.now() + 86400000).toISOString(),
         stageId: currentStage?.id || '',
@@ -177,6 +179,7 @@ const KanbanBoard = ({
         status: 'pending_approval',
         priority: 3,
         assignedTo: currentUser?.uid,
+        assignedUsers: [currentUser?.uid].filter(Boolean),
         stageId: currentStage?.id || '',
         phase: currentStage?.name || '',
         epic: '',
@@ -190,7 +193,7 @@ const KanbanBoard = ({
         setProposalForm({
           title: '',
           description: '',
-          type: 'feature',
+          type: 'LEVANTAMIENTO',
           effort: 1,
           startDate: currentStage?.startDate || new Date().toISOString(),
           endDate: currentStage?.endDate || new Date(Date.now() + 86400000).toISOString()
@@ -205,7 +208,6 @@ const KanbanBoard = ({
   const handleApproveTask = async (task: any) => {
     try {
       await updateTaskStatus(task.id, 'working_on_it', 'pending_approval');
-      toast.success('Tarea aprobada');
     } catch (error) {
       console.error("Error approving task:", error);
       toast.error('Error al aprobar tarea');
@@ -220,7 +222,6 @@ const KanbanBoard = ({
     try {
       const { taskId } = rejectionModal;
       await updateTaskStatus(taskId, 'rejected', 'pending_approval');
-      toast.success('Tarea rechazada');
       setRejectionModal(null);
       setRejectionReason('');
     } catch (error) {
@@ -234,7 +235,6 @@ const KanbanBoard = ({
       const task = tasks.find((t: any) => t.id === taskId);
       if (task && task.status !== newStatus) {
         await updateTaskStatus(taskId, newStatus, task.status);
-        toast.success('Tarea movida');
       }
     } catch (error) {
       console.error("Error moving task:", error);
@@ -331,8 +331,8 @@ const KanbanBoard = ({
         <div 
           ref={boardRef}
           className={`flex-1 p-4 overflow-x-auto custom-scrollbar
-            ${layout === 'desktop' ? 'grid grid-cols-[repeat(6,minmax(220px,1fr))] gap-4 snap-x snap-mandatory overscroll-x-contain' : ''}
-            ${layout === 'tablet' ? 'grid grid-cols-[repeat(6,minmax(300px,1fr))] gap-4 snap-x snap-mandatory overscroll-x-contain' : ''}
+            ${layout === 'desktop' ? 'grid grid-cols-[repeat(6,minmax(250px,1fr))] gap-4 snap-x snap-mandatory overscroll-x-contain' : ''}
+            ${layout === 'tablet' ? 'grid grid-cols-[repeat(6,minmax(320px,1fr))] gap-4 snap-x snap-mandatory overscroll-x-contain' : ''}
             ${layout === 'mobile' ? 'flex flex-col h-full' : ''}
           `}
         >
@@ -370,6 +370,7 @@ const KanbanBoard = ({
                             draggedTask={draggedTask}
                             initials={initials}
                             assignedStudent={assignedStudent}
+                            students={students}
                             onSelect={setSelectedTaskId}
                             onDelete={deleteTask}
                             onApprove={handleApproveTask}
@@ -412,6 +413,7 @@ const KanbanBoard = ({
                         draggedTask={draggedTask}
                         initials={initials}
                         assignedStudent={assignedStudent}
+                        students={students}
                         onSelect={setSelectedTaskId}
                         onDelete={deleteTask}
                         onApprove={handleApproveTask}
@@ -505,12 +507,21 @@ const KanbanBoard = ({
                   <div className="space-y-2">
                     <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Tipo</label>
                     <select 
-                      value={proposalForm.type || 'feature'}
+                      value={proposalForm.type || 'LEVANTAMIENTO'}
                       onChange={e => setProposalForm({...proposalForm, type: e.target.value})}
                       className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-bold ${isDarkMode ? 'bg-white/5 border-white/5 text-white' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     >
-                      {['feature', 'bug', 'quality', 'security', 'operations'].map(t => (
-                        <option key={t} value={t} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+                      {[
+                        'LEVANTAMIENTO',
+                        'DIAGNÓSTICO',
+                        'SOCIAL / TALLER',
+                        'REUNIÓN / COORDINACIÓN',
+                        'DISEÑO / MODELADO',
+                        'PLANOS EJECUTIVOS',
+                        'COSTOS Y PRESUPUESTO',
+                        'REVISIÓN / ENTREGA'
+                      ].map(t => (
+                        <option key={t} value={t} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{t}</option>
                       ))}
                     </select>
                   </div>
@@ -621,6 +632,7 @@ const KanbanBoard = ({
             students={students}
             updateTaskStatus={updateTaskStatus}
             updateTaskField={updateTaskField}
+            updateTaskFields={updateTaskFields}
             deleteTask={deleteTask}
             isDarkMode={isDarkMode}
           />

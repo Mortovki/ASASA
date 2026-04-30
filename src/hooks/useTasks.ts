@@ -291,6 +291,51 @@ export const useTasks = (projectId: string | null, userRole: string = 'user') =>
     }
   };
 
+  const updateTaskFields = async (taskId: string, fieldUpdates: Record<string, any>, oldValues: Record<string, any>) => {
+    if (!projectId || !auth.currentUser) return;
+
+    const batch = writeBatch(db);
+    const taskRef = doc(db, 'projects', projectId, 'tasks', taskId);
+
+    const updates: any = {};
+    for (const [field, newValue] of Object.entries(fieldUpdates)) {
+      updates[field] = newValue === undefined ? deleteField() : newValue;
+      
+      await logActivity(batch, taskId, {
+        type: 'field_update',
+        field: field,
+        oldValue: oldValues[field],
+        newValue,
+        authorUid: auth.currentUser.uid,
+        authorName: auth.currentUser.displayName || 'Usuario'
+      });
+    }
+
+    batch.update(taskRef, updates);
+
+    try {
+      await batch.commit();
+      toast.success('Tarea actualizada');
+
+      const currentUser = {
+        uid: auth.currentUser.uid,
+        firstName: auth.currentUser.displayName?.split(' ')[0] || 'Usuario',
+        lastNamePaterno: auth.currentUser.displayName?.split(' ')[1] || ''
+      };
+
+      const task = tasks.find(t => t.id === taskId);
+      if (task) {
+        if (fieldUpdates.assignedTo && fieldUpdates.assignedTo !== oldValues.assignedTo) {
+          await notifyTaskAssigned(fieldUpdates.assignedTo, task, currentUser);
+        }
+      }
+    } catch (err) {
+      console.error('Error updating task fields:', err);
+      toast.error('Error al actualizar la tarea');
+      handleFirestoreError(err, OperationType.UPDATE, `projects/${projectId}/tasks/${taskId}`);
+    }
+  };
+
   const updateTaskDates = async (taskId: string, newStart: Date, newEnd: Date) => {
     if (!projectId || !auth.currentUser) return;
 
@@ -511,6 +556,7 @@ export const useTasks = (projectId: string | null, userRole: string = 'user') =>
     error,
     updateTaskStatus,
     updateTaskField,
+    updateTaskFields,
     updateTaskDates,
     deleteTask,
     restoreTask,

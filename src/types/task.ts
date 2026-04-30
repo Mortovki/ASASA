@@ -1,5 +1,13 @@
 export type TaskStatus = 'pending_approval' | 'todo' | 'working_on_it' | 'waiting_review' | 'stuck' | 'done' | 'rejected';
-export type TaskType = 'feature' | 'bug' | 'quality' | 'security' | 'operations';
+export type TaskType = 
+  | 'LEVANTAMIENTO'
+  | 'DIAGNÓSTICO'
+  | 'SOCIAL / TALLER'
+  | 'REUNIÓN / COORDINACIÓN'
+  | 'DISEÑO / MODELADO'
+  | 'PLANOS EJECUTIVOS'
+  | 'COSTOS Y PRESUPUESTO'
+  | 'REVISIÓN / ENTREGA';
 
 export interface Task {
   id: string;
@@ -9,9 +17,13 @@ export interface Task {
   status: TaskStatus;
   priority: 1 | 2 | 3 | 4 | 5;
   effort?: number;
+  startTime?: string;
+  endTime?: string;
+  totalActualHours?: number;
   resources?: string[];
   type: TaskType;
   assignedTo?: string;
+  assignedUsers?: string[];
   startDate?: string;
   endDate?: string;
   phase?: string;
@@ -20,6 +32,7 @@ export interface Task {
   color?: string;
   stageId?: string | null;
   epic?: string;
+  isMilestone?: boolean;
   estimatedSP?: number;
   categoryId?: string;
   createdAt: string;

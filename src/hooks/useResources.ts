@@ -15,14 +15,9 @@ import { handleFirestoreError, OperationType } from '../firebase';
 
 export type ResourceType = 
   | 'drive' 
-  | 'docs' 
-  | 'sheets' 
   | 'canva' 
   | 'onedrive' 
-  | 'figma' 
-  | 'notion' 
   | 'youtube' 
-  | 'github' 
   | 'link';
 
 export interface ProjectResource {

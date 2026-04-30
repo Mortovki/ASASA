@@ -18,7 +18,10 @@ const Login = () => {
       if (error.code === 'auth/popup-blocked') {
         showErrorToast('El navegador bloqueó la ventana emergente. Por favor, permite las ventanas emergentes para este sitio.');
       } else if (error.code === 'auth/popup-closed-by-user') {
-        showErrorToast('Se cerró la ventana de inicio de sesión antes de completar el proceso.');
+        showErrorToast('Se cerró la ventana de inicio de sesión. Por favor, asegúrate de no cerrarla manualmente y que tu navegador no la bloquee.');
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        // This can happen if user clicks twice rapidly
+        console.log("Cancelled popup request");
       } else if (error.code === 'auth/unauthorized-domain') {
         showErrorToast('Este dominio no está autorizado para el inicio de sesión con Google. Revisa la configuración en la consola de Firebase.');
       } else {

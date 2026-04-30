@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Save, Edit2, Trash2, MessageSquare, Clock, User, Users, Tag, Star, Calendar, FileText, History, CheckCircle2, XCircle, GitBranch } from 'lucide-react';
+import { X, Save, Edit2, Trash2, MessageSquare, Clock, User, Users, Tag, Star, Calendar, FileText, History, CheckCircle2, XCircle, GitBranch, Mail, Phone, MapPin, AlertTriangle } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc, collection, query, onSnapshot, addDoc, deleteDoc, orderBy } from 'firebase/firestore';
 import toast from 'react-hot-toast';
@@ -19,7 +19,36 @@ const STATUS_OPTIONS = KANBAN_COLUMNS.map(col => ({
   color: `${col.bg} ${col.color.replace('bg-', 'text-')}`
 }));
 
-const TYPE_OPTIONS = ['feature', 'bug', 'quality', 'security', 'operations'];
+const TYPE_OPTIONS = [
+  'LEVANTAMIENTO',
+  'DIAGNÓSTICO',
+  'SOCIAL / TALLER',
+  'REUNIÓN / COORDINACIÓN',
+  'DISEÑO / MODELADO',
+  'PLANOS EJECUTIVOS',
+  'COSTOS Y PRESUPUESTO',
+  'REVISIÓN / ENTREGA'
+];
+
+const FIELD_LABELS: Record<string, string> = {
+  title: 'Título',
+  description: 'Descripción',
+  status: 'Estado',
+  priority: 'Prioridad',
+  effort: 'Esfuerzo',
+  startDate: 'Fecha Inicio',
+  endDate: 'Fecha Fin',
+  startTime: 'Hora Inicio',
+  endTime: 'Hora Fin',
+  totalActualHours: 'Total Horas',
+  assignedTo: 'Responsable',
+  assignedUsers: 'Alumnos Asignados',
+  type: 'Tipo',
+  phase: 'Fase/Sprint',
+  resources: 'Recursos',
+  color: 'Color',
+  isMilestone: 'Es Hito'
+};
 
 const TaskSidePanel = ({ 
   taskId, 
@@ -30,6 +59,7 @@ const TaskSidePanel = ({
   students,
   updateTaskStatus,
   updateTaskField,
+  updateTaskFields,
   deleteTask,
   isDarkMode
 }: any) => {
@@ -91,24 +121,57 @@ const TaskSidePanel = ({
     };
   }, [taskId, projectId]);
 
+  useEffect(() => {
+    if (editForm.startTime && editForm.endTime) {
+      const [sH, sM] = editForm.startTime.split(':').map(Number);
+      const [eH, eM] = editForm.endTime.split(':').map(Number);
+      let diff = (eH * 60 + eM) - (sH * 60 + sM);
+      if (diff < 0) diff += 24 * 60; // Overnight
+      const total = parseFloat((diff / 60).toFixed(2));
+      if (editForm.totalActualHours !== total) {
+        setEditForm((prev: any) => ({ ...prev, totalActualHours: total }));
+      }
+    }
+  }, [editForm.startTime, editForm.endTime]);
+
   const handleSave = async () => {
     if (!permissions.canEditTask) {
       toast.error('No tienes permisos para editar tareas');
       return;
     }
     try {
-      if (updateTaskField) {
-        // Update multiple fields if possible, or loop
+      const excludedFields = [
+        'id', 'createdAt', 'createdBy', 'projectId', 'updatedAt', 
+        'lastMovedAt', 'lastMovedBy', 'lastMovedFrom', 'completedAt', 
+        'deletedAt', 'deletedBy', 'noteCount'
+      ];
+
+      if (updateTaskFields) {
+        const fieldUpdates: Record<string, any> = {};
+        const oldValues: Record<string, any> = {};
+        let hasChanges = false;
+
         for (const [key, value] of Object.entries(editForm)) {
-          if (task[key] !== value && key !== 'id') {
-            await updateTaskField(taskId, key, value, task[key]);
+          if (!excludedFields.includes(key) && JSON.stringify(task[key]) !== JSON.stringify(value)) {
+            fieldUpdates[key] = value;
+            oldValues[key] = task[key];
+            hasChanges = true;
+          }
+        }
+
+        if (hasChanges) {
+          await updateTaskFields(taskId, fieldUpdates, oldValues);
+        }
+      } else if (updateTaskField) {
+        for (const [key, value] of Object.entries(editForm)) {
+          if (!excludedFields.includes(key) && JSON.stringify(task[key]) !== JSON.stringify(value)) {
+            await updateTaskField(taskId, key as any, value, task[key]);
           }
         }
       } else {
         await updateDoc(doc(db, `projects/${projectId}/tasks/${taskId}`), editForm);
       }
       setIsEditing(false);
-      toast.success('Tarea actualizada');
     } catch (error) {
       console.error("Error updating task:", error);
       toast.error('Error al actualizar tarea');
@@ -126,7 +189,6 @@ const TaskSidePanel = ({
       } else {
         await updateDoc(doc(db, `projects/${projectId}/tasks/${taskId}`), { status: newStatus });
       }
-      toast.success('Estado actualizado');
     } catch (error) {
       console.error("Error updating status:", error);
       toast.error('Error al actualizar estado');
@@ -224,6 +286,26 @@ const TaskSidePanel = ({
     }
   };
 
+  const handleHardDeleteNote = async (noteId: string) => {
+    if (!permissions.isAdmin) {
+      toast.error('No tienes permisos para esta acción');
+      return;
+    }
+    
+    if (!window.confirm('¿Estás seguro de eliminar este comentario permanentemente? Esta acción no se puede deshacer.')) {
+      return;
+    }
+
+    try {
+      const noteRef = doc(db, `projects/${projectId}/tasks/${taskId}/notes`, noteId);
+      await deleteDoc(noteRef);
+      toast.success('Nota eliminada permanentemente');
+    } catch (error) {
+      console.error("Error hard deleting note:", error);
+      toast.error('Error al eliminar nota');
+    }
+  };
+
   const handleDelete = async () => {
     if (!permissions.canDeleteTask) {
       toast.error('No tienes permisos para eliminar tareas');
@@ -235,7 +317,6 @@ const TaskSidePanel = ({
       } else {
         await deleteDoc(doc(db, `projects/${projectId}/tasks/${taskId}`));
       }
-      toast.success('Tarea eliminada');
       onClose();
     } catch (error) {
       console.error("Error deleting task:", error);
@@ -247,7 +328,6 @@ const TaskSidePanel = ({
     if (!permissions.canApproveTask) return;
     try {
       await updateTaskStatus(taskId, 'todo', 'pending_approval');
-      toast.success('Tarea aprobada');
     } catch (error) {
       console.error("Error approving task:", error);
       toast.error('Error al aprobar tarea');
@@ -273,7 +353,6 @@ const TaskSidePanel = ({
         editHistory: []
       });
 
-      toast.success('Tarea rechazada');
       setRejectionModal(false);
       setRejectionReason('');
     } catch (error) {
@@ -332,23 +411,78 @@ const TaskSidePanel = ({
                 </select>
 
                 <div className={`flex items-center gap-2 text-xs sm:text-sm ${isDarkMode ? 'text-slate-400' : 'text-slate-500'} font-semibold`}>
-                  <User size={14} className="sm:w-4 sm:h-4" />
+                  <Users size={14} className="sm:w-4 sm:h-4" />
                   {isEditing ? (
-                    <select 
-                      value={editForm.assignedTo || ''} 
-                      onChange={e => setEditForm({...editForm, assignedTo: e.target.value})}
-                      className={`${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-slate-200'} border rounded-lg px-2 py-1 outline-none text-xs sm:text-sm`}
-                    >
-                      <option value="" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Sin asignar</option>
-                      {students.map((s: any, idx: number) => (
-                        <option key={`${s.id || 'student'}-${idx}`} value={s.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{formatName(s.firstName, s.lastNamePaterno)}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <span className="truncate max-w-[100px] sm:max-w-none" title={students.find((s: any) => s.id === task?.assignedTo)?.career || ''}>
-                      {formatName(students.find((s: any) => s.id === task?.assignedTo)?.firstName, students.find((s: any) => s.id === task?.assignedTo)?.lastNamePaterno)}
-                    </span>
-                  )}
+                    <div className="flex flex-col gap-2">
+                      <div className="flex flex-wrap gap-1 mb-1">
+                        {(editForm.assignedUsers || []).map((uid: string) => {
+                          const student = students.find((s: any) => s.id === uid);
+                          return student ? (
+                            <span key={uid} className={`px-2 py-0.5 rounded-md ${isDarkMode ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-100 text-indigo-700'} text-[10px] flex items-center gap-1`}>
+                              {formatName(student.firstName, student.lastNamePaterno)}
+                              <button 
+                                onClick={() => setEditForm({
+                                  ...editForm, 
+                                  assignedUsers: editForm.assignedUsers.filter((id: string) => id !== uid),
+                                  assignedTo: editForm.assignedUsers.filter((id: string) => id !== uid)[0] || ''
+                                })}
+                                className="hover:text-indigo-900"
+                              >
+                                <X size={10} />
+                              </button>
+                            </span>
+                          ) : null;
+                        })}
+                      </div>
+                      <select 
+                        value="" 
+                        onChange={e => {
+                          const newId = e.target.value;
+                          if (!newId) return;
+                          const current = editForm.assignedUsers || [];
+                          if (!current.includes(newId)) {
+                            const updated = [...current, newId];
+                            setEditForm({
+                              ...editForm, 
+                              assignedUsers: updated,
+                              assignedTo: updated[0] || ''
+                            });
+                          }
+                        }}
+                        className={`${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-slate-200'} border rounded-lg px-2 py-1 outline-none text-xs sm:text-sm`}
+                      >
+                        <option value="" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Agregar alumno...</option>
+                        {students.map((s: any, idx: number) => (
+                          <option key={`${s.id || 'student'}-${idx}`} value={s.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{formatName(s.firstName, s.lastNamePaterno)}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : (() => {
+                    const assignedUids = task?.assignedUsers || (task?.assignedTo ? [task.assignedTo] : []);
+                    if (assignedUids.length === 0) return <span className="italic opacity-50">Sin asignar</span>;
+                    
+                    return (
+                      <div className="flex flex-wrap gap-2">
+                        {assignedUids.map((uid: string) => {
+                          const s = students.find((student: any) => student.id === uid);
+                          return s ? (
+                            <div key={uid} className="flex flex-col gap-0.5 border-l-2 border-indigo-400 pl-2">
+                              <span className="truncate max-w-[120px] font-bold" title={s?.career || ''}>
+                                {formatName(s?.firstName, s?.lastNamePaterno)}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                {s.email && (
+                                  <a href={`mailto:${s.email}`} className="text-[9px] hover:text-indigo-500 transition-colors">
+                                    {s.email}
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          ) : null;
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -457,6 +591,29 @@ const TaskSidePanel = ({
                 )}
               </div>
               <div className="space-y-1">
+                <span className={`text-[10px] font-black ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-1`}><Clock size={12}/> Hora Inicio</span>
+                {isEditing ? (
+                  <input type="time" value={editForm.startTime || ''} onChange={e => setEditForm({...editForm, startTime: e.target.value})} className={`w-full text-sm font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg px-2 py-1 outline-none`} />
+                ) : (
+                  <p className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} text-sm`}>{task?.startTime || '-'}</p>
+                )}
+              </div>
+              <div className="space-y-1">
+                <span className={`text-[10px] font-black ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-1`}><Clock size={12}/> Hora Fin</span>
+                {isEditing ? (
+                  <input type="time" value={editForm.endTime || ''} onChange={e => setEditForm({...editForm, endTime: e.target.value})} className={`w-full text-sm font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg px-2 py-1 outline-none`} />
+                ) : (
+                  <p className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} text-sm`}>{task?.endTime || '-'}</p>
+                )}
+              </div>
+              <div className="space-y-1">
+                <span className={`text-[10px] font-black ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-1`}><Clock size={12}/> Total Horas</span>
+                <p className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} text-sm`}>{isEditing ? editForm.totalActualHours : task?.totalActualHours || 0} hrs</p>
+              </div>
+              <div className="space-y-1 text-slate-400 italic text-[10px]">
+                * Calculado automáticamente
+              </div>
+              <div className="space-y-1">
                 <span className={`text-[10px] font-black ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-1`}><Tag size={12}/> Sprint/Fase</span>
                 {isEditing ? (
                   <input type="text" value={editForm.phase || ''} onChange={e => setEditForm({...editForm, phase: e.target.value})} className={`w-full text-sm font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg px-2 py-1 outline-none`} />
@@ -493,6 +650,25 @@ const TaskSidePanel = ({
                     <div className={`w-6 h-6 rounded-lg border ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`} style={{ backgroundColor: task?.color || '#6366f1' }} />
                     <span className={`text-xs font-bold ${isDarkMode ? 'text-slate-500' : 'text-slate-500'} font-mono uppercase`}>{task?.color || '#6366f1'}</span>
                   </div>
+                )}
+              </div>
+              <div className="space-y-1">
+                <span className={`text-[10px] font-black ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-1`}><MapPin size={12}/> Tipo de Tarea</span>
+                {isEditing ? (
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="checkbox" 
+                      id="isMilestone"
+                      checked={editForm.isMilestone || false} 
+                      onChange={e => setEditForm({...editForm, isMilestone: e.target.checked})} 
+                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <label htmlFor="isMilestone" className={`text-sm font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'}`}>Es un HITO</label>
+                  </div>
+                ) : (
+                  <p className={`font-bold ${task?.isMilestone ? 'text-indigo-500' : (isDarkMode ? 'text-slate-500' : 'text-slate-500')} text-sm`}>
+                    {task?.isMilestone ? '📍 HITO / MILESTONE' : 'Actividad Normal'}
+                  </p>
                 )}
               </div>
               <div className="space-y-1">
@@ -575,21 +751,34 @@ const TaskSidePanel = ({
                               </p>
                             </div>
                           </div>
-                          {!note.isDeleted && (note.authorUid === currentUser?.uid || permissions.isAdmin) && (
+                          {(!note.isDeleted || permissions.isAdmin) && (
                             <div className="flex items-center gap-1">
-                              {(note.authorUid === currentUser?.uid || permissions.isAdmin) && (
+                              {!note.isDeleted && (note.authorUid === currentUser?.uid || permissions.isAdmin) && (
                                 <button 
                                   onClick={() => {
                                     setEditingNoteId(note.id);
                                     setEditNoteContent(note.content);
                                   }}
                                   className={`text-slate-400 ${isDarkMode ? 'hover:text-indigo-400' : 'hover:text-indigo-600'} p-1`}
+                                  title="Editar nota"
                                 ><Edit2 size={14} /></button>
                               )}
-                              <button 
-                                onClick={() => handleDeleteNote(note.id)}
-                                className={`text-slate-400 ${isDarkMode ? 'hover:text-red-400' : 'hover:text-red-600'} p-1`}
-                              ><Trash2 size={14} /></button>
+                              
+                              {!note.isDeleted && (note.authorUid === currentUser?.uid || permissions.isAdmin) && (
+                                <button 
+                                  onClick={() => handleDeleteNote(note.id)}
+                                  className={`text-slate-400 ${isDarkMode ? 'hover:text-amber-400' : 'hover:text-amber-600'} p-1`}
+                                  title="Ocultar nota (Soft delete)"
+                                ><Trash2 size={14} /></button>
+                              )}
+
+                              {permissions.isAdmin && (
+                                <button 
+                                  onClick={() => handleHardDeleteNote(note.id)}
+                                  className={`text-slate-400 ${isDarkMode ? 'hover:text-red-400' : 'hover:text-red-600'} p-1`}
+                                  title="Eliminar permanentemente (Hard delete)"
+                                ><X size={14} /></button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -770,9 +959,16 @@ const TaskSidePanel = ({
                           </div>
                           <p className={`text-xs ${isDarkMode ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
                             {item.type === 'status_change' ? (
-                              <>Cambió el estado de <span className={`font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{STATUS_OPTIONS.find(o => o.value === item.oldValue)?.label}</span> a <span className="font-bold text-indigo-600">{STATUS_OPTIONS.find(o => o.value === item.newValue)?.label}</span></>
+                              <>Cambió el estado de <span className={`font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-900'}`}>{STATUS_OPTIONS.find(o => o.value === item.oldValue)?.label || item.oldValue}</span> a <span className="font-bold text-indigo-600">{STATUS_OPTIONS.find(o => o.value === item.newValue)?.label || item.newValue}</span></>
                             ) : item.type === 'field_update' ? (
-                              <>Actualizó <span className={`font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-900'} capitalize`}>{item.field}</span></>
+                              <>
+                                Actualizó <span className={`font-bold ${isDarkMode ? 'text-slate-200' : 'text-slate-900'} capitalize`}>{FIELD_LABELS[item.field] || item.field}</span>
+                                {item.oldValue !== undefined && item.newValue !== undefined && (
+                                  <span className="block mt-1 opacity-70">
+                                    De <span className="italic">{String(item.oldValue)}</span> a <span className="font-bold">{String(item.newValue)}</span>
+                                  </span>
+                                )}
+                              </>
                             ) : (
                               <>{item.type}</>
                             )}
