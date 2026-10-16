@@ -13,28 +13,61 @@ interface StageEditorProps {
   tasks: any[];
   onSave: (stages: Stage[], startDate?: string | null, endDate?: string | null) => Promise<void>;
   isDarkMode?: boolean;
+  addTask?: (task: any) => Promise<string | void>;
+  updateTaskStatus?: (taskId: string, newStatus: any, oldStatus?: any) => Promise<void>;
+  updateTaskField?: (taskId: string, field: string, value: any, oldValue?: any) => Promise<void>;
+  deleteTask?: (taskId: string) => Promise<void>;
+  students?: any[];
+  currentUser?: any;
+  userRole?: string;
+  permissions?: any;
+  onSelectTask?: (taskId: string) => void;
 }
 
-export const StageEditor = ({ project, tasks, onSave, isDarkMode }: StageEditorProps) => {
-  const [stages, setStages] = useState<Stage[]>(project.stages || []);
-  const [startDate, setStartDate] = useState<string>(project.startDate || '');
-  const [endDate, setEndDate] = useState<string>(project.endDate || '');
+export const StageEditor = ({ 
+  project, 
+  tasks = [], 
+  onSave, 
+  isDarkMode,
+  addTask,
+  updateTaskStatus,
+  updateTaskField,
+  deleteTask,
+  students = [],
+  currentUser,
+  userRole,
+  permissions,
+  onSelectTask
+}: StageEditorProps) => {
+  const [stages, setStages] = useState<Stage[]>(project?.stages || []);
+  const [startDate, setStartDate] = useState<string>(project?.startDate || '');
+  const [endDate, setEndDate] = useState<string>(project?.endDate || '');
   const [isSaving, setIsSaving] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [stageToDelete, setStageToDelete] = useState<string | null>(null);
 
+  // Sync internal state when project loads or updates asynchronously
+  useEffect(() => {
+    if (project) {
+      setStages(project.stages || []);
+      setStartDate(project.startDate || '');
+      setEndDate(project.endDate || '');
+    }
+  }, [project?.id, project?.stages, project?.startDate, project?.endDate]);
+
   // Calculate KPIs
   const kpis = React.useMemo(() => {
+    const safeTasks = Array.isArray(tasks) ? tasks : [];
     const totalStages = stages.length;
-    const activeTasks = tasks.filter(t => t.status !== 'done').length;
-    const doneTasks = tasks.filter(t => t.status === 'done').length;
-    const totalTasks = tasks.length;
+    const activeTasks = safeTasks.filter(t => t.status !== 'done').length;
+    const doneTasks = safeTasks.filter(t => t.status === 'done').length;
+    const totalTasks = safeTasks.length;
     const progress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
-    const totalSP = tasks.reduce((acc, t) => {
+    const totalSP = safeTasks.reduce((acc, t) => {
       const val = parseFloat(t.estimatedSP);
       return acc + (isNaN(val) ? 0 : val);
     }, 0);
-    const doneSP = tasks.filter(t => t.status === 'done').reduce((acc, t) => {
+    const doneSP = safeTasks.filter(t => t.status === 'done').reduce((acc, t) => {
       const val = parseFloat(t.estimatedSP);
       return acc + (isNaN(val) ? 0 : val);
     }, 0);
@@ -50,7 +83,7 @@ export const StageEditor = ({ project, tasks, onSave, isDarkMode }: StageEditorP
   const addStage = () => {
     const newStage: Stage = {
       id: nanoid(6),
-      projectId: project.id,
+      projectId: project?.id || '',
       name: '',
       color: '#3b82f6',
       startDate: new Date().toISOString(),
@@ -82,26 +115,40 @@ export const StageEditor = ({ project, tasks, onSave, isDarkMode }: StageEditorP
     const preset = STAGE_PRESETS[presetKey];
     if (!preset) return;
 
-    const newStages: Stage[] = preset.map((p, index) => ({
-      id: nanoid(6),
-      projectId: project.id,
-      name: p.name || '',
-      color: p.color || '#3b82f6',
-      startDate: new Date().toISOString(),
-      endDate: new Date(Date.now() + 86400000).toISOString(),
-      description: '',
-      order: index,
-      status: 'pending',
-      leaderId: null,
-      spTotal: 0,
-      spDone: 0,
-      sprintIds: [],
-      predecessors: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    }));
+    const base = new Date();
+    base.setHours(9, 0, 0, 0);
+
+    // Pre-generate IDs so predecessors can be accurately linked
+    const stageIds = preset.map(() => nanoid(6));
+
+    const newStages: Stage[] = preset.map((p, index) => {
+      const stageStart = new Date(base);
+      stageStart.setDate(stageStart.getDate() + (index * 14));
+      const stageEnd = new Date(stageStart);
+      stageEnd.setDate(stageEnd.getDate() + 14);
+
+      return {
+        id: stageIds[index],
+        projectId: project?.id || '',
+        name: p.name || '',
+        color: p.color || '#3b82f6',
+        startDate: stageStart.toISOString().split('T')[0],
+        endDate: stageEnd.toISOString().split('T')[0],
+        description: p.description || '',
+        order: index,
+        status: index === 0 ? 'completed' : index === 1 ? 'active' : 'pending',
+        leaderId: null,
+        spTotal: 0,
+        spDone: 0,
+        sprintIds: [],
+        predecessors: index > 0 ? [stageIds[index - 1]] : [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+    });
+
     setStages(newStages);
-    toast.success(`Preset "${STAGE_PRESET_LABELS[presetKey]}" aplicado`);
+    toast.success(`Preset "${STAGE_PRESET_LABELS[presetKey]}" aplicado con fases interdependientes`);
   };
 
   const handleSave = async () => {
@@ -119,6 +166,15 @@ export const StageEditor = ({ project, tasks, onSave, isDarkMode }: StageEditorP
       setIsSaving(false);
     }
   };
+
+  if (!project) {
+    return (
+      <div className={`p-8 rounded-2xl text-center border ${isDarkMode ? 'bg-[#1a1a1a] border-white/10 text-gray-400' : 'bg-white border-slate-200 text-slate-500'}`}>
+        <div className="animate-spin w-8 h-8 border-3 border-indigo-600 border-t-transparent rounded-full mx-auto mb-3" />
+        <p className="font-semibold text-sm">Cargando información de las etapas del proyecto...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-20">
@@ -283,9 +339,20 @@ export const StageEditor = ({ project, tasks, onSave, isDarkMode }: StageEditorP
                     key={stage.id}
                     stage={stage}
                     index={index}
+                    allStages={stages}
+                    tasks={tasks}
                     onUpdate={updateStage}
                     onRemove={(id) => setStageToDelete(id)}
                     isDarkMode={isDarkMode}
+                    addTask={addTask}
+                    updateTaskStatus={updateTaskStatus}
+                    updateTaskField={updateTaskField}
+                    deleteTask={deleteTask}
+                    students={students}
+                    currentUser={currentUser}
+                    userRole={userRole}
+                    permissions={permissions}
+                    onSelectTask={onSelectTask}
                   />
                 ))}
               </div>

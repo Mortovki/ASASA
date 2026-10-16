@@ -8,7 +8,11 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Use the specific database ID for this project to avoid initialization errors
+const firestoreDatabaseId = (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-b67305f5-5703-4b56-b34e-a97c8b8e5544';
+export const db = getFirestore(app, firestoreDatabaseId);
+
 export const storage = getStorage(app);
 
 export enum OperationType {

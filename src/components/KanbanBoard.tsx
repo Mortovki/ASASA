@@ -11,7 +11,9 @@ import {
   ChevronRight,
   MoveHorizontal,
   LayoutGrid,
-  List
+  List,
+  Layers,
+  Zap
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import TaskSidePanel from './TaskSidePanel';
@@ -30,9 +32,11 @@ const KanbanBoard = ({
   userRole, 
   currentUser, 
   students, 
+  sprints = [],
+  onOpenSprintConfig,
   updateTaskStatus, 
   updateTaskField, 
-  updateTaskFields,
+  updateTaskFields, 
   deleteTask, 
   addTask, 
   permissions, 
@@ -46,6 +50,8 @@ const KanbanBoard = ({
   const [rejectionModal, setRejectionModal] = useState<{ taskId: string, title: string } | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
+  const [selectedStageId, setSelectedStageId] = useState<string>('all');
+  const [selectedSprintId, setSelectedSprintId] = useState<string>('all');
   
   const { layout, activeColumnId, setActiveColumn, columnCount } = useKanbanLayout();
   
@@ -74,15 +80,24 @@ const KanbanBoard = ({
 
   const cpmTasks = useMemo(() => {
     try {
-      const filteredByStage = currentStage 
-        ? tasks.filter((t: any) => t.stageId === currentStage.id)
-        : tasks;
-      return computeCriticalPath(filteredByStage as Task[]);
+      let filtered = tasks;
+      if (selectedStageId !== 'all') {
+        const stageObj = project?.stages?.find((s: any) => s.id === selectedStageId);
+        filtered = filtered.filter((t: any) => t.stageId === selectedStageId || (stageObj && t.phase === stageObj.name));
+      }
+      if (selectedSprintId !== 'all') {
+        if (selectedSprintId === 'unassigned') {
+          filtered = filtered.filter((t: any) => !t.sprintId);
+        } else {
+          filtered = filtered.filter((t: any) => t.sprintId === selectedSprintId);
+        }
+      }
+      return computeCriticalPath(filtered as Task[]);
     } catch (e) {
       console.error("Error computing CPM:", e);
       return tasks as Task[];
     }
-  }, [tasks, currentStage]);
+  }, [tasks, selectedStageId, selectedSprintId, project?.stages]);
 
   const columnsToRender = useMemo(() => {
     const baseColumns = KANBAN_COLUMNS.filter(c => !c.hideFromBoard);
@@ -140,6 +155,13 @@ const KanbanBoard = ({
     }
 
     try {
+      const targetStage = selectedStageId !== 'all'
+        ? project?.stages?.find((s: any) => s.id === selectedStageId)
+        : currentStage;
+      const targetSprint = (selectedSprintId !== 'all' && selectedSprintId !== 'unassigned')
+        ? sprints.find((s: any) => s.id === selectedSprintId)
+        : null;
+
       const newTask = {
         title: 'Nueva Tarea',
         description: '',
@@ -149,11 +171,12 @@ const KanbanBoard = ({
         type: 'LEVANTAMIENTO',
         assignedTo: '',
         assignedUsers: [],
-        startDate: currentStage?.startDate || new Date().toISOString(),
-        endDate: currentStage?.endDate || new Date(Date.now() + 86400000).toISOString(),
-        stageId: currentStage?.id || '',
-        phase: currentStage?.name || 'Sprint 1',
-        epic: '',
+        startDate: targetStage?.startDate || targetSprint?.startDate || new Date().toISOString(),
+        endDate: targetStage?.endDate || targetSprint?.endDate || new Date(Date.now() + 86400000).toISOString(),
+        stageId: targetStage?.id || null,
+        sprintId: targetSprint?.id || null,
+        phase: targetStage?.name || targetSprint?.name || 'Sprint 1',
+        epic: targetStage ? `Fase ${targetStage.name.split(':')[0]}` : '',
         estimatedSP: 1,
         categoryId: ''
       };
@@ -174,6 +197,10 @@ const KanbanBoard = ({
       return;
     }
     try {
+      const targetSprint = (selectedSprintId !== 'all' && selectedSprintId !== 'unassigned')
+        ? sprints.find((s: any) => s.id === selectedSprintId)
+        : null;
+
       const newTask = {
         ...proposalForm,
         status: 'pending_approval',
@@ -181,6 +208,7 @@ const KanbanBoard = ({
         assignedTo: currentUser?.uid,
         assignedUsers: [currentUser?.uid].filter(Boolean),
         stageId: currentStage?.id || '',
+        sprintId: targetSprint?.id || null,
         phase: currentStage?.name || '',
         epic: '',
         estimatedSP: 0,
@@ -286,6 +314,203 @@ const KanbanBoard = ({
 
   return (
     <div className={`h-full flex flex-col overflow-hidden ${isDarkMode ? 'bg-[#0a0a0a]' : 'bg-slate-50/50'}`}>
+      {/* Stage Pills Filter Bar */}
+      {project?.stages && project.stages.length > 0 && (
+        <div className={`px-4 py-2.5 border-b shrink-0 flex items-center gap-2 overflow-x-auto hide-scrollbar z-10 transition-colors ${
+          isDarkMode ? 'bg-[#141414] border-white/5' : 'bg-white border-slate-200 shadow-xs'
+        }`}>
+          <div className={`flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider shrink-0 mr-1 ${
+            isDarkMode ? 'text-gray-400' : 'text-slate-500'
+          }`}>
+            <Layers size={13} className="text-indigo-500" />
+            <span className="hidden sm:inline">Etapa:</span>
+          </div>
+
+          {/* All stages button */}
+          <button
+            type="button"
+            onClick={() => setSelectedStageId('all')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 border cursor-pointer ${
+              selectedStageId === 'all'
+                ? (isDarkMode 
+                    ? 'bg-indigo-600/30 text-indigo-300 border-indigo-500 shadow-xs' 
+                    : 'bg-indigo-50 text-indigo-700 border-indigo-300 shadow-xs')
+                : (isDarkMode 
+                    ? 'bg-white/5 text-gray-400 border-white/5 hover:bg-white/10 hover:text-white' 
+                    : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-white hover:text-slate-900')
+            }`}
+          >
+            <span>Todas</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+              selectedStageId === 'all' 
+                ? (isDarkMode ? 'bg-indigo-500/30 text-indigo-200' : 'bg-indigo-200 text-indigo-800') 
+                : (isDarkMode ? 'bg-white/10 text-gray-400' : 'bg-slate-200 text-slate-600')
+            }`}>
+              {tasks.length}
+            </span>
+          </button>
+
+          {/* Individual stage pills */}
+          {project.stages.map((stage: any, sIdx: number) => {
+            const isSelected = selectedStageId === stage.id;
+            const isCurrentActive = project.currentStageIndex === sIdx;
+            const stageTasksCount = tasks.filter((t: any) => t.stageId === stage.id || t.phase === stage.name).length;
+
+            return (
+              <button
+                key={stage.id}
+                type="button"
+                onClick={() => setSelectedStageId(isSelected ? 'all' : stage.id)}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 border cursor-pointer ${
+                  isSelected
+                    ? 'shadow-xs font-black'
+                    : (isDarkMode 
+                        ? 'bg-white/5 text-gray-300 border-white/5 hover:bg-white/10' 
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-white')
+                }`}
+                style={isSelected ? {
+                  backgroundColor: `${stage.color || '#6366f1'}20`,
+                  borderColor: stage.color || '#6366f1',
+                  color: stage.color || '#6366f1'
+                } : {}}
+              >
+                <span 
+                  className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" 
+                  style={{ backgroundColor: stage.color || '#6366f1' }}
+                />
+                <span className="truncate max-w-[150px]">{stage.name}</span>
+                {isCurrentActive && (
+                  <span className={`text-[9px] font-black uppercase px-1 py-0.2 rounded ${
+                    isDarkMode ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-100 text-emerald-700'
+                  }`}>
+                    Activa
+                  </span>
+                )}
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black ${
+                  isSelected
+                    ? 'bg-white/20'
+                    : (isDarkMode ? 'bg-white/10 text-gray-400' : 'bg-slate-200 text-slate-600')
+                }`}>
+                  {stageTasksCount}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Sprints Filter & Management Bar */}
+      <div className={`px-4 py-2 border-b shrink-0 flex items-center justify-between gap-2 overflow-x-auto hide-scrollbar z-10 transition-colors ${
+        isDarkMode ? 'bg-[#121212] border-white/5' : 'bg-slate-50/80 border-slate-200'
+      }`}>
+        <div className="flex items-center gap-1.5 overflow-x-auto hide-scrollbar">
+          <div className={`flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider shrink-0 mr-1 ${
+            isDarkMode ? 'text-amber-400' : 'text-amber-600'
+          }`}>
+            <Zap size={13} className="fill-amber-500 text-amber-500" />
+            <span className="hidden sm:inline">Sprint:</span>
+          </div>
+
+          {/* All sprints button */}
+          <button
+            type="button"
+            onClick={() => setSelectedSprintId('all')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all shrink-0 border cursor-pointer ${
+              selectedSprintId === 'all'
+                ? (isDarkMode 
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-xs font-black' 
+                    : 'bg-amber-100/70 text-amber-900 border-amber-300 shadow-xs font-black')
+                : (isDarkMode 
+                    ? 'bg-white/5 text-gray-400 border-white/5 hover:bg-white/10 hover:text-white' 
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100 hover:text-slate-900')
+            }`}
+          >
+            <span>Todos</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+              selectedSprintId === 'all'
+                ? (isDarkMode ? 'bg-amber-500/30 text-amber-200' : 'bg-amber-200 text-amber-800')
+                : (isDarkMode ? 'bg-white/10 text-gray-400' : 'bg-slate-100 text-slate-600')
+            }`}>
+              {tasks.length}
+            </span>
+          </button>
+
+          {/* Individual Sprint Pills */}
+          {sprints.map((sprint: any) => {
+            const isSelected = selectedSprintId === sprint.id;
+            const sprintTasksCount = tasks.filter((t: any) => t.sprintId === sprint.id).length;
+            return (
+              <button
+                key={sprint.id}
+                type="button"
+                onClick={() => setSelectedSprintId(isSelected ? 'all' : sprint.id)}
+                className={`flex items-center gap-2 px-3 py-1 rounded-xl text-xs font-bold transition-all shrink-0 border cursor-pointer ${
+                  isSelected
+                    ? (isDarkMode 
+                        ? 'bg-amber-500/25 text-amber-300 border-amber-500 shadow-xs font-black' 
+                        : 'bg-amber-100 text-amber-900 border-amber-400 shadow-xs font-black')
+                    : (isDarkMode 
+                        ? 'bg-white/5 text-gray-300 border-white/5 hover:bg-white/10' 
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100')
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0 shadow-xs" />
+                <span className="truncate max-w-[140px]">{sprint.name}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                  isSelected
+                    ? (isDarkMode ? 'bg-amber-400/20 text-amber-200' : 'bg-amber-200 text-amber-800')
+                    : (isDarkMode ? 'bg-white/10 text-gray-400' : 'bg-slate-100 text-slate-600')
+                }`}>
+                  {sprintTasksCount}
+                </span>
+              </button>
+            );
+          })}
+
+          {/* Backlog / Sin Sprint Pill */}
+          <button
+            type="button"
+            onClick={() => setSelectedSprintId(selectedSprintId === 'unassigned' ? 'all' : 'unassigned')}
+            className={`flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold transition-all shrink-0 border cursor-pointer ${
+              selectedSprintId === 'unassigned'
+                ? (isDarkMode 
+                    ? 'bg-slate-700 text-white border-slate-500 shadow-xs font-black' 
+                    : 'bg-slate-200 text-slate-900 border-slate-400 shadow-xs font-black')
+                : (isDarkMode 
+                    ? 'bg-white/5 text-gray-400 border-white/5 hover:bg-white/10 hover:text-white' 
+                    : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100')
+            }`}
+          >
+            <span>Backlog (Sin Sprint)</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+              selectedSprintId === 'unassigned'
+                ? (isDarkMode ? 'bg-slate-600 text-white' : 'bg-slate-300 text-slate-800')
+                : (isDarkMode ? 'bg-white/10 text-gray-400' : 'bg-slate-100 text-slate-600')
+            }`}>
+              {tasks.filter((t: any) => !t.sprintId).length}
+            </span>
+          </button>
+        </div>
+
+        {/* Action Button: Configurar Sprints */}
+        {onOpenSprintConfig && (
+          <button
+            type="button"
+            onClick={onOpenSprintConfig}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-bold transition-all shrink-0 border cursor-pointer ${
+              isDarkMode 
+                ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20' 
+                : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100 shadow-xs'
+            }`}
+            title="Abrir Configuración de Sprints"
+          >
+            <Zap size={13} className="text-amber-500 fill-amber-500" />
+            <span className="hidden sm:inline">Configurar Sprints</span>
+            <span className="sm:hidden">Sprints</span>
+          </button>
+        )}
+      </div>
+
       {/* Mobile Header with Tabs */}
       {layout === 'mobile' && (
         <div className={`px-4 py-4 border-b shrink-0 relative flex items-center ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-200 shadow-sm'}`}>
@@ -371,6 +596,10 @@ const KanbanBoard = ({
                             initials={initials}
                             assignedStudent={assignedStudent}
                             students={students}
+                            stages={project?.stages || []}
+                            sprints={sprints}
+                            onFilterByStage={(stageId) => setSelectedStageId(stageId)}
+                            onFilterBySprint={(sprintId) => setSelectedSprintId(sprintId)}
                             onSelect={setSelectedTaskId}
                             onDelete={deleteTask}
                             onApprove={handleApproveTask}
@@ -414,6 +643,10 @@ const KanbanBoard = ({
                         initials={initials}
                         assignedStudent={assignedStudent}
                         students={students}
+                        stages={project?.stages || []}
+                        sprints={sprints}
+                        onFilterByStage={(stageId) => setSelectedStageId(stageId)}
+                        onFilterBySprint={(sprintId) => setSelectedSprintId(sprintId)}
                         onSelect={setSelectedTaskId}
                         onDelete={deleteTask}
                         onApprove={handleApproveTask}
@@ -545,7 +778,7 @@ const KanbanBoard = ({
                     <input 
                       type="date" 
                       value={proposalForm.startDate.split('T')[0]}
-                      onChange={e => setProposalForm({...proposalForm, startDate: new Date(e.target.value).toISOString()})}
+                      onChange={e => setProposalForm({...proposalForm, startDate: new Date(`${e.target.value}T00:00:00`).toISOString()})}
                       className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-bold ${isDarkMode ? 'bg-white/5 border-white/5 text-white [color-scheme:dark]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                   </div>
@@ -554,7 +787,7 @@ const KanbanBoard = ({
                     <input 
                       type="date" 
                       value={proposalForm.endDate.split('T')[0]}
-                      onChange={e => setProposalForm({...proposalForm, endDate: new Date(e.target.value).toISOString()})}
+                      onChange={e => setProposalForm({...proposalForm, endDate: new Date(`${e.target.value}T00:00:00`).toISOString()})}
                       className={`w-full p-3 border rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none font-bold ${isDarkMode ? 'bg-white/5 border-white/5 text-white [color-scheme:dark]' : 'bg-slate-50 border-slate-200 text-slate-700'}`}
                     />
                   </div>
@@ -630,6 +863,7 @@ const KanbanBoard = ({
             userRole={userRole}
             currentUser={currentUser}
             students={students}
+            sprints={sprints}
             updateTaskStatus={updateTaskStatus}
             updateTaskField={updateTaskField}
             updateTaskFields={updateTaskFields}

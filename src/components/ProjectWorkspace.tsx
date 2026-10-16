@@ -21,10 +21,11 @@ import {
   Bell,
   Share2,
   Search,
-  User
+  User,
+  Zap
 } from 'lucide-react';
 import { db } from '../firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { Stage } from '../types/stage';
 import { StageEditor } from './StageEditor';
 import toast from 'react-hot-toast';
@@ -36,10 +37,12 @@ import { CriticalPathAnalysis } from './CriticalPathAnalysis';
 import DeletedTasksView from './DeletedTasksView';
 import { ProjectResources } from './ProjectResources';
 import { useTasks } from '../hooks/useTasks';
+import { useSprints } from '../hooks/useSprints';
 import { usePermissions } from '../hooks/usePermissions';
 import { motion, AnimatePresence } from 'motion/react';
 import { useBreakpoint } from '../hooks/useBreakpoint';
 import { BottomSheet } from './ui/BottomSheet';
+import { SprintConfigModal } from './sprints/SprintConfigModal';
 
 interface Tab {
   id: string;
@@ -47,18 +50,41 @@ interface Tab {
   shortLabel: string;
   icon: LucideIcon;
   adminOnly?: boolean;
+  coordinatorOnly?: boolean;
 }
 
 const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, students, initialTaskId, isDarkMode, onOpenNotifications, unreadNotifications }: any) => {
+  const [currentProject, setCurrentProject] = useState<any>(project);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(initialTaskId || null);
   const [selectedAssignee, setSelectedAssignee] = useState<string>('all');
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [showStageEditor, setShowStageEditor] = useState(false);
+  const [showSprintModal, setShowSprintModal] = useState(false);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   const { isMobile, width, breakpoint } = useBreakpoint();
   const isTablet = breakpoint === 'tablet';
+
+  const { sprints, loading: sprintsLoading, addSprint, updateSprint, deleteSprint } = useSprints(projectId);
+
+  useEffect(() => {
+    if (project) {
+      setCurrentProject(project);
+    }
+  }, [project]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    const unsub = onSnapshot(doc(db, 'projects', projectId), (docSnap) => {
+      if (docSnap.exists()) {
+        setCurrentProject({ id: docSnap.id, ...docSnap.data() });
+      }
+    }, (error) => {
+      console.error("Error listening to project document:", error);
+    });
+    return () => unsub();
+  }, [projectId]);
 
   useEffect(() => {
     if (initialTaskId) {
@@ -160,11 +186,11 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
   };
 
   const handleSetStage = async (index: number) => {
-    if (userRole !== 'admin') return;
+    if (userRole !== 'admin' && userRole !== 'coordinator') return;
     try {
       const projectRef = doc(db, 'projects', projectId);
       await updateDoc(projectRef, { currentStageIndex: index });
-      toast.success(`Etapa cambiada a: ${project.stages[index].name}`);
+      toast.success(`Etapa cambiada a: ${currentProject?.stages?.[index]?.name || ('Etapa ' + (index + 1))}`);
     } catch (error) {
       console.error("Error setting stage:", error);
       toast.error('Error al cambiar de etapa');
@@ -178,13 +204,13 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
     { id: 'kanban', label: 'Tablero', shortLabel: 'Tablero', icon: Columns2 },
     { id: 'gantt', label: 'Gantt', shortLabel: 'Gantt', icon: GanttChartSquare },
     { id: 'sprints', label: 'Sprints', shortLabel: 'Sprints', icon: Table2 },
-    { id: 'stages', label: 'Etapas', shortLabel: 'Etapas', icon: Flag, adminOnly: true },
+    { id: 'stages', label: 'Etapas', shortLabel: 'Etapas', icon: Flag, coordinatorOnly: true },
     { id: 'resources', label: 'Recursos', shortLabel: 'Recursos', icon: LinkIcon },
     { id: 'cpm', label: 'Ruta Crítica', shortLabel: 'Ruta', icon: GitBranch },
-    { id: 'trash', label: 'Papelera', shortLabel: 'Papelera', icon: Trash2, adminOnly: true },
+    { id: 'trash', label: 'Papelera', shortLabel: 'Papelera', icon: Trash2, coordinatorOnly: true },
   ];
 
-  const filteredAllTabs = ALL_TABS.filter(t => !t.adminOnly || userRole === 'admin');
+  const filteredAllTabs = ALL_TABS.filter(t => !t.coordinatorOnly || userRole === 'admin' || userRole === 'coordinator');
   const visibleTabs = filteredAllTabs.filter(t => t.id !== 'cpm' && t.id !== 'trash' && t.id !== 'stages');
   const overflowTabs = filteredAllTabs.filter(t => t.id === 'cpm' || t.id === 'trash' || t.id === 'stages');
 
@@ -281,7 +307,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                 <div>
                   <div className="flex items-center gap-2 sm:gap-3">
                     <h2 className={`font-black tracking-tight truncate ${isDarkMode ? 'text-white' : 'text-slate-900'} ${isTablet ? 'text-lg max-w-[150px]' : 'text-base sm:text-2xl max-w-[140px] sm:max-w-md xl:max-w-xl'}`}>
-                      {project?.name || 'Proyecto'}
+                      {currentProject?.name || project?.name || 'Proyecto'}
                     </h2>
                     <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border shadow-sm shrink-0 ${isDarkMode ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-green-50 text-green-700 border-green-200/60'}`}>
                       <motion.div 
@@ -296,14 +322,38 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                 </div>
               </div>
 
-              {isMobile && userRole === 'admin' && (
-                <button 
-                  onClick={() => setActiveTab('stages')}
-                  className={`p-1.5 transition-colors ${isDarkMode ? 'text-gray-500 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowSprintModal(true)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-xl border text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                    isDarkMode 
+                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20' 
+                      : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                  }`}
+                  title="Configurar Sprints"
                 >
-                  <Settings2 size={18} />
+                  <Zap size={14} className="text-amber-500 fill-amber-500" />
+                  <span className="text-[11px] font-black">Sprints</span>
+                  {sprints.length > 0 && (
+                    <span className={`text-[9px] px-1 rounded-full font-black ${
+                      isDarkMode ? 'bg-amber-500/20 text-amber-200' : 'bg-amber-200 text-amber-800'
+                    }`}>
+                      {sprints.length}
+                    </span>
+                  )}
                 </button>
-              )}
+
+                {isMobile && (userRole === 'admin' || userRole === 'coordinator') && (
+                  <button 
+                    onClick={() => setActiveTab('stages')}
+                    className={`p-1.5 transition-colors ${isDarkMode ? 'text-gray-500 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
+                    title="Configuración de Etapas"
+                  >
+                    <Settings2 size={18} />
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Mobile Assignee Selector - Specifically for Kanban/Sprints */}
@@ -366,7 +416,29 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                   </div>
                 </div>
               )}
-              {userRole === 'admin' && (
+
+              <button
+                type="button"
+                onClick={() => setShowSprintModal(true)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-bold rounded-xl border shadow-xs transition-all cursor-pointer ${
+                  isDarkMode 
+                    ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20' 
+                    : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                }`}
+                title="Configuración de Sprints y Ciclos de Trabajo"
+              >
+                <Zap size={15} className="text-amber-500 fill-amber-500" />
+                <span>Configurar Sprints</span>
+                {sprints.length > 0 && (
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
+                    isDarkMode ? 'bg-amber-500/20 text-amber-200' : 'bg-amber-200 text-amber-800'
+                  }`}>
+                    {sprints.length}
+                  </span>
+                )}
+              </button>
+
+              {(userRole === 'admin' || userRole === 'coordinator') && (
                 <button 
                   onClick={() => setActiveTab('stages')}
                   className={`p-1.5 sm:p-2 transition-colors ${isDarkMode ? 'text-gray-500 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
@@ -416,7 +488,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
               <ProjectDashboard 
                 tasks={tasks} 
                 projectId={projectId} 
-                project={project}
+                project={currentProject}
                 students={students} 
                 isDarkMode={isDarkMode}
                 userRole={userRole}
@@ -426,9 +498,12 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
               <KanbanBoard 
                 tasks={filteredTasks} 
                 projectId={projectId} 
+                project={currentProject}
                 userRole={userRole} 
                 currentUser={currentUser} 
                 students={students}
+                sprints={sprints}
+                onOpenSprintConfig={() => setShowSprintModal(true)}
                 updateTaskStatus={updateTaskStatus}
                 updateTaskField={updateTaskField}
                 updateTaskFields={updateTaskFields}
@@ -444,14 +519,17 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
               <GanttView 
                 tasks={tasks} 
                 projectId={projectId} 
-                project={project} 
+                project={currentProject} 
                 userRole={userRole} 
                 currentUser={currentUser} 
                 students={students}
+                sprints={sprints}
+                addTask={addTask}
                 updateTaskStatus={updateTaskStatus}
                 updateTaskField={updateTaskField}
                 updateTaskFields={updateTaskFields}
                 updateTaskDates={updateTaskDates}
+                onSaveStages={handleSaveStages}
                 deleteTask={deleteTask}
                 permissions={permissions}
                 isDarkMode={isDarkMode}
@@ -461,10 +539,12 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
               <SprintTable 
                 tasks={filteredTasks} 
                 projectId={projectId} 
-                project={project}
+                project={currentProject}
                 userRole={userRole} 
                 currentUser={currentUser} 
                 students={students}
+                sprints={sprints}
+                onOpenSprintConfig={() => setShowSprintModal(true)}
                 updateTaskStatus={updateTaskStatus}
                 updateTaskField={updateTaskField}
                 updateTaskFields={updateTaskFields}
@@ -476,10 +556,22 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
             )}
             {activeTab === 'stages' && (
               <StageEditor
-                project={project}
+                project={currentProject}
                 tasks={tasks}
                 onSave={handleSaveStages}
                 isDarkMode={isDarkMode}
+                addTask={addTask}
+                updateTaskStatus={updateTaskStatus}
+                updateTaskField={updateTaskField}
+                deleteTask={deleteTask}
+                students={students}
+                currentUser={currentUser}
+                userRole={userRole}
+                permissions={permissions}
+                onSelectTask={(id: string) => {
+                  setSelectedTaskId(id);
+                  setActiveTab('kanban');
+                }}
               />
             )}
             {activeTab === 'resources' && (
@@ -489,7 +581,13 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                 isDarkMode={isDarkMode}
               />
             )}
-            {activeTab === 'cpm' && <CriticalPathAnalysis tasks={tasks as any} isDarkMode={isDarkMode} />}
+            {activeTab === 'cpm' && (
+              <CriticalPathAnalysis 
+                tasks={tasks as any} 
+                stages={currentProject?.stages || []} 
+                isDarkMode={isDarkMode} 
+              />
+            )}
             {activeTab === 'trash' && (
               <DeletedTasksView 
                 projectId={projectId} 
@@ -502,6 +600,22 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
           </>
         )}
       </div>
+
+      {/* Sprint Configuration Modal */}
+      <SprintConfigModal
+        isOpen={showSprintModal}
+        onClose={() => setShowSprintModal(false)}
+        projectId={projectId}
+        project={currentProject}
+        sprints={sprints}
+        tasks={tasks}
+        students={students}
+        addSprint={addSprint}
+        updateSprint={updateSprint}
+        deleteSprint={deleteSprint}
+        updateTaskField={updateTaskField}
+        isDarkMode={isDarkMode}
+      />
     </div>
   );
 };

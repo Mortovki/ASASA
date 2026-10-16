@@ -1,9 +1,8 @@
 import * as React from 'react';
 import { useState, useMemo, useEffect, useRef, Component } from 'react';
-import { createPortal } from 'react-dom';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
-import { doc, getDoc, setDoc, deleteDoc, getDocFromServer, getDocs, collection, query, orderBy, limit, onSnapshot, where, writeBatch, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, getDocFromServer, getDocs, collection, query, orderBy, limit, onSnapshot, where, writeBatch, updateDoc, addDoc } from 'firebase/firestore';
 import Login from './components/Login';
 import ProfileForm from './components/ProfileForm';
 import { AdminValidation } from './components/AdminValidation';
@@ -11,17 +10,20 @@ import ProjectDirectory from './components/ProjectDirectory';
 import ProjectWorkspace from './components/ProjectWorkspace';
 import SkillsView from './components/SkillsView';
 import { notifyProjectDeleted, getProjectAdmins, createNotification } from './services/notificationService';
-import { Users, User, PlusCircle, Clock, Calendar as CalendarIcon, CheckCircle2, XCircle, AlertCircle, History, Trash2, Edit2, ChevronRight, ChevronLeft, ArrowLeft, UserPlus, Tag, LayoutDashboard, CalendarDays, ExternalLink, Link as LinkIcon, Phone, Mail, GraduationCap, Briefcase, Plus, Filter, Search, Check, X, List, LayoutGrid, Download, RefreshCw, BarChart3, AlertTriangle, CheckSquare, ArrowDownUp, Folder, Send, Shield, ShieldOff, Menu, Settings, Bell, Sun, Moon, PieChart as PieChartIcon } from 'lucide-react';
+import { Users, User, UserX, PlusCircle, Clock, Calendar as CalendarIcon, CheckCircle2, XCircle, AlertCircle, History, Trash2, Edit2, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft, UserPlus, Tag, LayoutDashboard, CalendarDays, ExternalLink, Link as LinkIcon, Phone, Mail, GraduationCap, Briefcase, Plus, Filter, Search, Check, X, List, LayoutGrid, Download, RefreshCw, BarChart3, AlertTriangle, CheckSquare, ArrowDownUp, Folder, Send, Shield, ShieldOff, Menu, Settings, Bell, Sun, Moon, PieChart as PieChartIcon, BookOpen, Layers, Zap, Undo2 } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import toast, { Toaster } from 'react-hot-toast';
+import confetti from 'canvas-confetti';
 import { NotificationCenter } from './components/NotificationCenter';
 import { useNotifications } from './hooks/useNotifications';
 import { useBreakpoint } from './hooks/useBreakpoint';
 import { motion, AnimatePresence } from 'motion/react';
 import { ConfirmModal } from './components/ui/ConfirmModal';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Label, LabelList } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, LineChart, Line, Label, LabelList } from 'recharts';
+import { ChartContainer } from './components/ChartContainer';
+import { safeFormatDate } from './utils/dateUtils';
 
 const CustomXAxisTick = ({ x, y, payload, isDarkMode, isMobile }: any) => {
   if (!payload || !payload.value) return null;
@@ -50,6 +52,9 @@ const CustomXAxisTick = ({ x, y, payload, isDarkMode, isMobile }: any) => {
   );
 };
 import { showSuccessToast, showErrorToast, showLoadingToast, showConfirmToast } from './utils/toastUtils';
+import { exportToGoogleSheets, StudentExportData } from './services/googleSheetsService';
+import { GoogleTasksView } from './components/GoogleTasksView';
+import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 
 import { ProfileSkillMap } from './components/ProfileSkillMap';
 import { dedupeById } from './utils/dedupe';
@@ -60,7 +65,21 @@ import { PREDEFINED_SKILLS } from './constants/skills';
 import { notifyProjectAssigned } from './services/notificationService';
 
 const TOTAL_REQUIRED_HOURS = 480;
-const SUPER_ADMIN_EMAILS = ["luisedgar.gutierrez17@gmail.com", "luisedgar.gutierrez1@gmail.com", "mortovki@gmail.com"];
+const SUPER_ADMIN_EMAILS = ["luisedgar.gutierrez17@gmail.com", "luisedgar.gutierrez1@gmail.com", "mortovki@gmail.com", "legc.1794@gmail.com", "apoyo.comunitario.ss@fa.unam.mx"];
+
+export const isStudentFinished = (student: any): boolean => {
+  if (!student) return false;
+  if (student.status === 'Finalizado') return true;
+  if (student.workStatus === 'Finalizado') return true;
+  if (student.isArchived) return true;
+  const approvedHours = (student.records || []).reduce((sum: number, r: any) => {
+    if (r.validationStatus === 'aprobado' || !r.validationStatus) {
+      return sum + (Number(r.hours) || Number(r.horasCalculadas) || 0);
+    }
+    return sum;
+  }, 0);
+  return approvedHours >= TOTAL_REQUIRED_HOURS;
+};
 
 class ErrorBoundary extends React.Component<any, any> {
   state: { hasError: boolean, error: any };
@@ -113,14 +132,36 @@ const toMins = (t: string) => {
   return (h || 0) * 60 + (m || 0);
 };
 
-const getCDMXDateString = () => {
+const getCDMXDateInfo = () => {
   const now = new Date();
-  const cdmxTimeStr = now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' });
-  const cdmxDate = new Date(cdmxTimeStr);
-  const cdmxYear = cdmxDate.getFullYear();
-  const cdmxMonth = String(cdmxDate.getMonth() + 1).padStart(2, '0');
-  const cdmxDay = String(cdmxDate.getDate()).padStart(2, '0');
-  return `${cdmxYear}-${cdmxMonth}-${cdmxDay}`;
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Mexico_City',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23'
+  });
+  
+  const parts = formatter.formatToParts(now);
+  const info: any = {};
+  parts.forEach(p => info[p.type] = p.value);
+  
+  const year = info.year;
+  const month = String(info.month).padStart(2, '0');
+  const day = String(info.day).padStart(2, '0');
+  const hours = parseInt(info.hour);
+  const minutes = parseInt(info.minute);
+  
+  return {
+    dateString: `${year}-${month}-${day}`,
+    currentMins: hours * 60 + minutes
+  };
+};
+
+const getCDMXDateString = () => {
+  return getCDMXDateInfo().dateString;
 };
 
 const studentSchema = z.object({
@@ -174,7 +215,7 @@ const ATTENDANCE_STATUS = {
 
 const STUDENT_STATUS = {
   'En Curso': { color: 'bg-yellow-100 text-yellow-800 border-yellow-200', hex: '#fef08a' },
-  'Finalizada': { color: 'bg-green-100 text-green-800 border-green-200', hex: '#bbf7d0' },
+  'Finalizado': { color: 'bg-green-100 text-green-800 border-green-200', hex: '#bbf7d0' },
   'Pausada': { color: 'bg-orange-100 text-orange-800 border-orange-200', hex: '#fed7aa' },
   'Abandonada': { color: 'bg-red-100 text-red-800 border-red-200', hex: '#fecaca' },
 };
@@ -240,6 +281,26 @@ const getDisplayName = (student: any) => {
     return `${firstNames[0]} ${student.lastNamePaterno}`;
   }
   return student.name || 'Desconocido';
+};
+
+const triggerCelebration = () => {
+  const duration = 5 * 1000;
+  const animationEnd = Date.now() + duration;
+  const defaults = { startVelocity: 30, spread: 360, ticks: 60, zIndex: 10000 };
+
+  const randomInRange = (min: number, max: number) => Math.random() * (max - min) + min;
+
+  const interval: any = setInterval(function() {
+    const timeLeft = animationEnd - Date.now();
+
+    if (timeLeft <= 0) {
+      return clearInterval(interval);
+    }
+
+    const particleCount = 50 * (timeLeft / duration);
+    confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 } });
+    confetti({ ...defaults, particleCount, origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 } });
+  }, 250);
 };
 
 const getFullName = (student: any) => {
@@ -395,6 +456,14 @@ const Sidebar = ({
                   isDarkMode={isDarkMode}
                 />
                 <SidebarItem
+                  icon={<CheckSquare size={20} />}
+                  label="Google Tasks"
+                  active={view === 'google-tasks'}
+                  onClick={() => { setView('google-tasks'); setEditingRecordId(null); if (isRail) setIsExpanded(false); if (isMobile) setIsMobileMenuOpen(false); }}
+                  collapsed={isRail && !isExpanded}
+                  isDarkMode={isDarkMode}
+                />
+                <SidebarItem
                   icon={<Bell size={20} />}
                   label="Notificaciones"
                   active={false}
@@ -460,6 +529,14 @@ const Sidebar = ({
                 label="Habilidades"
                 active={view === 'skill-map'}
                 onClick={() => { setView('skill-map'); setEditingRecordId(null); if (isRail) setIsExpanded(false); if (isMobile) setIsMobileMenuOpen(false); }}
+                collapsed={isRail && !isExpanded}
+                isDarkMode={isDarkMode}
+              />
+              <SidebarItem
+                icon={<CheckSquare size={20} />}
+                label="Google Tasks"
+                active={view === 'google-tasks'}
+                onClick={() => { setView('google-tasks'); setEditingRecordId(null); if (isRail) setIsExpanded(false); if (isMobile) setIsMobileMenuOpen(false); }}
                 collapsed={isRail && !isExpanded}
                 isDarkMode={isDarkMode}
               />
@@ -735,16 +812,8 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
     }
 
     // Validar que la fecha y hora no sean en el futuro (CDMX)
-    const now = new Date();
-    const cdmxTimeStr = now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' });
-    const cdmxDate = new Date(cdmxTimeStr);
+    const { dateString: cdmxDateString, currentMins: cdmxCurrentMins } = getCDMXDateInfo();
     
-    const cdmxYear = cdmxDate.getFullYear();
-    const cdmxMonth = String(cdmxDate.getMonth() + 1).padStart(2, '0');
-    const cdmxDay = String(cdmxDate.getDate()).padStart(2, '0');
-    const cdmxDateString = `${cdmxYear}-${cdmxMonth}-${cdmxDay}`;
-    
-    const cdmxCurrentMins = cdmxDate.getHours() * 60 + cdmxDate.getMinutes();
     const startMins = toMins(form.startTime);
     const endMins = toMins(form.endTime);
 
@@ -1897,7 +1966,7 @@ const App = () => {
 
   const [projects, setProjects] = useState<any[]>(() => {
     const saved = localStorage.getItem('app_projects');
-    return saved ? JSON.parse(saved) : [];
+    return saved ? JSON.parse(saved).filter((p: any) => !p.isDeleted) : [];
   });
 
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -1913,6 +1982,15 @@ const App = () => {
       document.documentElement.classList.remove('dark');
     }
   }, [isDarkMode]);
+
+  const pendingDeletionsRef = useRef<Record<string, NodeJS.Timeout>>({});
+
+  useEffect(() => {
+    return () => {
+      // Clear any pending deletion timers on unmount
+      Object.values(pendingDeletionsRef.current).forEach(clearTimeout);
+    };
+  }, []);
 
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
@@ -1939,73 +2017,167 @@ const App = () => {
     });
   };
 
-  const handleDeleteProject = async (projectId: string) => {
+  const handleDeleteProject = (projectId: string) => {
     if (!projectId) {
       toast.error('Error: ID de proyecto no encontrado');
       return;
     }
 
-    const project = projects.find(p => p.id === projectId);
-    if (!project) {
+    const projectToDelete = projects.find(p => p.id === projectId);
+    if (!projectToDelete) {
       toast.error('Error: Proyecto no encontrado en el estado local');
       return;
     }
 
-    try {
-      // 1. Get project admins for notification
-      const admins = await getProjectAdmins(projectId);
-      
-      // 2. Delete the project document
-      await deleteDoc(doc(db, 'projects', projectId));
-      
-      // 3. Delete associated tasks
-      const tasksRef = collection(db, 'projects', projectId, 'tasks');
-      const tasksSnapshot = await getDocs(tasksRef);
-      
-      // 4. Delete associated resources
-      const resourcesRef = collection(db, 'projects', projectId, 'resources');
-      const resourcesSnapshot = await getDocs(resourcesRef);
-
-      // 5. Delete associated deletedTasks
-      const deletedTasksRef = collection(db, 'projects', projectId, 'deletedTasks');
-      const deletedTasksSnapshot = await getDocs(deletedTasksRef);
-
-      // Use batches to delete tasks, resources and deletedTasks (handling the 500 limit)
-      const allDocsToDelete = [
-        ...tasksSnapshot.docs, 
-        ...resourcesSnapshot.docs,
-        ...deletedTasksSnapshot.docs
-      ];
-      
-      for (let i = 0; i < allDocsToDelete.length; i += 500) {
-        const batch = writeBatch(db);
-        const chunk = allDocsToDelete.slice(i, i + 500);
-        chunk.forEach(doc => batch.delete(doc.ref));
-        await batch.commit();
-      }
-
-      // 5. Update local state
-      setProjects(prev => prev.filter(p => p.id !== projectId));
-      
-      // 6. Notify admins
-      const currentUserProfile = getStudentData(user?.uid || '') || { 
-        firstName: 'Usuario', 
-        lastNamePaterno: 'Desconocido', 
-        uid: user?.uid || '' 
-      };
-
-      for (const admin of admins) {
-        // Only notify others, not self
-        if (admin.uid !== user?.uid) {
-          await notifyProjectDeleted(admin.uid, project, currentUserProfile);
-        }
-      }
-
-      toast.success('Proyecto eliminado correctamente');
-    } catch (error) {
-      console.error('Error deleting project:', error);
-      handleFirestoreError(error, OperationType.DELETE, `projects/${projectId}`);
+    // Cancel any existing pending deletion for this project if it was somehow re-triggered
+    if (pendingDeletionsRef.current[projectId]) {
+      clearTimeout(pendingDeletionsRef.current[projectId]);
+      delete pendingDeletionsRef.current[projectId];
     }
+
+    // Capture previous state for rollback if user undoes
+    const previousProjects = [...projects];
+    const previousStudents = [...students];
+    const previousUserProfile = userProfile ? { ...userProfile } : null;
+
+    // 1. Optimistically remove from local state and localStorage immediately for a responsive UI
+    setProjects(prev => {
+      const updated = prev.filter(p => p.id !== projectId);
+      localStorage.setItem('app_projects', JSON.stringify(updated));
+      return updated;
+    });
+
+    setStudents(prev => {
+      const updatedStudents = prev.map(s => {
+        if (s.projectIds && s.projectIds.includes(projectId)) {
+          const newProjectIds = s.projectIds.filter((pid: string) => pid !== projectId);
+          const newProjectTasks = { ...(s.projectTasks || {}) };
+          delete newProjectTasks[projectId];
+          return {
+            ...s,
+            projectIds: newProjectIds,
+            projectTasks: newProjectTasks,
+            workStatus: newProjectIds.length > 0 ? 'Asignado' : 'Sin asignar'
+          };
+        }
+        return s;
+      });
+      localStorage.setItem('app_students', JSON.stringify(updatedStudents));
+      return updatedStudents;
+    });
+
+    if (userProfile && (userProfile.projectIds || []).includes(projectId)) {
+      setUserProfile((prev: any) => {
+        if (!prev) return prev;
+        const newPids = (prev.projectIds || []).filter((pid: string) => pid !== projectId);
+        return { ...prev, projectIds: newPids };
+      });
+    }
+
+    let isUndone = false;
+
+    // 2. Schedule Firestore soft-delete after 5 seconds
+    const timer = setTimeout(async () => {
+      delete pendingDeletionsRef.current[projectId];
+      if (isUndone) return;
+
+      try {
+        // Soft-delete the project document in Firestore
+        await updateDoc(doc(db, 'projects', projectId), {
+          isDeleted: true,
+          deletedAt: new Date().toISOString()
+        });
+
+        // Update enrolled students in Firestore
+        const enrolledStudents = studentsWithRecords.filter(s => (s.projectIds || []).includes(projectId));
+        for (const st of enrolledStudents) {
+          const newPids = (st.projectIds || []).filter((pid: string) => pid !== projectId);
+          const stRef = doc(db, 'users', st.id);
+          await updateDoc(stRef, {
+            projectIds: newPids,
+            workStatus: newPids.length > 0 ? 'Asignado' : 'Sin asignar'
+          }).catch(() => {});
+          const pubRef = doc(db, 'public_profiles', st.id);
+          await updateDoc(pubRef, {
+            projectIds: newPids,
+            workStatus: newPids.length > 0 ? 'Asignado' : 'Sin asignar'
+          }).catch(() => {});
+        }
+
+        // Notify admins
+        const admins = await getProjectAdmins(projectId);
+        const currentUserProfile = getStudentData(user?.uid || '') || { 
+          firstName: 'Usuario', 
+          lastNamePaterno: 'Desconocido', 
+          uid: user?.uid || '' 
+        };
+
+        for (const admin of admins) {
+          if (admin.uid !== user?.uid) {
+            await notifyProjectDeleted(admin.uid, projectToDelete, currentUserProfile);
+          }
+        }
+      } catch (error) {
+        console.error('Error soft-deleting project:', error);
+        handleFirestoreError(error, OperationType.DELETE, `projects/${projectId}`);
+      }
+    }, 5000);
+
+    pendingDeletionsRef.current[projectId] = timer;
+
+    // 3. Display Toast notification with countdown and UNDO button
+    toast.custom((t) => (
+      <div
+        className={`${
+          t.visible ? 'animate-enter' : 'animate-leave'
+        } max-w-md w-full bg-slate-900 dark:bg-[#1e1e1e] text-white shadow-2xl rounded-2xl pointer-events-auto flex flex-col p-4 border border-slate-700/60 dark:border-white/10`}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-red-500/20 text-red-400 flex items-center justify-center shrink-0 border border-red-500/30">
+              <Trash2 size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-black truncate text-white">
+                "{projectToDelete.name}" eliminado
+              </p>
+              <p className="text-[10px] font-semibold text-slate-400">
+                Se confirmará en 5 segundos...
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              isUndone = true;
+              clearTimeout(timer);
+              delete pendingDeletionsRef.current[projectId];
+              toast.dismiss(t.id);
+
+              // Restore local state and localStorage
+              setProjects(previousProjects);
+              localStorage.setItem('app_projects', JSON.stringify(previousProjects));
+              setStudents(previousStudents);
+              localStorage.setItem('app_students', JSON.stringify(previousStudents));
+              if (previousUserProfile) {
+                setUserProfile(previousUserProfile);
+              }
+              toast.success(`Eliminación cancelada. "${projectToDelete.name}" restaurado.`);
+            }}
+            className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 shadow-lg shadow-indigo-600/30 active:scale-95 cursor-pointer"
+          >
+            <Undo2 size={14} />
+            Deshacer
+          </button>
+        </div>
+        {/* Animated progress bar for 5 seconds countdown */}
+        <div className="w-full bg-slate-800 rounded-full h-1 mt-3 overflow-hidden">
+          <div
+            className="bg-indigo-500 h-full rounded-full transition-all duration-[5000ms] ease-linear w-0"
+            style={{ width: t.visible ? '100%' : '0%' }}
+          />
+        </div>
+      </div>
+    ), { duration: 5000, id: `delete-project-${projectId}` });
   };
 
   const [view, setView] = useState('dashboard');
@@ -2046,13 +2218,25 @@ const App = () => {
   const [filterStatus, setFilterStatus] = useState('Todos');
   const [filterWork, setFilterWork] = useState('Todos');
   const [filterProject, setFilterProject] = useState('Todos');
+  const [filterCategories, setFilterCategories] = useState<string[]>([]);
+  const categoriesLoadedRef = useRef(false);
+  
+  useEffect(() => {
+    if (categories.length > 0 && !categoriesLoadedRef.current) {
+      setFilterCategories(categories.map(c => c.id));
+      categoriesLoadedRef.current = true;
+    }
+  }, [categories]);
   const [filterCareer, setFilterCareer] = useState('Todos');
   const [filterBrigade, setFilterBrigade] = useState('Todos');
   const [sortHours, setSortHours] = useState<'none' | 'asc' | 'desc'>('none');
+  const [isExporting, setIsExporting] = useState(false);
+  const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [calendarDateFilter, setCalendarDateFilter] = useState('');
   const [calendarStudentFilter, setCalendarStudentFilter] = useState('');
   const [studentPage, setStudentPage] = useState(1);
-  const studentsPerPage = 10;
+  const [studentsPerPage, setStudentsPerPage] = useState(10);
   const [sessionPage, setSessionPage] = useState(1);
   const [sessionSortOrder, setSessionSortOrder] = useState<'desc' | 'asc'>('desc');
   const sessionsPerPage = 5;
@@ -2183,6 +2367,61 @@ const App = () => {
       }
     }
   }, [userProfile]);
+  // Automatización: Finalizar y Archivar al llegar a 480 horas
+  useEffect(() => {
+    if (userRole === 'admin' || userRole === 'coordinator') {
+      const finalizeStudents = async () => {
+        const batch = writeBatch(db);
+        let hasUpdates = false;
+
+        studentsWithRecords.forEach(student => {
+          if (student.email && SUPER_ADMIN_EMAILS.includes(student.email)) return;
+
+          // Calculate approved hours
+          const approvedHours = (student.records || []).reduce((acc: number, r: any) => {
+            if (r.validationStatus === 'aprobado' || !r.validationStatus) {
+              return acc + (r.hours || 0);
+            }
+            return acc;
+          }, 0);
+
+          // Trigger when >= 480 and not already finalized/archived
+          if (approvedHours >= TOTAL_REQUIRED_HOURS && student.status !== 'Finalizado' && !student.isArchived) {
+            hasUpdates = true;
+            const studentRef = doc(db, 'users', student.id);
+            const publicRef = doc(db, 'public_profiles', student.id);
+            
+            const updateData = {
+              status: 'Finalizado',
+              projectIds: [], // Desenrolar de todos los proyectos
+              isArchived: true, // Archivar expediente
+              finalizedAt: new Date().toISOString(),
+              workStatus: 'Finalizado'
+            };
+
+            batch.update(studentRef, updateData);
+            batch.update(publicRef, updateData);
+            
+            toast.success(`🎉 El alumno ${getFullName(student)} ha completado sus ${TOTAL_REQUIRED_HOURS} horas. Ha sido finalizado y archivado.`, {
+              duration: 6000,
+              icon: '🎓'
+            });
+          }
+        });
+
+        if (hasUpdates) {
+          try {
+            await batch.commit();
+          } catch (error) {
+            console.error("Error auto-finalizing students:", error);
+          }
+        }
+      };
+
+      finalizeStudents();
+    }
+  }, [studentsWithRecords, userRole]);
+
   useEffect(() => {
     if (!user || !userRole) return;
 
@@ -2219,59 +2458,56 @@ const App = () => {
 
   useEffect(() => {
     if (loading || !user) return;
-    const fetchConfig = async () => {
-      setIsLoadingConfig(true);
-      try {
-        const projectsSnapshot = await getDocs(collection(db, 'projects'));
-        if (!projectsSnapshot.empty) {
-          const projectsData = projectsSnapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          }));
-          setProjects(dedupeById(projectsData));
-        } else if (userRole !== 'user') {
-          // If empty and admin, save defaults to Firestore
-          const defaults = [
-            { id: 'p-1', name: 'Brigada de Salud', color: '#ef4444' },
-            { id: 'p-2', name: 'Apoyo Comunitario', color: '#3b82f6' }
-          ];
-          for (const p of defaults) {
-            await setDoc(doc(db, 'projects', p.id), p);
-          }
-          setProjects(defaults);
-        }
-
-        const categoriesSnapshot = await getDocs(collection(db, 'categories'));
-        if (!categoriesSnapshot.empty) {
-          const categoriesData = categoriesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-          setCategories(dedupeById(categoriesData));
-        } else if (userRole !== 'user') {
-          // If empty and admin, save defaults to Firestore
-          const defaults = [
-            { id: 'cat-1', name: 'Administrativo', icon: 'FileText' },
-            { id: 'cat-2', name: 'Campo', icon: 'Map' },
-            { id: 'cat-3', name: 'Investigación', icon: 'Search' }
-          ];
-          for (const c of defaults) {
-            await setDoc(doc(db, 'categories', c.id), c);
-          }
-          setCategories(defaults);
-        }
-      } catch (error: any) {
-        console.error("Error fetching config from Firestore:", error);
-        if (error.code === 'permission-denied' || error.message?.includes('Missing or insufficient permissions')) {
-          console.log("Permission denied for config fetch. Auth state:", {
-            user: !!user,
-            userRole,
-            loading,
-            currentUser: !!auth.currentUser
-          });
-        }
-      } finally {
-        setIsLoadingConfig(false);
+    
+    setIsLoadingConfig(true);
+    
+    // Listen to Projects
+    const unsubProjects = onSnapshot(collection(db, 'projects'), async (snapshot) => {
+      if (!snapshot.empty) {
+        const projectsData = snapshot.docs
+          .map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              ...data,
+              isDeleted: data.isDeleted === true ? true : false,
+            };
+          })
+          .filter((p: any) => p.isDeleted !== true);
+        setProjects(dedupeById(projectsData));
+      } else {
+        setProjects([]);
       }
+      setIsLoadingConfig(false);
+    }, (error) => {
+      console.error("Error listening to projects:", error);
+      setIsLoadingConfig(false);
+    });
+
+    // Listen to Categories
+    const unsubCategories = onSnapshot(collection(db, 'categories'), async (snapshot) => {
+      if (!snapshot.empty) {
+        const categoriesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setCategories(dedupeById(categoriesData));
+      } else if (userRole !== 'user') {
+        const defaults = [
+          { id: 'cat-1', name: 'Administrativo', icon: 'FileText' },
+          { id: 'cat-2', name: 'Campo', icon: 'Map' },
+          { id: 'cat-3', name: 'Investigación', icon: 'Search' }
+        ];
+        for (const c of defaults) {
+          await setDoc(doc(db, 'categories', c.id), c);
+        }
+        setCategories(defaults);
+      }
+    }, (error) => {
+      console.error("Error listening to categories:", error);
+    });
+
+    return () => {
+      unsubProjects();
+      unsubCategories();
     };
-    fetchConfig();
   }, [user, userRole, loading]);
 
   useEffect(() => {
@@ -2364,7 +2600,38 @@ const App = () => {
   const [editingCategory, setEditingCategory] = useState<any>(null);
   const [editingProject, setEditingProject] = useState<any>(null);
   const [showManualHours, setShowManualHours] = useState(false);
+  const [manualHoursStudentId, setManualHoursStudentId] = useState<string>('');
+  const [manualHoursSearch, setManualHoursSearch] = useState<string>('');
   const [manualHoursForm, setManualHoursForm] = useState({ hours: 0, category: 'Otra Brigada', date: getCDMXDateString() });
+  const [activityStudentSearch, setActivityStudentSearch] = useState<string>('');
+  const [editingCalendarRecord, setEditingCalendarRecord] = useState<any | null>(null);
+  const [calendarEditForm, setCalendarEditForm] = useState({
+    date: getCDMXDateString(),
+    startTime: '09:00',
+    endTime: '13:00',
+    hours: 4,
+    isManualHours: false,
+    categoryId: '',
+    projectId: '',
+    description: '',
+    studentId: '',
+    status: 'A'
+  });
+  const [isSavingCalendarEdit, setIsSavingCalendarEdit] = useState(false);
+
+  // Estados para agregar más alumnos activos a una actividad
+  const [targetActivityForAddingStudents, setTargetActivityForAddingStudents] = useState<any | null>(null);
+  const [selectedStudentsToAdd, setSelectedStudentsToAdd] = useState<string[]>([]);
+  const [searchStudentsToAdd, setSearchStudentsToAdd] = useState<string>('');
+  const [isSavingStudentsToActivity, setIsSavingStudentsToActivity] = useState(false);
+
+  // Estados para cambiar categoría y asignación a proyecto de una actividad
+  const [activityToChangeCategoryProject, setActivityToChangeCategoryProject] = useState<any | null>(null);
+  const [changeCategoryForm, setChangeCategoryForm] = useState({
+    categoryId: '',
+    projectId: ''
+  });
+  const [isSavingCategoryProjectChange, setIsSavingCategoryProjectChange] = useState(false);
 
   const [tagInputs, setTagInputs] = useState<any>({});
   const [activeSuggestionProject, setActiveSuggestionProject] = useState<string | null>(null);
@@ -2446,9 +2713,15 @@ const App = () => {
   const filteredStudents = useMemo(() => {
     let result = studentsWithRecords.filter(s => {
       if (s.email && SUPER_ADMIN_EMAILS.includes(s.email)) return false;
+      
+      // Filter by archived status
+      if (showArchived && !s.isArchived) return false;
+      if (!showArchived && s.isArchived) return false;
+
       const matchStatus = filterStatus === 'Todos' || s.status === filterStatus;
       const matchWork = filterWork === 'Todos' || s.workStatus === filterWork;
       const matchProject = filterProject === 'Todos' || (s.projectIds || []).includes(filterProject);
+      const matchCategory = filterCategories.length === categories.length || (s.records || []).some((r: any) => filterCategories.includes(r.categoryId));
       const matchCareer = filterCareer === 'Todos' || s.career === filterCareer;
       const matchBrigade = filterBrigade === 'Todos' || s.brigadePeriod === filterBrigade;
       const lowerSearch = searchTerm.toLowerCase();
@@ -2459,7 +2732,7 @@ const App = () => {
                           (s.nickname || '').toLowerCase().includes(lowerSearch) ||
                           (s.career || '').toLowerCase().includes(lowerSearch) ||
                           hasMatchingTag;
-      return matchStatus && matchWork && matchProject && matchCareer && matchBrigade && matchSearch;
+      return matchStatus && matchWork && matchProject && matchCategory && matchCareer && matchBrigade && matchSearch;
     });
 
     if (sortHours !== 'none') {
@@ -2474,11 +2747,11 @@ const App = () => {
       });
     }
     return result;
-  }, [studentsWithRecords, filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours]);
+  }, [studentsWithRecords, filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours, showArchived]);
 
   useEffect(() => {
     setStudentPage(1);
-  }, [filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours]);
+  }, [filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours, showArchived]);
 
   const paginatedStudents = useMemo(() => {
     const startIndex = (studentPage - 1) * studentsPerPage;
@@ -2486,6 +2759,80 @@ const App = () => {
   }, [filteredStudents, studentPage]);
 
   const totalStudentPages = Math.ceil(filteredStudents.length / studentsPerPage);
+
+  const activeEligibleStudents = useMemo(() => {
+    return studentsWithRecords.filter(s => {
+      if (s.email && SUPER_ADMIN_EMAILS.includes(s.email)) return false;
+      if (s.isArchived) return false;
+      if (s.status === 'Baja' || s.status === 'Finalizado' || s.status === 'Inactivo') return false;
+      if (s.workStatus === 'Finalizado' || s.workStatus === 'Baja') return false;
+      return !isStudentFinished(s);
+    });
+  }, [studentsWithRecords]);
+
+  const filteredActiveStudentsForActivity = useMemo(() => {
+    if (!activityStudentSearch.trim()) return activeEligibleStudents;
+    const q = activityStudentSearch.toLowerCase().trim();
+    return activeEligibleStudents.filter(s => {
+      const fullName = (s.name || getFullName(s) || '').toLowerCase();
+      const nickname = (s.nickname || '').toLowerCase();
+      const matricula = (s.studentId || '').toLowerCase();
+      const career = (s.career || '').toLowerCase();
+      const brigade = (s.brigadePeriod || '').toLowerCase();
+      return fullName.includes(q) || nickname.includes(q) || matricula.includes(q) || career.includes(q) || brigade.includes(q);
+    });
+  }, [activeEligibleStudents, activityStudentSearch]);
+
+  const filteredActiveStudentsForManualHours = useMemo(() => {
+    if (!manualHoursSearch.trim()) return activeEligibleStudents;
+    const q = manualHoursSearch.toLowerCase().trim();
+    return activeEligibleStudents.filter(s => {
+      const fullName = (s.name || getFullName(s) || '').toLowerCase();
+      const nickname = (s.nickname || '').toLowerCase();
+      const matricula = (s.studentId || '').toLowerCase();
+      const career = (s.career || '').toLowerCase();
+      return fullName.includes(q) || nickname.includes(q) || matricula.includes(q) || career.includes(q);
+    });
+  }, [activeEligibleStudents, manualHoursSearch]);
+
+  const availableActiveStudentsForTargetActivity = useMemo(() => {
+    if (!targetActivityForAddingStudents) return [];
+    const existingIds = new Set(
+      (targetActivityForAddingStudents.records || []).flatMap((r: any) => [r.studentId, r.userId]).filter(Boolean)
+    );
+    const existingNames = new Set(
+      [
+        ...(targetActivityForAddingStudents.participants || []),
+        ...(targetActivityForAddingStudents.records || []).map((r: any) => r.studentName)
+      ].filter(Boolean).map((p: any) => String(p).trim().toLowerCase())
+    );
+    return activeEligibleStudents.filter(s => {
+      // Excluir si ya pertenece a la actividad
+      if (existingIds.has(s.id) || (s.uid && existingIds.has(s.uid))) return false;
+      const sFullName = (s.name || getFullName(s) || '').trim().toLowerCase();
+      if (sFullName && existingNames.has(sFullName)) return false;
+      
+      // Debe estar estrictamente activo
+      if (s.isArchived) return false;
+      if (s.status === 'Baja' || s.status === 'Finalizado' || s.status === 'Inactivo') return false;
+      if (s.workStatus === 'Finalizado' || s.workStatus === 'Baja') return false;
+      if (isStudentFinished(s)) return false;
+      return true;
+    });
+  }, [targetActivityForAddingStudents, activeEligibleStudents]);
+
+  const filteredStudentsToAdd = useMemo(() => {
+    const q = searchStudentsToAdd.toLowerCase().trim();
+    if (!q) return availableActiveStudentsForTargetActivity;
+    return availableActiveStudentsForTargetActivity.filter(s => {
+      const fullName = (s.name || getFullName(s) || '').toLowerCase();
+      const nickname = (s.nickname || '').toLowerCase();
+      const matricula = (s.studentId || '').toLowerCase();
+      const career = (s.career || '').toLowerCase();
+      const brigade = (s.brigadePeriod || s.brigade || '').toLowerCase();
+      return fullName.includes(q) || nickname.includes(q) || matricula.includes(q) || career.includes(q) || brigade.includes(q);
+    });
+  }, [availableActiveStudentsForTargetActivity, searchStudentsToAdd]);
 
   const allRecords = useMemo(() => {
     let base = studentsWithRecords.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email));
@@ -2518,7 +2865,7 @@ const App = () => {
 
   const chartData = useMemo(() => {
     const hoursByProject: Record<string, { hours: number, color: string, studentCount: number }> = {};
-    const hoursByCategory: Record<string, number> = {};
+    const hoursByCategory: Record<string, { hours: number, id: string }> = {};
     let totalCompletedHours = 0;
 
     projects.forEach(p => {
@@ -2555,8 +2902,12 @@ const App = () => {
           }
 
           if (r.categoryId) {
-            const cName = categories.find(c => c.id === r.categoryId)?.name || 'Desconocida';
-            hoursByCategory[cName] = (hoursByCategory[cName] || 0) + r.hours;
+            const cat = categories.find(c => c.id === r.categoryId);
+            const cName = cat?.name || 'Desconocida';
+            if (!hoursByCategory[cName]) {
+              hoursByCategory[cName] = { hours: 0, id: r.categoryId };
+            }
+            hoursByCategory[cName].hours += r.hours;
           }
         }
       });
@@ -2572,13 +2923,20 @@ const App = () => {
         avgHours: data.studentCount > 0 ? data.hours / data.studentCount : 0
       }));
     
-    const categoryChartData = Object.entries(hoursByCategory).map(([name, hours]) => ({ name, hours }));
+    const categoryChartData = Object.entries(hoursByCategory)
+      .map(([name, data]) => ({ 
+        name, 
+        hours: filterCategories.includes(data.id) ? data.hours : 0, 
+        actualHours: data.hours,
+        id: data.id 
+      }))
+      .filter(entry => entry.actualHours > 0 || filterCategories.includes(entry.id));
     const totalRequired = validStudents.length * TOTAL_REQUIRED_HOURS;
     const progressPerc = totalRequired > 0 ? (totalCompletedHours / totalRequired) * 100 : 0;
     const avgHoursPerStudent = validStudents.length > 0 ? totalCompletedHours / validStudents.length : 0;
 
     return { projectChartData, categoryChartData, progressPerc, totalCompletedHours, totalRequired, avgHoursPerStudent, totalEnrolled: validStudents.length };
-  }, [studentsWithRecords, projects, categories]);
+  }, [studentsWithRecords, projects, categories, filterCategories]);
 
   const [rejectingRecord, setRejectingRecord] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -2718,7 +3076,7 @@ const App = () => {
     }
 
     // Validación de certificación (horas mínimas)
-    if (studentForm.status === 'Finalizada') {
+    if (studentForm.status === 'Finalizado') {
       const currentStudent = getStudentData(selectedStudentId);
       const totalHours = currentStudent ? (currentStudent.records || []).reduce((acc: number, r: any) => {
         if (r.validationStatus === 'aprobado') return acc + r.hours;
@@ -2846,8 +3204,43 @@ const App = () => {
       await updateDoc(sessionRef, {
         estado: 'aprobado',
         status: 'A',
-        updatedBy: user.uid
+        updatedBy: user?.uid
       });
+
+      // Verificar si alcanzó las horas totales con esta aprobación
+      const student = studentsWithRecords.find(s => s.id === studentId);
+      if (student) {
+        const record = student.records.find((r: any) => r.id === recordId);
+        if (record && record.validationStatus !== 'aprobado') {
+          const currentHours = student.records.reduce((acc: number, r: any) => {
+            if (r.validationStatus === 'aprobado') return acc + r.hours;
+            return acc;
+          }, 0);
+          
+          if (currentHours < TOTAL_REQUIRED_HOURS && (currentHours + record.hours) >= TOTAL_REQUIRED_HOURS) {
+            triggerCelebration();
+            toast.success(`🎉 ¡Felicidades ${getDisplayName(student)}! Ha completado sus ${TOTAL_REQUIRED_HOURS} horas.`, {
+              duration: 8000,
+              position: 'top-center',
+              style: {
+                background: isDarkMode ? '#2d2d2d' : '#fff',
+                color: isDarkMode ? '#fff' : '#1e293b',
+                padding: '24px',
+                borderRadius: '24px',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+                fontWeight: 900,
+                fontSize: '18px',
+                border: `4px solid ${isDarkMode ? '#6366f1' : '#4f46e5'}`
+              }
+            });
+            
+            // Actualizar estatus en Firestore
+            await updateDoc(doc(db, 'users', studentId), { status: 'Finalizado' });
+            await updateDoc(doc(db, 'public_profiles', studentId), { status: 'Finalizado' });
+          }
+        }
+      }
+
       showSuccessToast("Registro aprobado");
     } catch (error) {
       console.error("Error approving session:", error);
@@ -3101,6 +3494,320 @@ const App = () => {
     });
   };
 
+  const openCalendarEdit = (record: any) => {
+    if (userRole !== 'admin' && userRole !== 'coordinator') {
+      showErrorToast("Solo administradores y coordinadores pueden modificar horas desde el calendario.");
+      return;
+    }
+    const isManual = !record.startTime || !record.endTime;
+    const targetStudentId = record.studentId || record.userId;
+    setEditingCalendarRecord(record);
+    setCalendarEditForm({
+      date: record.date || getCDMXDateString(),
+      startTime: record.startTime || '09:00',
+      endTime: record.endTime || '13:00',
+      hours: Number(record.hours) || Number(record.horasCalculadas) || 0,
+      isManualHours: isManual,
+      categoryId: record.categoryId || '',
+      projectId: record.projectId || '',
+      description: record.description || '',
+      studentId: targetStudentId,
+      status: record.status || 'A'
+    });
+  };
+
+  const handleCalendarStartTimeChange = (val: string) => {
+    setCalendarEditForm(prev => {
+      const next = { ...prev, startTime: val };
+      if (!next.isManualHours) {
+        const start = toMins(val);
+        const end = toMins(next.endTime);
+        const calcHours = end - start > 0 ? (end - start) / 60 : 0;
+        next.hours = calcHours;
+      }
+      return next;
+    });
+  };
+
+  const handleCalendarEndTimeChange = (val: string) => {
+    setCalendarEditForm(prev => {
+      const next = { ...prev, endTime: val };
+      if (!next.isManualHours) {
+        const start = toMins(next.startTime);
+        const end = toMins(val);
+        const calcHours = end - start > 0 ? (end - start) / 60 : 0;
+        next.hours = calcHours;
+      }
+      return next;
+    });
+  };
+
+  const handleSaveCalendarRecordEdit = async () => {
+    if (!editingCalendarRecord) return;
+    if (userRole !== 'admin' && userRole !== 'coordinator') {
+      showErrorToast("Permisos insuficientes para modificar horas.");
+      return;
+    }
+
+    const student = getStudentData(calendarEditForm.studentId);
+    if (!student) {
+      showErrorToast("Alumno no encontrado.");
+      return;
+    }
+
+    if (isStudentFinished(student)) {
+      showErrorToast("El alumno ya ha finalizado su servicio social y no se le pueden asignar ni modificar horas.");
+      return;
+    }
+
+    if (calendarEditForm.hours < 0.5) {
+      showErrorToast("El registro mínimo es de media hora (0.5 hrs).");
+      return;
+    }
+    if (calendarEditForm.hours > 240) {
+      showErrorToast("Un registro no puede exceder las 240 horas.");
+      return;
+    }
+
+    const { dateString: cdmxDateString, currentMins: cdmxCurrentMins } = getCDMXDateInfo();
+    if (calendarEditForm.date > cdmxDateString) {
+      showErrorToast("No se pueden registrar o mover actividades a fechas futuras.");
+      return;
+    }
+
+    const startMins = toMins(calendarEditForm.startTime);
+    const endMins = toMins(calendarEditForm.endTime);
+    if (!calendarEditForm.isManualHours) {
+      if (endMins <= startMins) {
+        showErrorToast("La hora de salida debe ser posterior a la de entrada.");
+        return;
+      }
+      if (calendarEditForm.date === cdmxDateString && endMins > cdmxCurrentMins) {
+        showErrorToast("La hora de salida no puede ser mayor a la hora actual.");
+        return;
+      }
+      if (checkTimeOverlap(calendarEditForm.studentId, calendarEditForm.date, calendarEditForm.startTime, calendarEditForm.endTime, editingCalendarRecord.id)) {
+        showErrorToast(`Ya existe otra actividad registrada en ese horario para ${student.name || getFullName(student)}.`);
+        return;
+      }
+    }
+
+    setIsSavingCalendarEdit(true);
+    const recordId = editingCalendarRecord.id;
+    const updateData = {
+      date: calendarEditForm.date,
+      startTime: calendarEditForm.isManualHours ? '' : calendarEditForm.startTime,
+      endTime: calendarEditForm.isManualHours ? '' : calendarEditForm.endTime,
+      horasCalculadas: calendarEditForm.hours,
+      hours: calendarEditForm.hours,
+      categoryId: calendarEditForm.categoryId,
+      projectId: calendarEditForm.projectId || '',
+      description: calendarEditForm.description,
+      status: calendarEditForm.status || 'A',
+      updatedBy: auth.currentUser?.uid || 'admin',
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      await updateDoc(doc(db, 'sesiones', recordId), updateData);
+      
+      setStudents(prev => prev.map(s => {
+        if (s.id === calendarEditForm.studentId) {
+          const updatedRecs = (s.records || []).map((r: any) => r.id === recordId ? { ...r, ...updateData } : r);
+          return { ...s, records: updatedRecs };
+        }
+        return s;
+      }));
+
+      showSuccessToast("Horas modificadas correctamente");
+      setEditingCalendarRecord(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `sesiones/${recordId}`);
+    } finally {
+      setIsSavingCalendarEdit(false);
+    }
+  };
+
+  const handleDeleteCalendarRecord = (record: any) => {
+    if (userRole !== 'admin' && userRole !== 'coordinator') {
+      showErrorToast("Permisos insuficientes.");
+      return;
+    }
+    showConfirmToast("¿Estás seguro de que deseas eliminar este registro de horas?", async () => {
+      try {
+        await deleteDoc(doc(db, 'sesiones', record.id));
+        setStudents(prev => prev.map(s => {
+          if (s.id === record.studentId || s.id === record.userId) {
+            return { ...s, records: (s.records || []).filter((r: any) => r.id !== record.id) };
+          }
+          return s;
+        }));
+        showSuccessToast("Registro eliminado");
+        if (editingCalendarRecord?.id === record.id) {
+          setEditingCalendarRecord(null);
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, `sesiones/${record.id}`);
+      }
+    });
+  };
+
+  const openChangeCategoryProjectModal = (activityGroup: any) => {
+    if (userRole !== 'admin' && userRole !== 'coordinator') {
+      showErrorToast("Solo administradores y coordinadores pueden modificar la categoría y el proyecto.");
+      return;
+    }
+    setActivityToChangeCategoryProject(activityGroup);
+    setChangeCategoryForm({
+      categoryId: activityGroup.categoryId || (categories[0]?.id || ''),
+      projectId: activityGroup.projectId || ''
+    });
+  };
+
+  const handleSaveCategoryProjectChange = async () => {
+    if (!activityToChangeCategoryProject) return;
+    if (userRole !== 'admin' && userRole !== 'coordinator') {
+      showErrorToast("Permisos insuficientes.");
+      return;
+    }
+
+    setIsSavingCategoryProjectChange(true);
+    try {
+      const records = activityToChangeCategoryProject.records || [activityToChangeCategoryProject];
+      const newCategoryId = changeCategoryForm.categoryId;
+      const newProjectId = changeCategoryForm.projectId || '';
+
+      const batch = writeBatch(db);
+      records.forEach((rec: any) => {
+        if (rec.id) {
+          const ref = doc(db, 'sesiones', rec.id);
+          batch.update(ref, {
+            categoryId: newCategoryId,
+            projectId: newProjectId,
+            updatedAt: new Date().toISOString(),
+            updatedBy: auth.currentUser?.uid || 'admin'
+          });
+        }
+      });
+      await batch.commit();
+
+      const recordIds = new Set(records.map((r: any) => r.id));
+      setStudents(prev => prev.map(s => {
+        let changed = false;
+        const updatedRecords = (s.records || []).map((r: any) => {
+          if (recordIds.has(r.id)) {
+            changed = true;
+            return { ...r, categoryId: newCategoryId, projectId: newProjectId };
+          }
+          return r;
+        });
+        return changed ? { ...s, records: updatedRecords } : s;
+      }));
+
+      // Si está abierto selectedCalendarDate o targetActivityForAddingStudents, actualizarlo en caliente
+      if (targetActivityForAddingStudents) {
+        setTargetActivityForAddingStudents((prev: any) => prev ? { ...prev, categoryId: newCategoryId, projectId: newProjectId } : null);
+      }
+
+      showSuccessToast("Categoría y proyecto actualizados correctamente");
+      setActivityToChangeCategoryProject(null);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, 'sesiones');
+    } finally {
+      setIsSavingCategoryProjectChange(false);
+    }
+  };
+
+  const openAddStudentsToActivity = (activityGroup: any) => {
+    if (userRole !== 'admin' && userRole !== 'coordinator') {
+      showErrorToast("Solo administradores y coordinadores pueden agregar alumnos a actividades.");
+      return;
+    }
+    setTargetActivityForAddingStudents(activityGroup);
+    setSelectedStudentsToAdd([]);
+    setSearchStudentsToAdd('');
+  };
+
+  const handleSaveStudentsToActivity = async () => {
+    if (!targetActivityForAddingStudents || selectedStudentsToAdd.length === 0) {
+      showErrorToast("Selecciona al menos un alumno activo para agregar a la actividad.");
+      return;
+    }
+    if (userRole !== 'admin' && userRole !== 'coordinator') {
+      showErrorToast("Permisos insuficientes.");
+      return;
+    }
+
+    const finishedSelected = selectedStudentsToAdd.filter(id => {
+      const s = getStudentData(id);
+      return isStudentFinished(s);
+    });
+    if (finishedSelected.length > 0) {
+      showErrorToast("No se pueden agregar alumnos que ya han finalizado su servicio social.");
+      return;
+    }
+
+    setIsSavingStudentsToActivity(true);
+    try {
+      const act = targetActivityForAddingStudents;
+      const hoursNum = Number(act.hours) || Number(act.horasCalculadas) || 0;
+      const dateStr = act.date || selectedCalendarDate || getCDMXDateString();
+      const startTimeStr = act.startTime || '';
+      const endTimeStr = act.endTime || '';
+      const categoryIdStr = act.categoryId || '';
+      const descriptionStr = act.description || '';
+      const projectIdStr = act.projectId || '';
+      const evidenceLinkStr = act.evidenceLink || '';
+
+      const newCreatedRecords: any[] = [];
+      
+      for (const studentId of selectedStudentsToAdd) {
+        const student = getStudentData(studentId);
+        const studentName = student?.name || getFullName(student) || 'Alumno';
+        const recordData = {
+          userId: studentId,
+          studentId: studentId,
+          studentName: studentName,
+          date: dateStr,
+          startTime: startTimeStr,
+          endTime: endTimeStr,
+          hours: hoursNum,
+          horasCalculadas: hoursNum,
+          categoryId: categoryIdStr,
+          description: descriptionStr,
+          projectId: projectIdStr,
+          status: 'A',
+          validationStatus: 'aprobado',
+          evidenceLink: evidenceLinkStr,
+          createdAt: new Date().toISOString(),
+          createdBy: auth.currentUser?.uid || 'admin'
+        };
+
+        const docRef = await addDoc(collection(db, 'sesiones'), recordData);
+        newCreatedRecords.push({ id: docRef.id, ...recordData });
+      }
+
+      setStudents(prev => prev.map(s => {
+        const matchingRecs = newCreatedRecords.filter(r => r.studentId === s.id);
+        if (matchingRecs.length > 0) {
+          return {
+            ...s,
+            records: [...(s.records || []), ...matchingRecs]
+          };
+        }
+        return s;
+      }));
+
+      showSuccessToast(`${newCreatedRecords.length} alumno(s) activo(s) agregado(s) a la actividad correctamente`);
+      setTargetActivityForAddingStudents(null);
+      setSelectedStudentsToAdd([]);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'sesiones');
+    } finally {
+      setIsSavingStudentsToActivity(false);
+    }
+  };
+
   const saveActivity = (e: any) => {
     e.preventDefault();
     if (isSubmitting) return;
@@ -3111,6 +3818,15 @@ const App = () => {
     if (!targetIds || targetIds.length === 0 || !targetIds[0]) {
       setErrorMessage("Debe seleccionar participantes.");
       showErrorToast("Debe seleccionar participantes.");
+      return;
+    }
+
+    const finishedSelected = targetIds.map(id => getStudentData(id)).filter(s => isStudentFinished(s));
+    if (finishedSelected.length > 0) {
+      const names = finishedSelected.map(s => getDisplayName(s)).join(', ');
+      const msg = `No se pueden asignar horas a alumnos que ya finalizaron su servicio social: ${names}`;
+      setErrorMessage(msg);
+      showErrorToast(msg);
       return;
     }
 
@@ -3149,16 +3865,7 @@ const App = () => {
     }
 
     // Validar que la fecha y hora no sean en el futuro (CDMX)
-    const now = new Date();
-    const cdmxTimeStr = now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' });
-    const cdmxDate = new Date(cdmxTimeStr);
-    
-    const cdmxYear = cdmxDate.getFullYear();
-    const cdmxMonth = String(cdmxDate.getMonth() + 1).padStart(2, '0');
-    const cdmxDay = String(cdmxDate.getDate()).padStart(2, '0');
-    const cdmxDateString = `${cdmxYear}-${cdmxMonth}-${cdmxDay}`;
-    
-    const cdmxCurrentMins = cdmxDate.getHours() * 60 + cdmxDate.getMinutes();
+    const { dateString: cdmxDateString, currentMins: cdmxCurrentMins } = getCDMXDateInfo();
 
     if (activityForm.date > cdmxDateString) {
       setErrorMessage("No se pueden registrar actividades en fechas futuras.");
@@ -3223,11 +3930,37 @@ const App = () => {
           };
           updatedRecords = [newRecord, ...records];
         }
+        const oldHours = (s.records || []).reduce((a: number, c: any) => {
+          if (c.validationStatus === 'aprobado' || !c.validationStatus) return a + c.hours;
+          return a;
+        }, 0);
+
         const approvedHours = updatedRecords.reduce((a: number,c: any) => {
           if (c.validationStatus === 'aprobado' || !c.validationStatus) return a + c.hours;
           return a;
         }, 0);
-        return { ...s, records: updatedRecords, status: approvedHours >= TOTAL_REQUIRED_HOURS ? 'Finalizada' : s.status };
+
+        if (oldHours < TOTAL_REQUIRED_HOURS && approvedHours >= TOTAL_REQUIRED_HOURS) {
+          setTimeout(() => {
+            triggerCelebration();
+            toast.success(`🎉 ¡Felicidades ${getDisplayName(s)}! Has completado tus ${TOTAL_REQUIRED_HOURS} horas de servicio social.`, {
+              duration: 8000,
+              position: 'top-center',
+              style: {
+                background: isDarkMode ? '#2d2d2d' : '#fff',
+                color: isDarkMode ? '#fff' : '#1e293b',
+                padding: '24px',
+                borderRadius: '24px',
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)',
+                fontWeight: 900,
+                fontSize: '18px',
+                border: `4px solid ${isDarkMode ? '#6366f1' : '#4f46e5'}`
+              }
+            });
+          }, 600);
+        }
+
+        return { ...s, records: updatedRecords, status: approvedHours >= TOTAL_REQUIRED_HOURS ? 'Finalizado' : s.status };
       }
       return s;
     });
@@ -3267,6 +4000,26 @@ const App = () => {
           }
 
           await setDoc(doc(db, 'sesiones', recordId), sessionData, { merge: true });
+
+          // Persistir cambio de estatus si completó las horas
+          const updatedStudent = updatedStudents.find(s => s.id === id);
+          if (updatedStudent && updatedStudent.status === 'Finalizado') {
+            const studentRef = doc(db, 'users', id);
+            await updateDoc(studentRef, { 
+              status: 'Finalizado',
+              projectIds: [],
+              isArchived: true,
+              finalizedAt: new Date().toISOString(),
+              workStatus: 'Finalizado'
+            });
+            await updateDoc(doc(db, 'public_profiles', id), { 
+              status: 'Finalizado',
+              projectIds: [],
+              isArchived: true,
+              finalizedAt: new Date().toISOString(),
+              workStatus: 'Finalizado'
+            });
+          }
         });
         await Promise.all(updates);
         showSuccessToast(editingRecordId ? "Registro actualizado exitosamente" : "Registro agregado exitosamente");
@@ -3401,14 +4154,67 @@ const App = () => {
           )}
           
           {activityForm.categoryId && !isGroup && (
-            <div className="space-y-2">
-              <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Alumno</label>
-              <select className={`w-full p-4 border rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`} value={activityForm.selectedStudentIds[0] || selectedStudentId || ''} onChange={e => {
-                setActivityForm({...activityForm, selectedStudentIds: [e.target.value]});
-                setSelectedStudentId(e.target.value);
-              }}>
-                <option value="" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Seleccionar Alumno</option>
-                {students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email)).map((s, idx) => <option key={`${s.id || 'student'}-${idx}`} value={s.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{s.name}</option>)}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
+                  Alumno Activo
+                </label>
+                <span className={`text-[10px] font-black uppercase tracking-wider ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>
+                  {filteredActiveStudentsForActivity.length} disponible{filteredActiveStudentsForActivity.length === 1 ? '' : 's'}
+                </span>
+              </div>
+
+              {/* Barra de búsqueda para filtrar alumno individual */}
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                  <Search size={16} className={isDarkMode ? 'text-gray-500' : 'text-slate-400'} />
+                </div>
+                <input
+                  type="text"
+                  value={activityStudentSearch}
+                  onChange={e => setActivityStudentSearch(e.target.value)}
+                  placeholder="Buscar alumno por nombre, matrícula o carrera..."
+                  className={`w-full pl-10 pr-9 py-3 border rounded-2xl text-xs font-bold outline-none transition-all ${
+                    isDarkMode
+                      ? 'bg-white/5 border-white/10 text-white placeholder-gray-500 focus:bg-white/10 focus:border-indigo-400'
+                      : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400 focus:bg-white focus:border-indigo-500'
+                  }`}
+                />
+                {activityStudentSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setActivityStudentSearch('')}
+                    className={`absolute inset-y-0 right-0 pr-3.5 flex items-center ${isDarkMode ? 'text-gray-400 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+
+              <select
+                className={`w-full p-4 border rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500 ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'}`}
+                value={activityForm.selectedStudentIds[0] || selectedStudentId || ''}
+                onChange={e => {
+                  setActivityForm({ ...activityForm, selectedStudentIds: [e.target.value] });
+                  setSelectedStudentId(e.target.value);
+                }}
+              >
+                <option value="" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>
+                  {filteredActiveStudentsForActivity.length === 0 ? 'Sin alumnos activos disponibles' : 'Seleccionar Alumno...'}
+                </option>
+                {filteredActiveStudentsForActivity.map((s, idx) => {
+                  const approvedHrs = (s.records || []).reduce((acc: number, r: any) => {
+                    if (r.validationStatus === 'aprobado' || !r.validationStatus) {
+                      return acc + (Number(r.hours) || Number(r.horasCalculadas) || 0);
+                    }
+                    return acc;
+                  }, 0);
+                  return (
+                    <option key={`${s.id || 'student'}-${idx}`} value={s.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>
+                      {s.name || getFullName(s)} {s.studentId ? `(${s.studentId})` : ''} — {s.career || ''} [{Number(approvedHrs.toFixed(1))}/{TOTAL_REQUIRED_HOURS}h]
+                    </option>
+                  );
+                })}
               </select>
             </div>
           )}
@@ -3416,33 +4222,161 @@ const App = () => {
 
         {activityForm.categoryId && isGroup && (
           <div className="space-y-4">
-            <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Participantes</label>
-            <div className={`grid grid-cols-1 gap-4 p-6 rounded-[2rem] border max-h-[300px] overflow-y-auto ${isDarkMode ? 'bg-white/2 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
-              {students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email)).map((s, idx) => {
-                const isSelected = activityForm.selectedStudentIds.includes(s.id);
-                const sStatus = activityForm.studentStatuses[s.id] || 'A';
-                return (
-                  <div key={`${s.id || 'student'}-${idx}`} className={`p-4 rounded-xl border-2 transition-all ${isSelected ? (isDarkMode ? 'bg-white/10 border-emerald-500/50' : 'bg-white border-emerald-500') : 'bg-transparent border-transparent'}`}>
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input type="checkbox" checked={isSelected} onChange={e => {
-                        const checked = e.target.checked;
-                        const ids = checked ? [...activityForm.selectedStudentIds, s.id] : activityForm.selectedStudentIds.filter(id => id !== s.id);
-                        const newStatuses = { ...activityForm.studentStatuses };
-                        if (checked) newStatuses[s.id] = 'A'; else delete newStatuses[s.id];
-                        setActivityForm({...activityForm, selectedStudentIds: ids, studentStatuses: newStatuses});
-                      }} className="w-4 h-4 text-emerald-500 rounded focus:ring-emerald-500" />
-                      <span className={`text-sm font-bold ${isDarkMode ? (isSelected ? 'text-white' : 'text-gray-400') : (isSelected ? 'text-slate-900' : 'text-slate-600')}`}>{s.name}</span>
-                    </label>
-                    {isSelected && (
-                      <div className="flex gap-1 mt-3">
-                        {Object.keys(ATTENDANCE_STATUS).map(k => (
-                          <button key={k} type="button" onClick={() => setActivityForm(prev => ({...prev, studentStatuses: {...prev.studentStatuses, [s.id]: k}}))} className={`text-[9px] font-black p-1 to-t border rounded flex-1 transition-all ${sStatus === k ? 'bg-indigo-600 border-indigo-600 text-white' : (isDarkMode ? 'bg-white/5 border-white/10 text-gray-500 hover:bg-white/10' : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50')}`}>{k}</button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
+                  Participantes Activos
+                </label>
+                <p className={`text-[11px] font-bold ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                  {activityForm.selectedStudentIds.length} de {activeEligibleStudents.length} alumno{activeEligibleStudents.length === 1 ? '' : 's'} seleccionado{activityForm.selectedStudentIds.length === 1 ? '' : 's'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const filteredIds = filteredActiveStudentsForActivity.map(s => s.id);
+                    const newIds = Array.from(new Set([...activityForm.selectedStudentIds, ...filteredIds]));
+                    const newStatuses = { ...activityForm.studentStatuses };
+                    filteredIds.forEach(id => {
+                      if (!newStatuses[id]) newStatuses[id] = 'A';
+                    });
+                    setActivityForm({ ...activityForm, selectedStudentIds: newIds, studentStatuses: newStatuses });
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${isDarkMode ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400 hover:bg-indigo-500/20' : 'bg-indigo-50 border-indigo-200 text-indigo-600 hover:bg-indigo-100'}`}
+                >
+                  Seleccionar {activityStudentSearch ? 'Filtrados' : 'Todos'}
+                </button>
+                {activityForm.selectedStudentIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActivityForm({ ...activityForm, selectedStudentIds: [], studentStatuses: {} });
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all border ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:text-white' : 'bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-700'}`}
+                  >
+                    Deseleccionar
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Barra de búsqueda para filtrar alumnos */}
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <Search size={18} className={isDarkMode ? 'text-gray-500' : 'text-slate-400'} />
+              </div>
+              <input
+                type="text"
+                value={activityStudentSearch}
+                onChange={e => setActivityStudentSearch(e.target.value)}
+                placeholder="Buscar alumno por nombre, matrícula o carrera..."
+                className={`w-full pl-11 pr-10 py-3.5 border rounded-2xl text-sm font-bold outline-none transition-all focus:ring-2 focus:ring-indigo-500 ${
+                  isDarkMode
+                    ? 'bg-white/5 border-white/10 text-white placeholder-gray-500 focus:bg-white/10'
+                    : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400 focus:bg-white focus:border-indigo-500'
+                }`}
+              />
+              {activityStudentSearch && (
+                <button
+                  type="button"
+                  onClick={() => setActivityStudentSearch('')}
+                  className={`absolute inset-y-0 right-0 pr-4 flex items-center ${isDarkMode ? 'text-gray-400 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+
+            {/* Lista de alumnos filtrados */}
+            <div className={`grid grid-cols-1 gap-3 p-4 sm:p-6 rounded-[2rem] border max-h-[340px] overflow-y-auto custom-scrollbar ${isDarkMode ? 'bg-white/2 border-white/5' : 'bg-slate-50 border-slate-100'}`}>
+              {filteredActiveStudentsForActivity.length === 0 ? (
+                <div className="text-center py-8">
+                  <UserX size={36} className={`mx-auto mb-2 ${isDarkMode ? 'text-gray-600' : 'text-slate-300'}`} />
+                  <p className={`text-xs font-bold ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                    {activityStudentSearch ? 'No se encontraron alumnos activos con esa búsqueda' : 'No hay alumnos activos disponibles para asignar horas'}
+                  </p>
+                  <p className={`text-[10px] mt-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
+                    Los alumnos que ya finalizaron su servicio social no aparecen en esta lista.
+                  </p>
+                </div>
+              ) : (
+                filteredActiveStudentsForActivity.map((s, idx) => {
+                  const isSelected = activityForm.selectedStudentIds.includes(s.id);
+                  const sStatus = activityForm.studentStatuses[s.id] || 'A';
+                  const approvedHrs = (s.records || []).reduce((acc: number, r: any) => {
+                    if (r.validationStatus === 'aprobado' || !r.validationStatus) {
+                      return acc + (Number(r.hours) || Number(r.horasCalculadas) || 0);
+                    }
+                    return acc;
+                  }, 0);
+                  return (
+                    <div
+                      key={`${s.id || 'student'}-${idx}`}
+                      className={`p-4 rounded-2xl border-2 transition-all ${
+                        isSelected
+                          ? (isDarkMode ? 'bg-indigo-500/10 border-indigo-500/50 shadow-sm' : 'bg-white border-indigo-500 shadow-md ring-2 ring-indigo-500/10')
+                          : (isDarkMode ? 'bg-transparent border-white/5 hover:border-white/10' : 'bg-white/70 border-slate-200/80 hover:border-slate-300')
+                      }`}
+                    >
+                      <label className="flex items-start gap-3 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={e => {
+                            const checked = e.target.checked;
+                            const ids = checked ? [...activityForm.selectedStudentIds, s.id] : activityForm.selectedStudentIds.filter(id => id !== s.id);
+                            const newStatuses = { ...activityForm.studentStatuses };
+                            if (checked) newStatuses[s.id] = 'A'; else delete newStatuses[s.id];
+                            setActivityForm({ ...activityForm, selectedStudentIds: ids, studentStatuses: newStatuses });
+                          }}
+                          className="w-5 h-5 mt-0.5 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className={`text-sm font-black truncate ${isDarkMode ? (isSelected ? 'text-white' : 'text-gray-200') : (isSelected ? 'text-slate-900' : 'text-slate-700')}`}>
+                              {s.name || getFullName(s)}
+                            </span>
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${isDarkMode ? 'bg-white/5 border-white/10 text-indigo-400' : 'bg-indigo-50 border-indigo-100 text-indigo-700'}`}>
+                              {Number(approvedHrs.toFixed(1))} / {TOTAL_REQUIRED_HOURS}h
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 mt-1">
+                            {s.studentId && (
+                              <span className={`text-[9px] font-bold ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
+                                Matrícula: {s.studentId}
+                              </span>
+                            )}
+                            {s.career && (
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-white/5 text-gray-400' : 'bg-slate-100 text-slate-500'}`}>
+                                {s.career}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </label>
+                      {isSelected && (
+                        <div className="flex gap-1.5 mt-3 pt-3 border-t border-dashed border-indigo-200/40">
+                          {Object.keys(ATTENDANCE_STATUS).map(k => (
+                            <button
+                              key={k}
+                              type="button"
+                              onClick={() => setActivityForm(prev => ({ ...prev, studentStatuses: { ...prev.studentStatuses, [s.id]: k } }))}
+                              className={`text-[9px] font-black py-1 px-2 border rounded-xl flex-1 transition-all ${
+                                sStatus === k
+                                  ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                                  : (isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100')
+                              }`}
+                            >
+                              {k}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         )}
@@ -3461,6 +4395,132 @@ const App = () => {
         )}
       </div>
     );
+  };
+
+  const handleExportToSheets = async () => {
+    if (filteredStudents.length === 0) {
+      showErrorToast("No hay alumnos filtrados para exportar");
+      return;
+    }
+
+    const includeArchived = await new Promise<boolean>((resolve) => {
+      showConfirmToast(
+        `¿Deseas incluir a los alumnos ${showArchived ? 'activos' : 'archivados'} en la exportación?`,
+        () => resolve(true),
+        "Incluir",
+        "No, solo actuales",
+        () => resolve(false)
+      );
+    });
+
+    let token = googleAccessToken;
+
+    if (!token) {
+      const btn = document.getElementById('export-sheets-btn') as HTMLButtonElement;
+      if (btn) {
+        btn.disabled = true;
+        btn.style.opacity = '0.5';
+      }
+      const loadingAuth = showLoadingToast("Autenticando con Google...");
+      try {
+        const provider = new GoogleAuthProvider();
+        provider.addScope('https://www.googleapis.com/auth/spreadsheets');
+        provider.setCustomParameters({ prompt: 'select_account' });
+        const result = await signInWithPopup(auth, provider);
+        const credential = GoogleAuthProvider.credentialFromResult(result);
+        token = credential?.accessToken || null;
+        if (token) setGoogleAccessToken(token);
+      } catch (error: any) {
+        if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+          console.warn("Autenticación para Sheets cancelada o ventana cerrada por el usuario.");
+          toast("Ventana de autenticación cerrada.", { icon: 'ℹ️' });
+        } else if (error.code === 'auth/blocked-at-iframe-start' || error.code === 'auth/popup-blocked') {
+          console.warn("Ventana emergente bloqueada por el navegador.");
+          showErrorToast("El navegador bloqueó la ventana emergente. Por favor, habilita los popups para este sitio.");
+        } else {
+          console.error("Error authenticating for Sheets:", error);
+          showErrorToast("Error al autenticar con Google: " + (error.message || "Error desconocido"));
+        }
+        toast.dismiss(loadingAuth);
+        if (btn) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }
+        return;
+      } finally {
+        toast.dismiss(loadingAuth);
+        if (btn) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }
+      }
+    }
+
+    if (!token) return;
+
+    const loadingExport = showLoadingToast("Exportando a Google Sheets...");
+    setIsExporting(true);
+
+    try {
+      let studentsToExport = [...filteredStudents];
+
+      if (includeArchived) {
+        const extraStudents = studentsWithRecords.filter(s => {
+          if (s.email && SUPER_ADMIN_EMAILS.includes(s.email)) return false;
+          
+          // If we were showing archived, we add active. If we were showing active, we add archived.
+          if (showArchived) {
+            if (s.isArchived) return false; // Already included
+          } else {
+            if (!s.isArchived) return false; // Already included
+          }
+
+          const matchStatus = filterStatus === 'Todos' || s.status === filterStatus;
+          const matchWork = filterWork === 'Todos' || s.workStatus === filterWork;
+          const matchProject = filterProject === 'Todos' || (s.projectIds || []).includes(filterProject);
+          const matchCategory = filterCategories.length === categories.length || (s.records || []).some((r: any) => filterCategories.includes(r.categoryId));
+          const matchCareer = filterCareer === 'Todos' || s.career === filterCareer;
+          const matchBrigade = filterBrigade === 'Todos' || s.brigadePeriod === filterBrigade;
+          const lowerSearch = searchTerm.toLowerCase();
+          const matchSearch = getFullName(s).toLowerCase().includes(lowerSearch) ||
+                              (s.nickname || '').toLowerCase().includes(lowerSearch) ||
+                              (s.career || '').toLowerCase().includes(lowerSearch);
+          return matchStatus && matchWork && matchProject && matchCategory && matchCareer && matchBrigade && matchSearch;
+        });
+        studentsToExport = [...studentsToExport, ...extraStudents];
+      }
+
+      const exportData: StudentExportData[] = studentsToExport.map(s => {
+        const approvedHours = (s.records || []).reduce((acc: number, r: any) => {
+          if (r.validationStatus === 'aprobado' || !r.validationStatus) return acc + (r.hours || 0);
+          return acc;
+        }, 0);
+
+        return {
+          id: s.id,
+          firstName: s.firstName || '',
+          lastNamePaterno: s.lastNamePaterno || '',
+          lastNameMaterno: s.lastNameMaterno || '',
+          studentId: s.studentId || '',
+          email: s.email || '',
+          career: s.career || '',
+          brigadePeriod: s.brigadePeriod || '',
+          status: s.status || '',
+          totalHours: Number(approvedHours.toFixed(2))
+        };
+      });
+
+      const url = await exportToGoogleSheets(token, exportData);
+      showSuccessToast("¡Exportación exitosa!");
+      window.open(url, '_blank');
+    } catch (error) {
+      console.error("Error during Sheets export:", error);
+      showErrorToast("Error al exportar a Google Sheets");
+      setGoogleAccessToken(null); // Reset token if it failed (might be expired)
+    } finally {
+      setIsExporting(false);
+      toast.dismiss(loadingExport);
+    }
   };
 
   const handleSyncPublicProfiles = async () => {
@@ -3980,78 +5040,218 @@ const App = () => {
                   <button onClick={() => { setSelectedProjectId(null); setView('project-directory'); }} className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-sm transition-all active:scale-95 ${isDarkMode ? 'bg-white/5 text-white hover:bg-white/10' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}><Briefcase size={18} /> Directorio</button>
                   {(userRole === 'admin' || userRole === 'coordinator') && (
                     <>
+                      <button 
+                        id="export-sheets-btn"
+                        onClick={handleExportToSheets} 
+                        disabled={isExporting}
+                        className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-emerald-500/20 transition-all active:scale-95 ${isDarkMode ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
+                      >
+                        <Download size={18} /> {isExporting ? 'Exportando...' : 'Sheets'}
+                      </button>
                       <button onClick={() => { setShowBulkProjectAssign(true); setSelectedStudentsForBulk([]); setSelectedProjectsForBulk([]); }} className="w-full sm:w-auto bg-amber-500 text-white px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:bg-amber-600 transition-all active:scale-95"><Folder size={18} /> Asignar</button>
-                      <button onClick={() => { setActivityForm(prev => ({...prev, selectedStudentIds: []})); setView('individual-activity'); }} className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-sm transition-all active:scale-95 ${isDarkMode ? 'bg-white/5 border-white/10 text-white hover:bg-white/10' : 'bg-white border-2 sm:border-4 border-slate-100 text-slate-700 hover:bg-slate-50'}`}><PlusCircle size={18} className="text-indigo-500" /> Individual</button>
-                      <button onClick={() => setView('group-activity')} className="w-full sm:w-auto bg-emerald-600 text-white px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-emerald-600/20 hover:bg-emerald-700 transition-all active:scale-95"><Users size={18} /> Grupal</button>
+                      <button onClick={() => setView('group-activity')} className="w-full sm:w-auto bg-emerald-600 text-white px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-emerald-600/20 hover:bg-emerald-700 transition-all active:scale-95"><Users size={18} /> Manual</button>
                       <button onClick={handleSyncPublicProfiles} className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-sm transition-all active:scale-95 ${isDarkMode ? 'bg-white/5 border-white/10 text-white hover:bg-white/10' : 'bg-white border-2 border-indigo-100 text-indigo-600 hover:bg-indigo-50'}`}><RefreshCw size={18} /> Sincronizar</button>
-                      <button onClick={() => { setShowEditStudent(false); setStudentForm({ firstName: '', lastNamePaterno: '', lastNameMaterno: '', studentId: '', serviceType: 'Prestador', nickname: '', phone: '', emergencyPhone: '', email: '', brigadePeriod: '', brigade: '', skills: [], skillRatings: [], career: 'Arquitectura', status: 'En Curso', workStatus: 'Sin asignar', projectIds: [], projectTasks: {}, projectTaskHistory: {}, role: 'user' }); setStudentFormErrors({}); setShowAddStudent(true); }} className="w-full sm:w-auto bg-indigo-600 text-white px-6 py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-indigo-600/30 hover:bg-indigo-700 transition-all active:scale-95"><UserPlus size={18} /> Alumno</button>
                     </>
                   )}
                 </div>
               </div>
 
               {/* Filtros */}
-              <div className={`${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'} p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm flex flex-col gap-4 sm:gap-6`}>
-                <div className="flex justify-between items-center">
-                  <span className={`text-[9px] sm:text-[10px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Búsqueda y Filtros</span>
-                  <span className={`${isDarkMode ? 'bg-white/10 text-white' : 'bg-indigo-50 text-indigo-600'} px-3 py-1 rounded-full text-[9px] sm:text-[10px] font-black uppercase tracking-widest`}>
-                    {filteredStudents.length} {filteredStudents.length === 1 ? 'Alumno' : 'Alumnos'}
-                  </span>
-                </div>
-                <div className="w-full relative">
-                  <Search className="absolute left-4 sm:left-5 top-1/2 -translate-y-1/2 text-slate-300" size={20} />
-                  <input type="text" placeholder="Nombre del alumno, carrera o etiqueta..." className={`w-full pl-12 sm:pl-14 pr-6 py-3 sm:py-4 rounded-xl sm:rounded-[1.5rem] border text-xs sm:text-sm font-bold outline-none transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:ring-white/5' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white focus:ring-indigo-500/10'}`} value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4 w-full">
-                  <div className="space-y-1 sm:space-y-2">
-                    <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Proyecto</span>
-                    <select className={`w-full px-3 py-2 sm:px-4 sm:py-3 rounded-lg sm:rounded-[1.2rem] border text-[9px] sm:text-[10px] font-black uppercase outline-none transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white'}`} value={filterProject} onChange={e => setFilterProject(e.target.value)}>
-                      <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODOS</option>
-                      {projects.map(p => <option key={p.id} value={p.id} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{p.name}</option>)}
-                    </select>
+              <div className={`${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'} p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm flex flex-col gap-6 sm:gap-8`}>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
+                      <Filter size={18} />
+                    </div>
+                    <div>
+                      <h3 className={`text-base sm:text-lg font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Panel de Filtrado</h3>
+                      <p className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Gestión de búsqueda y segmentación</p>
+                    </div>
                   </div>
-                  <div className="space-y-1 sm:space-y-2">
-                    <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Carrera</span>
-                    <select className={`w-full px-3 py-2 sm:px-4 sm:py-3 rounded-lg sm:rounded-[1.2rem] border text-[9px] sm:text-[10px] font-black uppercase outline-none transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white'}`} value={filterCareer} onChange={e => setFilterCareer(e.target.value)}>
-                      <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODAS</option>
-                      {uniqueCareers.map(c => <option key={c} value={c} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{c}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1 sm:space-y-2">
-                    <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Brigada</span>
-                    <select className={`w-full px-3 py-2 sm:px-4 sm:py-3 rounded-lg sm:rounded-[1.2rem] border text-[9px] sm:text-[10px] font-black uppercase outline-none transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white'}`} value={filterBrigade} onChange={e => setFilterBrigade(e.target.value)}>
-                      <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODAS</option>
-                      {uniqueBrigades.map(b => <option key={b} value={b} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{b}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1 sm:space-y-2">
-                    <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Estatus Acad.</span>
-                    <select className={`w-full px-3 py-2 sm:px-4 sm:py-3 rounded-lg sm:rounded-[1.2rem] border text-[9px] sm:text-[10px] font-black uppercase outline-none transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white'}`} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-                      <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODOS</option>
-                      {Object.keys(STUDENT_STATUS).map(s => <option key={s} value={s} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{s}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1 sm:space-y-2">
-                    <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Carga Trabajo</span>
-                    <select className={`w-full px-3 py-2 sm:px-4 sm:py-3 rounded-lg sm:rounded-[1.2rem] border text-[9px] sm:text-[10px] font-black uppercase outline-none transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white'}`} value={filterWork} onChange={e => setFilterWork(e.target.value)}>
-                      <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODOS</option>
-                      {Object.keys(WORK_STATUS).map(w => <option key={w} value={w} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{w}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1 sm:space-y-2">
-                    <span className={`text-[8px] sm:text-[9px] font-black uppercase tracking-widest ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Ordenar</span>
-                    <select className={`w-full px-3 py-2 sm:px-4 sm:py-3 rounded-lg sm:rounded-[1.2rem] border text-[9px] sm:text-[10px] font-black uppercase outline-none transition-all shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white'}`} value={sortHours} onChange={e => setSortHours(e.target.value as any)}>
-                      <option value="none" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>SIN ORDENAR</option>
-                      <option value="desc" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>MAYOR HORAS</option>
-                      <option value="asc" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>MENOR HORAS</option>
-                    </select>
+                  <div className="flex items-center gap-2">
+                    <span className={`${isDarkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-900'} px-4 py-1.5 rounded-xl text-[10px] sm:text-[11px] font-black uppercase tracking-widest border ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`}>
+                      {filteredStudents.length} {filteredStudents.length === 1 ? 'Alumno' : 'Alumnos'}
+                    </span>
+                    <button 
+                      onClick={() => setShowArchived(!showArchived)}
+                      className={`px-4 py-1.5 rounded-xl text-[10px] sm:text-[11px] font-black uppercase tracking-widest border transition-all ${
+                        showArchived 
+                          ? 'bg-amber-500 text-white border-amber-600 shadow-lg shadow-amber-500/20' 
+                          : isDarkMode ? 'bg-white/5 text-gray-400 border-white/10 hover:text-white' : 'bg-white text-slate-400 border-slate-200 hover:text-slate-600'
+                      }`}
+                    >
+                      {showArchived ? 'Ver Activos' : 'Ver Archivados'}
+                    </button>
                   </div>
                 </div>
-                {(filterProject !== 'Todos' || filterCareer !== 'Todos' || filterBrigade !== 'Todos' || filterStatus !== 'Todos' || filterWork !== 'Todos' || sortHours !== 'none' || searchTerm !== '') && (
-                  <div className="flex justify-end mt-2">
+
+                <div className="flex flex-col gap-6">
+                  {/* Search Bar Refined */}
+                  <div className="w-full relative group">
+                    <Search className={`absolute left-5 top-1/2 -translate-y-1/2 transition-colors duration-300 ${isDarkMode ? 'text-gray-600 group-focus-within:text-indigo-400' : 'text-slate-300 group-focus-within:text-indigo-500'}`} size={20} />
+                    <input 
+                      type="text" 
+                      placeholder="Busca por nombre, carrera, brigade o etiqueta..." 
+                      className={`w-full pl-14 pr-6 py-4 rounded-2xl border text-sm font-bold outline-none transition-all ${
+                        isDarkMode 
+                          ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500/30' 
+                          : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500/20 shadow-sm'
+                      }`} 
+                      value={searchTerm} 
+                      onChange={e => setSearchTerm(e.target.value)} 
+                    />
+                    {searchTerm && (
+                      <button 
+                        onClick={() => setSearchTerm('')}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10 text-slate-400 transition-colors"
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filter Selects Grid */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 w-full">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 ml-1">
+                        <Briefcase size={10} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Proyecto</span>
+                      </div>
+                      <select 
+                        className={`w-full px-4 py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none ${
+                          isDarkMode 
+                            ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' 
+                            : 'bg-white border-slate-200 text-slate-900 focus:border-indigo-500/30 hover:border-slate-300'
+                        }`} 
+                        value={filterProject} 
+                        onChange={e => setFilterProject(e.target.value)}
+                      >
+                        <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODOS LOS PROYECTOS</option>
+                        {projects.map(p => <option key={p.id} value={p.id} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{p.name}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 ml-1">
+                        <BookOpen size={10} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Carrera</span>
+                      </div>
+                      <select 
+                        className={`w-full px-4 py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none ${
+                          isDarkMode 
+                            ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' 
+                            : 'bg-white border-slate-200 text-slate-900 focus:border-indigo-500/30 hover:border-slate-300'
+                        }`} 
+                        value={filterCareer} 
+                        onChange={e => setFilterCareer(e.target.value)}
+                      >
+                        <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODAS LAS CARRERAS</option>
+                        {uniqueCareers.map(c => <option key={c} value={c} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{c}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 ml-1">
+                        <CalendarIcon size={10} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Brigada</span>
+                      </div>
+                      <select 
+                        className={`w-full px-4 py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none ${
+                          isDarkMode 
+                            ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' 
+                            : 'bg-white border-slate-200 text-slate-900 focus:border-indigo-500/30 hover:border-slate-300'
+                        }`} 
+                        value={filterBrigade} 
+                        onChange={e => setFilterBrigade(e.target.value)}
+                      >
+                        <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODAS LAS BRIGADAS</option>
+                        {uniqueBrigades.map(b => <option key={b} value={b} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{b}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 ml-1">
+                        <Layers size={10} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Estatus Acad.</span>
+                      </div>
+                      <select 
+                        className={`w-full px-4 py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none ${
+                          isDarkMode 
+                            ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' 
+                            : 'bg-white border-slate-200 text-slate-900 focus:border-indigo-500/30 hover:border-slate-300'
+                        }`} 
+                        value={filterStatus} 
+                        onChange={e => setFilterStatus(e.target.value)}
+                      >
+                        <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODOS LOS ESTATUS</option>
+                        {Object.keys(STUDENT_STATUS).map(s => <option key={s} value={s} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{s}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 ml-1">
+                        <Zap size={10} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Carga Trabajo</span>
+                      </div>
+                      <select 
+                        className={`w-full px-4 py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none ${
+                          isDarkMode 
+                            ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' 
+                            : 'bg-white border-slate-200 text-slate-900 focus:border-indigo-500/30 hover:border-slate-300'
+                        }`} 
+                        value={filterWork} 
+                        onChange={e => setFilterWork(e.target.value)}
+                      >
+                        <option value="Todos" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>TODAS LAS CARGAS</option>
+                        {Object.keys(WORK_STATUS).map(w => <option key={w} value={w} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>{w}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 ml-1">
+                        <ArrowDownUp size={10} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
+                        <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Ordenar</span>
+                      </div>
+                      <select 
+                        className={`w-full px-4 py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none ${
+                          isDarkMode 
+                            ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' 
+                            : 'bg-white border-slate-200 text-slate-900 focus:border-indigo-500/30 hover:border-slate-300'
+                        }`} 
+                        value={sortHours} 
+                        onChange={e => setSortHours(e.target.value as any)}
+                      >
+                        <option value="none" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>SIN ORDENAR</option>
+                        <option value="desc" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>MAYOR HORAS</option>
+                        <option value="asc" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>MENOR HORAS</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {(filterProject !== 'Todos' || filterCategories.length > 0 || filterCareer !== 'Todos' || filterBrigade !== 'Todos' || filterStatus !== 'Todos' || filterWork !== 'Todos' || sortHours !== 'none' || searchTerm !== '') && (
+                  <div className="flex flex-col sm:flex-row justify-between items-center pt-2 border-t border-slate-100 dark:border-white/5 mt-2 gap-4">
+                    <div className="flex flex-wrap gap-2">
+                      {filterProject !== 'Todos' && (
+                        <div className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase flex items-center gap-1.5 ${isDarkMode ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}`}>
+                          <Briefcase size={10} /> {projects.find(p => p.id === filterProject)?.name}
+                        </div>
+                      )}
+                      {filterStatus !== 'Todos' && (
+                        <div className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase flex items-center gap-1.5 ${isDarkMode ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-amber-50 text-amber-700 border border-amber-100'}`}>
+                          <Layers size={10} /> {filterStatus}
+                        </div>
+                      )}
+                      {filterCategories.length > 0 && filterCategories.length < categories.length && (
+                        <div className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase flex items-center gap-1.5 ${isDarkMode ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-emerald-50 text-emerald-700 border border-emerald-100'}`}>
+                          <Filter size={10} /> {filterCategories.length} Categorías
+                        </div>
+                      )}
+                    </div>
                     <button 
                       onClick={() => {
                         setFilterProject('Todos');
+                        setFilterCategories(categories.map(c => c.id));
                         setFilterCareer('Todos');
                         setFilterBrigade('Todos');
                         setFilterStatus('Todos');
@@ -4059,9 +5259,9 @@ const App = () => {
                         setSortHours('none');
                         setSearchTerm('');
                       }}
-                      className={`text-[10px] font-black hover:text-red-500 uppercase tracking-widest flex items-center gap-1 transition-colors ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}
+                      className={`text-[10px] font-black hover:text-red-500 uppercase tracking-widest flex items-center gap-2 px-4 py-2 rounded-xl transition-all ${isDarkMode ? 'text-gray-500 bg-white/5 hover:bg-white/10' : 'text-slate-400 bg-slate-50 hover:bg-slate-100'}`}
                     >
-                      <X size={12} /> Limpiar Filtros
+                      <RefreshCw size={12} className="group-hover:rotate-180 transition-transform duration-500" /> Reiniciar Filtros
                     </button>
                   </div>
                 )}
@@ -4135,8 +5335,8 @@ const App = () => {
                   {isLoadingStudents ? (
                     <div className={`h-64 sm:h-80 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                   ) : (
-                    <div className="h-64 sm:h-80 w-full">
-                      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                    <div className="h-64 sm:h-80 w-full flex flex-col">
+                      <ChartContainer height="100%" minHeight={260} isDarkMode={isDarkMode}>
                         <BarChart data={chartData.projectChartData} margin={{ bottom: 40 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#333' : '#e2e8f0'} />
                           <XAxis dataKey="name" tick={<CustomXAxisTick isDarkMode={isDarkMode} isMobile={breakpoint === 'mobile'} />} axisLine={false} tickLine={false} height={100} interval={0} />
@@ -4149,7 +5349,7 @@ const App = () => {
                             <LabelList dataKey="hours" position="top" style={{ fill: isDarkMode ? '#999' : '#64748b', fontSize: breakpoint === 'mobile' ? '7px' : '9px', fontWeight: '500' }} />
                           </Bar>
                         </BarChart>
-                      </ResponsiveContainer>
+                      </ChartContainer>
                     </div>
                   )}
                 </div>
@@ -4159,8 +5359,8 @@ const App = () => {
                   {isLoadingStudents ? (
                     <div className={`h-64 sm:h-80 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                   ) : (
-                    <div className="h-64 sm:h-80 w-full">
-                      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                    <div className="h-64 sm:h-80 w-full flex flex-col">
+                      <ChartContainer height="100%" minHeight={260} isDarkMode={isDarkMode}>
                         <BarChart data={chartData.projectChartData} margin={{ bottom: 40 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#333' : '#e2e8f0'} />
                           <XAxis dataKey="name" tick={<CustomXAxisTick isDarkMode={isDarkMode} isMobile={breakpoint === 'mobile'} />} axisLine={false} tickLine={false} height={100} interval={0} />
@@ -4173,7 +5373,7 @@ const App = () => {
                             <LabelList dataKey="avgHours" position="top" style={{ fill: isDarkMode ? '#999' : '#64748b', fontSize: breakpoint === 'mobile' ? '7px' : '9px', fontWeight: '500' }} formatter={(val: number) => val.toFixed(1)} />
                           </Bar>
                         </BarChart>
-                      </ResponsiveContainer>
+                      </ChartContainer>
                     </div>
                   )}
                 </div>
@@ -4183,8 +5383,8 @@ const App = () => {
                   {isLoadingStudents ? (
                     <div className={`h-64 sm:h-80 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
                   ) : (
-                    <div className="h-64 sm:h-80 w-full">
-                      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                    <div className="h-64 sm:h-80 w-full flex flex-col">
+                      <ChartContainer height="100%" minHeight={260} isDarkMode={isDarkMode}>
                         <BarChart data={chartData.projectChartData} margin={{ bottom: 40 }}>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#333' : '#e2e8f0'} />
                           <XAxis dataKey="name" tick={<CustomXAxisTick isDarkMode={isDarkMode} isMobile={breakpoint === 'mobile'} />} axisLine={false} tickLine={false} height={100} interval={0} />
@@ -4197,18 +5397,62 @@ const App = () => {
                             <LabelList dataKey="studentCount" position="top" style={{ fill: isDarkMode ? '#999' : '#64748b', fontSize: breakpoint === 'mobile' ? '7px' : '9px', fontWeight: '500' }} />
                           </Bar>
                         </BarChart>
-                      </ResponsiveContainer>
+                      </ChartContainer>
                     </div>
                   )}
                 </div>
 
                 <div className={`p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
-                  <h3 className={`text-lg sm:text-xl font-black tracking-tight mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Distribución de Categorías</h3>
+                  <div className="flex items-center justify-between mb-6">
+                    <div className="flex flex-col">
+                      <h3 className={`text-lg sm:text-xl font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Distribución de Categorías</h3>
+                      <p className={`text-[9px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Breakdown por tipo de actividad</p>
+                    </div>
+                    <div className="flex gap-2">
+                       <button 
+                        onClick={() => setFilterCategories(categories.map(c => c.id))}
+                        className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg border transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-indigo-400 hover:bg-white/10' : 'bg-slate-50 border-slate-100 text-indigo-600 hover:bg-slate-100'}`}
+                      >
+                        Todas
+                      </button>
+                      <button 
+                        onClick={() => setFilterCategories([])}
+                        className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-lg border transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-500 hover:bg-white/10' : 'bg-slate-50 border-slate-100 text-slate-400 hover:bg-slate-100'}`}
+                      >
+                        Ninguna
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Chips de Categorías Refactorizados */}
+                  <div className="flex flex-wrap gap-1.5 mb-6">
+                    {categories.map(cat => {
+                      const isSelected = filterCategories.includes(cat.id);
+                      return (
+                        <button
+                          key={cat.id}
+                          onClick={() => {
+                            setFilterCategories(prev => 
+                              prev.includes(cat.id) ? prev.filter(id => id !== cat.id) : [...prev, cat.id]
+                            );
+                          }}
+                          className={`px-2.5 py-1.5 rounded-xl text-[9px] font-black uppercase transition-all border flex items-center gap-2 ${
+                            isSelected 
+                              ? (isDarkMode ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300' : 'bg-indigo-50 border-indigo-200 text-indigo-600 shadow-sm')
+                              : (isDarkMode ? 'bg-white/5 border-white/5 text-gray-600 hover:border-gray-700' : 'bg-white border-slate-100 text-slate-400 hover:border-slate-300')
+                          }`}
+                        >
+                          <div className={`w-2 h-2 rounded-full transition-all ${isSelected ? 'scale-100' : 'scale-75 opacity-50'}`} style={{ backgroundColor: cat.color }}></div>
+                          {cat.name}
+                        </button>
+                      );
+                    })}
+                  </div>
                   {isLoadingStudents ? (
                     <div className="h-48 sm:h-64 w-full bg-slate-50 rounded-2xl animate-pulse"></div>
                   ) : (
-                    <div className="h-48 sm:h-64 w-full">
-                      <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                    <div className="h-48 sm:h-64 w-full cursor-pointer flex flex-col">
+                      <ChartContainer height="100%" minHeight={220} isDarkMode={isDarkMode}>
                         <PieChart>
                           <Pie
                             data={chartData.categoryChartData}
@@ -4218,16 +5462,48 @@ const App = () => {
                             outerRadius={60}
                             paddingAngle={5}
                             dataKey="hours"
+                            onClick={(data: any) => {
+                              if (data && data.id) {
+                                setFilterCategories(prev => 
+                                  prev.includes(data.id) ? prev.filter(id => id !== data.id) : [...prev, data.id]
+                                );
+                              }
+                            }}
                           >
                                     {chartData.categoryChartData.map((entry, index) => {
                                       const cat = categories.find(c => c.name === entry.name);
-                                      return <Cell key={`cell-${index}`} fill={cat?.color || '#4f46e5'} />;
+                                      const isSelected = filterCategories.includes(entry.id);
+                                      return (
+                                        <Cell 
+                                          key={`cell-${index}`} 
+                                          fill={cat?.color || '#4f46e5'} 
+                                          opacity={isSelected ? 1 : 0.1}
+                                          stroke={isSelected && entry.hours > 0 ? (isDarkMode ? '#000' : '#fff') : 'none'}
+                                          strokeWidth={2}
+                                          className="transition-all"
+                                        />
+                                      );
                                     })}
                           </Pie>
                           <Tooltip contentStyle={{borderRadius: '0.75rem', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '10px'}} />
-                          <Legend wrapperStyle={{fontSize: '8px', fontWeight: 'bold'}} />
+                          <Legend 
+                            wrapperStyle={{fontSize: '8px', fontWeight: 'bold', cursor: 'pointer'}} 
+                            onClick={(data: any) => {
+                              const foundCat = categories.find(c => c.name === data.value);
+                              if (foundCat) {
+                                setFilterCategories(prev => 
+                                  prev.includes(foundCat.id) ? prev.filter(id => id !== foundCat.id) : [...prev, foundCat.id]
+                                );
+                              }
+                            }}
+                            formatter={(value, entry: any) => {
+                               const catId = (chartData.categoryChartData[entry.payload.index] as any)?.id;
+                               const isSelected = filterCategories.includes(catId);
+                               return <span className={isSelected ? (isDarkMode ? 'text-white' : 'text-slate-900') : 'text-slate-400 line-through opacity-50'}>{value}</span>;
+                            }}
+                          />
                         </PieChart>
-                      </ResponsiveContainer>
+                      </ChartContainer>
                     </div>
                   )}
                 </div>
@@ -4278,11 +5554,16 @@ const App = () => {
                                 <span className={`px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-[8px] sm:text-[9px] font-black uppercase border shadow-sm 
                                   ${isDarkMode ? 
                                     (student.status === 'En Curso' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
-                                     student.status === 'Finalizada' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                                     student.status === 'Finalizado' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
                                      student.status === 'Pausada' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
                                      'bg-red-500/10 text-red-400 border-red-500/20') : 
                                     ((STUDENT_STATUS as any)[student.status]?.color || 'bg-slate-100')
                                   }`}>{student.status}</span>
+                                {student.isArchived && (
+                                  <span className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-[8px] sm:text-[9px] font-black uppercase bg-amber-500 text-white border border-amber-600 shadow-sm flex items-center gap-1">
+                                    <Layers size={10} /> Archivado
+                                  </span>
+                                )}
                                 <span className={`hidden sm:flex lg:hidden items-center gap-1.5 px-3 py-1 rounded-xl border text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}><GraduationCap size={12}/> {student.career}</span>
                               </div>
                             </div>
@@ -4435,25 +5716,46 @@ const App = () => {
               </div>
               
               {/* Pagination Controls */}
-              {totalStudentPages > 1 && (
-                <div className="flex justify-center items-center gap-4 mt-8">
-                  <button 
-                    onClick={() => setStudentPage(p => Math.max(1, p - 1))} 
-                    disabled={studentPage === 1}
-                    className={`p-3 border rounded-2xl shadow-sm disabled:opacity-50 transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                  >
-                    <ChevronLeft size={20} />
-                  </button>
-                  <span className={`text-sm font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
-                    Página {studentPage} de {totalStudentPages}
-                  </span>
-                  <button 
-                    onClick={() => setStudentPage(p => Math.min(totalStudentPages, p + 1))} 
-                    disabled={studentPage === totalStudentPages}
-                    className={`p-3 border rounded-2xl shadow-sm disabled:opacity-50 transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
-                  >
-                    <ChevronRight size={20} />
-                  </button>
+              {(totalStudentPages > 1 || filteredStudents.length > 5) && (
+                <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-8 px-4">
+                  <div className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
+                    <span>Mostrar:</span>
+                    <select 
+                      className={`px-3 py-2 rounded-xl border outline-none cursor-pointer transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white'}`}
+                      value={studentsPerPage} 
+                      onChange={(e) => {
+                        setStudentsPerPage(Number(e.target.value));
+                        setStudentPage(1);
+                      }}
+                    >
+                      <option value={5} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>5</option>
+                      <option value={10} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>10</option>
+                      <option value={15} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>15</option>
+                      <option value={20} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>20</option>
+                      <option value={50} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>50</option>
+                      <option value={100} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>100</option>
+                    </select>
+                  </div>
+                  
+                  <div className="flex items-center gap-4">
+                    <button 
+                      onClick={() => setStudentPage(p => Math.max(1, p - 1))} 
+                      disabled={studentPage === 1}
+                      className={`p-3 border rounded-2xl shadow-sm disabled:opacity-50 transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      <ChevronLeft size={20} />
+                    </button>
+                    <span className={`text-sm font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
+                      Página {studentPage} de {Math.max(1, totalStudentPages)}
+                    </span>
+                    <button 
+                      onClick={() => setStudentPage(p => Math.min(totalStudentPages, p + 1))} 
+                      disabled={studentPage === totalStudentPages || totalStudentPages === 0}
+                      className={`p-3 border rounded-2xl shadow-sm disabled:opacity-50 transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+                    >
+                      <ChevronRight size={20} />
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -4472,7 +5774,7 @@ const App = () => {
                         <div className={`inline-flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-2.5 rounded-full text-[10px] sm:text-[12px] font-black uppercase border shadow-lg mb-6 sm:mb-8 
                           ${isDarkMode ? 
                             (selectedStudent.status === 'En Curso' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
-                             selectedStudent.status === 'Finalizada' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                             selectedStudent.status === 'Finalizado' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
                              selectedStudent.status === 'Pausada' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
                              'bg-red-500/10 text-red-400 border-red-500/20') : 
                             ((STUDENT_STATUS as any)[selectedStudent.status]?.color || 'bg-slate-100')
@@ -4504,9 +5806,26 @@ const App = () => {
                                 <ShieldOff size={20} />
                               </button>
                             )}
-                            <button onClick={() => setShowManualHours(true)} className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 ${isDarkMode ? 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-600 bg-indigo-50 border-indigo-100 hover:bg-indigo-100'}`} title="Agregar Horas Manuales">
-                              <Clock size={20} />
-                            </button>
+                            {!isStudentFinished(selectedStudent) ? (
+                              <button 
+                                onClick={() => {
+                                  setManualHoursStudentId(selectedStudent.id);
+                                  setManualHoursSearch('');
+                                  setShowManualHours(true);
+                                }} 
+                                className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 ${isDarkMode ? 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-600 bg-indigo-50 border-indigo-100 hover:bg-indigo-100'}`} 
+                                title="Agregar Horas Manuales"
+                              >
+                                <Clock size={20} />
+                              </button>
+                            ) : (
+                              <div 
+                                className={`px-3 py-2 sm:px-4 sm:py-3 rounded-xl sm:rounded-2xl border flex items-center gap-1.5 text-[9px] sm:text-[10px] font-black uppercase tracking-wider ${isDarkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}
+                                title="Servicio Social Concluido - No se pueden asignar más horas"
+                              >
+                                <CheckCircle2 size={16} /> Finalizado
+                              </div>
+                            )}
                             <button 
                               onClick={() => handleDeleteStudent(selectedStudent.id)} 
                               className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 ${isDarkMode ? 'text-red-400 bg-red-500/10 border-red-500/20 hover:bg-red-500/20' : 'text-red-600 bg-red-50 border-red-100 hover:bg-red-100'}`} 
@@ -4906,7 +6225,7 @@ const App = () => {
                 <div className="flex items-center justify-between mb-16">
                    <h2 className="text-5xl font-black text-slate-900 flex items-center gap-6 tracking-tighter">
                       {view === 'group-activity' ? <Users size={56} className="text-emerald-500"/> : <PlusCircle size={56} className="text-indigo-600"/>}
-                      {view === 'group-activity' ? 'Bitácora Grupal' : 'Bitácora Individual'}
+                      {view === 'group-activity' ? 'Bitácora Manual' : 'Bitácora Individual'}
                    </h2>
                 </div>
                 <form onSubmit={saveActivity} className="space-y-16">
@@ -5107,13 +6426,16 @@ const App = () => {
                            const groupedActs: any = {};
                            groupedByDate[date].forEach((r: any) => {
                               const k = `${r.startTime}-${r.endTime}-${r.categoryId}-${r.description}`;
-                              if (!groupedActs[k]) groupedActs[k] = { ...r, participants: [r.studentName] };
-                              else groupedActs[k].participants.push(r.studentName);
+                              if (!groupedActs[k]) groupedActs[k] = { ...r, participants: [r.studentName], records: [r] };
+                              else {
+                                groupedActs[k].participants.push(r.studentName);
+                                groupedActs[k].records.push(r);
+                              }
                            });
                            return (
                              <div key={date} className="relative animate-in fade-in slide-in-from-bottom-4 duration-500">
                                 <div className={`sticky top-0 backdrop-blur-md py-3 sm:py-4 mb-4 sm:mb-6 border-b-2 z-10 flex items-center gap-4 ${isDarkMode ? 'bg-[#1a1a1a]/95 border-white/5' : 'bg-white/95 border-slate-100'}`}>
-                                 <h3 className="font-black text-lg sm:text-2xl text-slate-800 capitalize tracking-tight">{dateObj.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}</h3>
+                                 <h3 className="font-black text-lg sm:text-2xl text-slate-800 capitalize tracking-tight">{safeFormatDate(date)}</h3>
                                </div>
                                <div className="space-y-4 pl-2 sm:pl-8 border-l-2 border-indigo-50">
                                  {Object.entries(groupedActs).map(([k, group]: any, idx: number) => {
@@ -5128,7 +6450,7 @@ const App = () => {
                                          <div className="space-y-2 sm:space-y-3 flex-1">
                                            <div className="flex flex-wrap items-center gap-2">
                                                <span className="px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl text-[8px] sm:text-[9px] font-black text-white uppercase shadow-sm" style={{ backgroundColor: cat?.color }}>{cat?.name || 'Categoría'}</span>
-                                                {group.participants.length > 1 && <span className={`px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl text-[8px] sm:text-[9px] font-black uppercase flex items-center gap-1 shadow-sm ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-100 text-indigo-700'}`}><Users size={10}/> <span className="hidden xs:inline">Actividad Grupal</span><span className="xs:hidden">Grupal</span></span>}
+                                                {group.participants.length > 1 && <span className={`px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl text-[8px] sm:text-[9px] font-black uppercase flex items-center gap-1 shadow-sm ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-100 text-indigo-700'}`}><Users size={10}/> <span className="hidden xs:inline">Actividad Manual</span><span className="xs:hidden">Manual</span></span>}
                                            </div>
                                            <div className="flex flex-wrap gap-2">
                                               {group.participants.map((pName: string, i: number) => (
@@ -5137,7 +6459,33 @@ const App = () => {
                                            </div>
                                          </div>
                                        </div>
-                                        {group.description && <div className={`md:max-w-xs w-full border-t md:border-t-0 pt-3 md:pt-0 ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`}> <p className={`text-[10px] sm:text-[11px] font-bold italic line-clamp-2 ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>"{group.description}"</p> </div>}
+                                        <div className="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end">
+                                          {group.description && <div className={`md:max-w-xs w-full border-t md:border-t-0 pt-3 md:pt-0 ${isDarkMode ? 'border-white/5' : 'border-slate-100'}`}> <p className={`text-[10px] sm:text-[11px] font-bold italic line-clamp-2 ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>"{group.description}"</p> </div>}
+                                          {(userRole === 'admin' || userRole === 'coordinator') && (
+                                            <div className="flex items-center gap-2 shrink-0">
+                                              <button
+                                                type="button"
+                                                onClick={() => openAddStudentsToActivity({ ...group, date })}
+                                                className={`px-3 py-2 sm:px-3.5 sm:py-2.5 rounded-xl border text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm active:scale-95 ${
+                                                  isDarkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20' : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                                                }`}
+                                                title="Agregar más alumnos activos a esta actividad"
+                                              >
+                                                <UserPlus size={13} /> <span className="hidden xs:inline">+ Alumnos</span><span className="xs:hidden">+</span>
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() => openCalendarEdit(group.records ? group.records[0] : group)}
+                                                className={`px-3 py-2 sm:px-4 sm:py-2.5 rounded-xl border text-[11px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm active:scale-95 ${
+                                                  isDarkMode ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400 hover:bg-indigo-500/20' : 'bg-white border-indigo-200 text-indigo-600 hover:bg-indigo-50'
+                                                }`}
+                                                title="Editar horas y horario"
+                                              >
+                                                <Edit2 size={13} /> Editar
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
                                      </div>
                                    );
                                  })}
@@ -5153,44 +6501,1037 @@ const App = () => {
 
                {selectedCalendarDate && (
                  <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-4 z-[100] overflow-y-auto" onClick={(e) => {if(e.target===e.currentTarget) setSelectedCalendarDate(null);}}>
-                    <div className={`rounded-[2rem] sm:rounded-[4rem] p-6 sm:p-14 w-full max-w-4xl shadow-2xl relative animate-in zoom-in-95 duration-300 border-t-[8px] sm:border-t-[12px] border-indigo-600 my-auto ${isDarkMode ? 'bg-[#1a1a1a]' : 'bg-white'}`}>
-                     <button onClick={() => setSelectedCalendarDate(null)} className={`absolute top-6 right-6 sm:top-10 sm:right-10 p-3 sm:p-5 rounded-[1.5rem] transition-all ${isDarkMode ? 'bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-400' : 'bg-slate-50 hover:bg-red-50 text-slate-400 hover:text-red-500'}`}><X size={24}/></button>
-                     <h3 className={`font-black text-2xl sm:text-4xl capitalize tracking-tight mb-8 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}> {new Date(`${selectedCalendarDate}T00:00:00`).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })} </h3>
-                     <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-4 custom-scrollbar">
-                       {(() => {
-                          const dayRecords = allRecords.filter((r: any) => r.date === selectedCalendarDate).sort((a: any,b: any) => (a.startTime || '').localeCompare(b.startTime || ''));
-                          const grouped: any = {};
-                          dayRecords.forEach((r: any) => {
-                             const key = `${r.startTime || 'manual'}-${r.endTime || 'manual'}-${r.categoryId}-${r.description}`;
-                             if (!grouped[key]) grouped[key] = { ...r, participants: [r.studentName] };
-                             else grouped[key].participants.push(r.studentName);
-                          });
-                          return Object.entries(grouped).map(([k, group]: any, idx: number) => {
-                             const cat = categories.find(c => c.id === group.categoryId);
-                             return (
-                               <div key={`${k}-${idx}`} className={`p-6 sm:p-8 rounded-[2.5rem] flex flex-col md:flex-row items-center justify-between gap-6 transition-all border ${isDarkMode ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-slate-50 border-slate-100 hover:bg-white hover:shadow-lg'}`}>
-                                 <div className="flex items-center gap-6 w-full md:w-auto">
-                                   <div className={`p-4 rounded-2xl shadow-sm border text-center min-w-[100px] ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-100'}`}>
-                                     <p className="text-xl font-black text-indigo-600 leading-none">{group.startTime || 'Manual'}</p>
-                                      {group.hours && <p className={`text-[10px] font-black uppercase tracking-widest mt-2 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>{group.hours} Hrs</p>}
-                                   </div>
-                                   <div className="space-y-3">
-                                     <div className="flex flex-wrap items-center gap-2">
-                                        <span className="px-3 py-1.5 rounded-xl text-[9px] font-black text-white uppercase" style={{ backgroundColor: cat?.color || '#ccc' }}>{cat?.name || 'Categoría'}</span>
-                                        {group.participants.length > 1 && <span className={`px-3 py-1.5 rounded-xl text-[9px] font-black flex items-center gap-1 ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-100 text-indigo-700'}`}><Users size={10}/> Grupal</span>}
-                                     </div>
-                                     <div className="flex flex-wrap gap-2"> {group.participants.map((pName: string, i: number) => ( <div key={`${pName}-${i}`} className={`border px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-400' : 'bg-white border-slate-200 text-slate-700'}`}>{String(pName)}</div> ))} </div>
-                                   </div>
-                                 </div>
-                                 {group.description && <div className="md:max-w-xs w-full"> <p className={`text-[11px] font-bold italic line-clamp-3 ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>"{group.description}"</p> </div>}
-                               </div>
-                             );
-                          });
-                       })()}
-                     </div>
-                   </div>
-                 </div>
-               )}
+                    <div className={`rounded-[2rem] sm:rounded-[3.5rem] p-6 sm:p-12 w-full max-w-4xl shadow-2xl relative animate-in zoom-in-95 duration-300 border-t-[8px] sm:border-t-[12px] border-indigo-600 my-auto ${isDarkMode ? 'bg-[#1a1a1a]' : 'bg-white'}`}>
+                     <button onClick={() => setSelectedCalendarDate(null)} className={`absolute top-6 right-6 sm:top-10 sm:right-10 p-3 sm:p-4 rounded-[1.5rem] transition-all ${isDarkMode ? 'bg-white/5 hover:bg-red-500/20 text-gray-400 hover:text-red-400' : 'bg-slate-50 hover:bg-red-50 text-slate-400 hover:text-red-500'}`}><X size={24}/></button>
+                     
+                     {(() => {
+                        const dayRecords = allRecords.filter((r: any) => r.date === selectedCalendarDate).sort((a: any,b: any) => (a.startTime || '').localeCompare(b.startTime || ''));
+                        const totalDayHours = dayRecords.reduce((sum: number, r: any) => sum + (Number(r.hours) || Number(r.horasCalculadas) || 0), 0);
+                        const grouped: any = {};
+                        dayRecords.forEach((r: any) => {
+                           const key = `${r.startTime || 'manual'}-${r.endTime || 'manual'}-${r.categoryId || 'none'}-${r.projectId || 'none'}-${r.description || ''}`;
+                           if (!grouped[key]) grouped[key] = { ...r, participants: [r.studentName], records: [r] };
+                           else {
+                             grouped[key].participants.push(r.studentName);
+                             grouped[key].records.push(r);
+                           }
+                        });
+
+                        return (
+                          <>
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-6 border-b border-slate-200 dark:border-white/10 pr-10">
+                              <div>
+                                <h3 className={`font-black text-2xl sm:text-3xl capitalize tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                                  {safeFormatDate(selectedCalendarDate || '')}
+                                </h3>
+                                <p className={`text-xs font-bold uppercase tracking-wider mt-1.5 flex flex-wrap items-center gap-2 ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                                  <span className="font-mono tabular-nums text-indigo-500 font-black">{Number(totalDayHours.toFixed(1))} hrs</span>
+                                  <span>computadas</span>
+                                  <span>•</span>
+                                  <span>{Object.keys(grouped).length} {Object.keys(grouped).length === 1 ? 'actividad' : 'actividades'}</span>
+                                  <span>•</span>
+                                  <span>{dayRecords.length} {dayRecords.length === 1 ? 'registro' : 'registros'}</span>
+                                </p>
+                              </div>
+                              {(userRole === 'admin' || userRole === 'coordinator') && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setManualHoursForm({ hours: 0, category: 'Otra Brigada', date: selectedCalendarDate || getCDMXDateString() });
+                                    setManualHoursStudentId('');
+                                    setManualHoursSearch('');
+                                    setShowManualHours(true);
+                                  }}
+                                  className="px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-wider flex items-center gap-2 shadow-lg shadow-indigo-600/20 transition-all active:scale-95 shrink-0 w-fit"
+                                >
+                                  <Plus size={16} /> Asignar Horas
+                                </button>
+                              )}
+                            </div>
+
+                            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-3 sm:pr-4 custom-scrollbar overflow-x-hidden">
+                              {Object.keys(grouped).length === 0 ? (
+                                <div className="p-12 text-center text-slate-400 text-xs font-bold">
+                                  No hay actividades registradas en esta fecha.
+                                </div>
+                              ) : (
+                                Object.entries(grouped).map(([k, group]: any, idx: number) => {
+                                  const cat = categories.find(c => c.id === group.categoryId);
+                                  return (
+                                    <div 
+                                      key={`${k}-${idx}`} 
+                                      className={`p-4 sm:p-6 rounded-[2rem] border transition-all ${
+                                        isDarkMode 
+                                          ? 'bg-white/5 border-white/10 hover:bg-white/[0.08]' 
+                                          : 'bg-slate-50/80 border-slate-200/80 hover:bg-white hover:shadow-md'
+                                      }`}
+                                    >
+                                      <div className="flex flex-col lg:flex-row items-start lg:items-center gap-4 lg:gap-6">
+                                        {/* Col 1: Horario & Duración */}
+                                        <div className={`flex flex-row lg:flex-col items-center justify-center gap-2 lg:gap-1 p-3 sm:p-4 rounded-2xl border text-center shrink-0 w-full lg:w-28 ${
+                                          isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200 shadow-sm'
+                                        }`}>
+                                          <div className="flex items-center gap-1.5 text-indigo-500 font-mono">
+                                            <Clock size={16} className="shrink-0" />
+                                            <span className="text-base sm:text-lg font-black tracking-tight tabular-nums">
+                                              {group.startTime || 'Manual'}
+                                            </span>
+                                          </div>
+                                          {group.endTime && group.startTime && (
+                                            <span className={`text-[10px] font-bold ${isDarkMode ? 'text-gray-400' : 'text-slate-400'}`}>
+                                              hasta {group.endTime}
+                                            </span>
+                                          )}
+                                          {group.hours && (
+                                            <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md mt-0 lg:mt-1 ${
+                                              isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-50 text-indigo-700'
+                                            }`}>
+                                              {Number(group.hours).toFixed(1)} hrs
+                                            </span>
+                                          )}
+                                        </div>
+
+                                        {/* Col 2: Contenido, Categoría, Descripción y Participantes */}
+                                        <div className="flex-1 min-w-0 space-y-3 w-full">
+                                          {/* Meta de Categoría, Proyecto y Tipo */}
+                                          <div className="flex flex-wrap items-center gap-2 max-w-full">
+                                            {/* Categoría Badge interactivo */}
+                                            <button 
+                                              type="button"
+                                              onClick={() => (userRole === 'admin' || userRole === 'coordinator') && openChangeCategoryProjectModal({ ...group, date: selectedCalendarDate })}
+                                              className={`px-2.5 py-1 rounded-lg text-[10px] font-black text-white uppercase tracking-wider shadow-sm flex items-center gap-1.5 transition-all max-w-[200px] truncate ${
+                                                (userRole === 'admin' || userRole === 'coordinator') ? 'hover:brightness-110 active:scale-95 cursor-pointer ring-1 ring-white/20' : 'cursor-default'
+                                              }`}
+                                              style={{ backgroundColor: cat?.color || '#6366f1' }}
+                                              title={(userRole === 'admin' || userRole === 'coordinator') ? `Categoría: ${cat?.name || 'General'}. Clic para cambiar categoría o proyecto.` : (cat?.name || 'General')}
+                                            >
+                                              <span className="truncate">{cat?.name || 'General'}</span>
+                                              {(userRole === 'admin' || userRole === 'coordinator') && (
+                                                <ChevronDown size={11} className="opacity-80 shrink-0" />
+                                              )}
+                                            </button>
+
+                                            {/* Proyecto Badge interactivo */}
+                                            {(() => {
+                                              const currentProj = projects.find((p: any) => p.id === group.projectId);
+                                              return (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => (userRole === 'admin' || userRole === 'coordinator') && openChangeCategoryProjectModal({ ...group, date: selectedCalendarDate })}
+                                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all max-w-[220px] truncate ${
+                                                    (userRole === 'admin' || userRole === 'coordinator') ? 'cursor-pointer hover:opacity-90 active:scale-95' : 'cursor-default'
+                                                  } ${
+                                                    currentProj
+                                                      ? (isDarkMode ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' : 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-sm')
+                                                      : (isDarkMode ? 'bg-white/5 border border-dashed border-white/20 text-gray-400 hover:text-white' : 'bg-slate-100 border border-dashed border-slate-300 text-slate-500 hover:text-slate-700')
+                                                  }`}
+                                                  title={(userRole === 'admin' || userRole === 'coordinator') ? (currentProj ? `Proyecto: ${currentProj.name}. Clic para cambiar.` : 'Sin proyecto específico. Clic para asignar a un proyecto.') : (currentProj?.name || 'Sin Proyecto')}
+                                                >
+                                                  <Folder size={11} className={`shrink-0 ${currentProj ? 'text-indigo-400' : 'opacity-60'}`} />
+                                                  <span className="truncate">{currentProj?.name || '+ Asignar Proyecto'}</span>
+                                                  {(userRole === 'admin' || userRole === 'coordinator') && (
+                                                    <Edit2 size={9} className="opacity-60 shrink-0" />
+                                                  )}
+                                                </button>
+                                              );
+                                            })()}
+
+                                            {group.participants.length > 1 && (
+                                              <span className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider flex items-center gap-1 shrink-0 ${
+                                                isDarkMode ? 'bg-white/10 text-gray-300' : 'bg-slate-200/80 text-slate-700'
+                                              }`}>
+                                                <Users size={11} className="shrink-0" /> Actividad Grupal ({group.participants.length})
+                                              </span>
+                                            )}
+                                          </div>
+
+                                          {/* Descripción clara y legible */}
+                                          {group.description ? (
+                                            <p className={`text-xs sm:text-[13px] font-medium leading-relaxed ${
+                                              isDarkMode ? 'text-gray-200' : 'text-slate-700'
+                                            }`}>
+                                              {group.description}
+                                            </p>
+                                          ) : (
+                                            <p className={`text-xs italic ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
+                                              Sin descripción detallada.
+                                            </p>
+                                          )}
+
+                                          {/* Lista de Alumnos Participantes: Chips compactos y limpios */}
+                                          <div className="pt-2 border-t border-slate-200/60 dark:border-white/5">
+                                            <div className="flex items-center justify-between mb-1.5">
+                                              <span className={`text-[10px] font-black uppercase tracking-wider ${
+                                                isDarkMode ? 'text-gray-400' : 'text-slate-500'
+                                              }`}>
+                                                Alumnos en esta actividad ({(group.records || []).length})
+                                              </span>
+                                            </div>
+
+                                            <div className="flex flex-wrap gap-2 items-center">
+                                              {(group.records || []).map((rec: any, i: number) => {
+                                                const student = getStudentData(rec.studentId || rec.userId);
+                                                const studentName = rec.studentName || student?.name || 'Alumno';
+                                                const initial = (studentName || 'A')[0].toUpperCase();
+                                                const hoursDisplay = Number((rec.hours || 0).toFixed(1));
+
+                                                return (
+                                                  <div 
+                                                    key={`${rec.id || 'rec'}-${i}`}
+                                                    className={`group/chip pl-1.5 pr-2 py-1 rounded-xl border text-xs font-medium shadow-sm flex items-center gap-2 transition-all ${
+                                                      isDarkMode 
+                                                        ? 'bg-white/5 border-white/10 text-gray-200 hover:border-white/20' 
+                                                        : 'bg-white border-slate-200 text-slate-800 hover:border-slate-300'
+                                                    }`}
+                                                  >
+                                                    {/* Mini Avatar */}
+                                                    <div className={`w-5 h-5 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 ${
+                                                      isDarkMode ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-100 text-indigo-700'
+                                                    }`}>
+                                                      {initial}
+                                                    </div>
+
+                                                    {/* Nombre */}
+                                                    <span className="font-semibold text-[11px] max-w-[120px] sm:max-w-[160px] truncate" title={studentName}>
+                                                      {studentName}
+                                                    </span>
+
+                                                    {/* Horas del alumno */}
+                                                    <span className={`text-[10px] font-mono tabular-nums px-1.5 py-0.2 rounded ${
+                                                      isDarkMode ? 'bg-white/10 text-gray-300' : 'bg-slate-100 text-slate-600'
+                                                    }`}>
+                                                      {hoursDisplay}h
+                                                    </span>
+
+                                                    {/* Acciones individuales (editar / borrar registro) */}
+                                                    {(userRole === 'admin' || userRole === 'coordinator') && (
+                                                      <div className="flex items-center gap-0.5 border-l pl-1.5 ml-0.5 border-slate-200 dark:border-white/10">
+                                                        <button
+                                                          type="button"
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            openCalendarEdit(rec);
+                                                          }}
+                                                          className={`p-1 rounded-md transition-colors ${
+                                                            isDarkMode 
+                                                              ? 'text-gray-400 hover:text-indigo-400 hover:bg-indigo-500/20' 
+                                                              : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'
+                                                          }`}
+                                                          title={`Editar horas de ${studentName}`}
+                                                        >
+                                                          <Edit2 size={11} />
+                                                        </button>
+                                                        <button
+                                                          type="button"
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDeleteCalendarRecord(rec);
+                                                          }}
+                                                          className={`p-1 rounded-md transition-colors ${
+                                                            isDarkMode 
+                                                              ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/20' 
+                                                              : 'text-slate-400 hover:text-red-600 hover:bg-red-50'
+                                                          }`}
+                                                          title={`Eliminar registro de ${studentName}`}
+                                                        >
+                                                          <Trash2 size={11} />
+                                                        </button>
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        {/* Col 3: Acciones Principales Unificadas (Derecha) */}
+                                        {(userRole === 'admin' || userRole === 'coordinator') && (
+                                          <div className="flex flex-row lg:flex-col items-stretch lg:items-end gap-2 shrink-0 w-full lg:w-auto pt-3 lg:pt-0 border-t lg:border-t-0 border-slate-200/60 dark:border-white/5 justify-end">
+                                            <button
+                                              type="button"
+                                              onClick={() => openAddStudentsToActivity({ ...group, date: selectedCalendarDate })}
+                                              className={`flex-1 lg:flex-none px-3.5 py-2.5 rounded-xl border text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 whitespace-nowrap ${
+                                                isDarkMode 
+                                                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20' 
+                                                  : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-300'
+                                              }`}
+                                              title="Agregar más alumnos activos a esta actividad"
+                                            >
+                                              <UserPlus size={14} className="shrink-0" />
+                                              <span>+ Alumnos</span>
+                                            </button>
+
+                                            <button
+                                              type="button"
+                                              onClick={() => openChangeCategoryProjectModal({ ...group, date: selectedCalendarDate })}
+                                              className={`flex-1 lg:flex-none px-3.5 py-2.5 rounded-xl border text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 whitespace-nowrap ${
+                                                isDarkMode 
+                                                  ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20' 
+                                                  : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 hover:border-amber-300'
+                                              }`}
+                                              title="Cambiar categoría o asignar a un proyecto específico"
+                                            >
+                                              <Layers size={14} className="shrink-0" />
+                                              <span>Categoría / Proyecto</span>
+                                            </button>
+
+                                            {group.records && group.records.length === 1 && (
+                                              <button
+                                                type="button"
+                                                onClick={() => openCalendarEdit(group.records[0])}
+                                                className={`flex-1 lg:flex-none px-3.5 py-2.5 rounded-xl border text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 whitespace-nowrap ${
+                                                  isDarkMode 
+                                                    ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20' 
+                                                    : 'bg-white border-indigo-200 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-300'
+                                                }`}
+                                                title="Editar horario y horas de esta actividad"
+                                              >
+                                                <Edit2 size={14} className="shrink-0" />
+                                                <span>Editar</span>
+                                              </button>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {/* Modal Interactivo de Edición de Horas desde el Calendario */}
+                {editingCalendarRecord && (
+                  <div className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-[110] overflow-y-auto">
+                    <div className={`rounded-[2.5rem] p-6 sm:p-10 w-full max-w-xl shadow-2xl border ${isDarkMode ? 'bg-[#1a1a1a] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'} my-auto animate-in zoom-in-95 duration-300 relative`}>
+                      <div className="flex items-start justify-between mb-6">
+                        <div>
+                          <h3 className="text-2xl sm:text-3xl font-black tracking-tight">Editar Horas del Alumno</h3>
+                          <p className={`text-[10px] font-bold uppercase tracking-wider mt-1 ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                            Modificación interactiva directa desde el calendario
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => setEditingCalendarRecord(null)}
+                          className={`p-2.5 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-slate-100 text-slate-400'}`}
+                        >
+                          <X size={20} />
+                        </button>
+                      </div>
+
+                      {(() => {
+                        const student = getStudentData(calendarEditForm.studentId);
+                        const approvedHrs = (student?.records || []).reduce((acc: number, r: any) => {
+                          if (r.validationStatus === 'aprobado' || !r.validationStatus) {
+                            return acc + (Number(r.hours) || Number(r.horasCalculadas) || 0);
+                          }
+                          return acc;
+                        }, 0);
+
+                        return (
+                          <div className="space-y-5">
+                            {/* Tarjeta del alumno */}
+                            {student && (
+                              <div className={`p-4 rounded-2xl border flex items-center justify-between gap-3 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'}`}>
+                                <div className="min-w-0 flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-xl bg-indigo-600/10 text-indigo-600 flex items-center justify-center font-black text-sm">
+                                    {(student.name || 'A')[0]}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="font-black text-xs truncate">{student.name || getFullName(student)}</p>
+                                    <p className={`text-[10px] font-bold ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                                      {student.career} {student.studentId ? `• Matrícula: ${student.studentId}` : ''}
+                                    </p>
+                                  </div>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg border ${isDarkMode ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400' : 'bg-white border-indigo-200 text-indigo-700'}`}>
+                                    {Number(approvedHrs.toFixed(1))} / {TOTAL_REQUIRED_HOURS}h
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Fecha de la actividad (Permite mover a otro día) */}
+                            <div className="space-y-1.5">
+                              <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                                Fecha de la Actividad (Mover a otro día)
+                              </label>
+                              <input
+                                type="date"
+                                max={getCDMXDateString()}
+                                value={calendarEditForm.date}
+                                onChange={e => setCalendarEditForm({ ...calendarEditForm, date: e.target.value })}
+                                className={`w-full p-3.5 border rounded-2xl text-xs font-bold outline-none transition-all ${
+                                  isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white'
+                                }`}
+                              />
+                            </div>
+
+                            {/* Selector de modo: Horario Entrada/Salida o Horas Manuales */}
+                            <div className="flex items-center gap-2 pt-1">
+                              <input
+                                type="checkbox"
+                                id="calEditManualHours"
+                                checked={calendarEditForm.isManualHours}
+                                onChange={e => {
+                                  const isManual = e.target.checked;
+                                  setCalendarEditForm(prev => ({
+                                    ...prev,
+                                    isManualHours: isManual,
+                                    hours: isManual ? (prev.hours || 1) : prev.hours
+                                  }));
+                                }}
+                                className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500 cursor-pointer"
+                              />
+                              <label htmlFor="calEditManualHours" className={`text-xs font-bold cursor-pointer ${isDarkMode ? 'text-gray-300' : 'text-slate-600'}`}>
+                                Asignar horas totales fijas (sin horario entrada/salida)
+                              </label>
+                            </div>
+
+                            {/* Horario Entrada / Salida o Campo de Horas */}
+                            {!calendarEditForm.isManualHours ? (
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                  <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>Entrada</label>
+                                  <input
+                                    type="text"
+                                    placeholder="HH:MM"
+                                    maxLength={5}
+                                    value={calendarEditForm.startTime}
+                                    onChange={e => handleCalendarStartTimeChange(e.target.value)}
+                                    className={`w-full p-3 border rounded-2xl text-sm font-black text-center outline-none ${
+                                      isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                                    }`}
+                                  />
+                                </div>
+                                <div className="space-y-1">
+                                  <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>Salida</label>
+                                  <input
+                                    type="text"
+                                    placeholder="HH:MM"
+                                    maxLength={5}
+                                    value={calendarEditForm.endTime}
+                                    onChange={e => handleCalendarEndTimeChange(e.target.value)}
+                                    className={`w-full p-3 border rounded-2xl text-sm font-black text-center outline-none ${
+                                      isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                                    }`}
+                                  />
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="space-y-1">
+                                <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>Horas Totales</label>
+                                <input
+                                  type="number"
+                                  min="0.5"
+                                  max="240"
+                                  step="0.5"
+                                  value={calendarEditForm.hours || ''}
+                                  onChange={e => setCalendarEditForm({ ...calendarEditForm, hours: parseFloat(e.target.value) || 0 })}
+                                  className={`w-full p-3 border rounded-2xl text-sm font-black text-center outline-none ${
+                                    isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                                  }`}
+                                />
+                              </div>
+                            )}
+
+                            {/* Banner de Total Calculado */}
+                            <div className={`p-4 rounded-2xl border flex items-center justify-between shadow-inner ${
+                              isDarkMode ? 'bg-indigo-950/40 border-indigo-500/20 text-white' : 'bg-indigo-50 border-indigo-100 text-indigo-950'
+                            }`}>
+                              <div className="flex items-center gap-3">
+                                <Clock size={20} className="text-indigo-500" />
+                                <div>
+                                  <p className="text-[10px] font-black uppercase tracking-wider text-indigo-400">Total a Computar</p>
+                                  <div className="flex items-baseline gap-1">
+                                    <span className="text-2xl font-black">{Number(calendarEditForm.hours.toFixed(2))}</span>
+                                    <span className="text-xs font-bold uppercase text-indigo-400">Horas</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="text-right text-[11px] font-bold opacity-80">
+                                {calendarEditForm.date}
+                              </div>
+                            </div>
+
+                            {/* Categoría y Proyecto Asignado */}
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="space-y-1.5">
+                                <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>Categoría</label>
+                                <select
+                                  value={calendarEditForm.categoryId}
+                                  onChange={e => setCalendarEditForm({ ...calendarEditForm, categoryId: e.target.value })}
+                                  className={`w-full p-3.5 border rounded-2xl text-xs font-bold outline-none ${
+                                    isDarkMode ? 'bg-[#1a1a1a] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'
+                                  }`}
+                                >
+                                  <option value="">Sin categoría / General</option>
+                                  {categories.map(c => (
+                                    <option key={c.id} value={c.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>{c.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div className="space-y-1.5">
+                                <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>Proyecto Asignado</label>
+                                <select
+                                  value={calendarEditForm.projectId || ''}
+                                  onChange={e => setCalendarEditForm({ ...calendarEditForm, projectId: e.target.value })}
+                                  className={`w-full p-3.5 border rounded-2xl text-xs font-bold outline-none ${
+                                    isDarkMode ? 'bg-[#1a1a1a] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'
+                                  }`}
+                                >
+                                  <option value="">Sin Proyecto / General</option>
+                                  {projects.map((p: any) => (
+                                    <option key={p.id} value={p.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>
+                                      {p.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+
+                            {/* Descripción */}
+                            <div className="space-y-1.5">
+                              <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>Descripción / Bitácora</label>
+                              <textarea
+                                value={calendarEditForm.description}
+                                onChange={e => setCalendarEditForm({ ...calendarEditForm, description: e.target.value })}
+                                rows={2}
+                                placeholder="Detalle de actividades realizadas..."
+                                className={`w-full p-3 border rounded-2xl text-xs outline-none ${
+                                  isDarkMode ? 'bg-white/5 border-white/10 text-white placeholder-gray-500' : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400'
+                                }`}
+                              />
+                            </div>
+
+                            {/* Botones de acción */}
+                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 pt-3">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteCalendarRecord(editingCalendarRecord)}
+                                className={`p-3.5 rounded-2xl border text-xs font-bold transition-all text-red-500 hover:bg-red-500/10 ${
+                                  isDarkMode ? 'border-red-500/20' : 'border-red-200'
+                                }`}
+                                title="Eliminar esta sesión de horas"
+                              >
+                                <Trash2 size={18} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const actGroup = {
+                                    date: calendarEditForm.date,
+                                    startTime: calendarEditForm.startTime,
+                                    endTime: calendarEditForm.endTime,
+                                    hours: calendarEditForm.hours,
+                                    horasCalculadas: calendarEditForm.hours,
+                                    categoryId: calendarEditForm.categoryId,
+                                    description: calendarEditForm.description,
+                                    records: [editingCalendarRecord]
+                                  };
+                                  openAddStudentsToActivity(actGroup);
+                                }}
+                                className={`p-3.5 rounded-2xl border text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition-all ${
+                                  isDarkMode ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20' : 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+                                }`}
+                                title="Sumar más alumnos a esta misma actividad"
+                              >
+                                <UserPlus size={15} /> + Alumnos
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingCalendarRecord(null)}
+                                className={`flex-1 p-3.5 rounded-2xl border text-xs font-black uppercase tracking-wider transition-colors ${
+                                  isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white' : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200'
+                                }`}
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isSavingCalendarEdit}
+                                onClick={handleSaveCalendarRecordEdit}
+                                className="flex-2 p-3.5 rounded-2xl bg-indigo-600 text-white text-xs font-black uppercase tracking-wider shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                              >
+                                {isSavingCalendarEdit && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                                Guardar Horas
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {/* Modal para agregar más alumnos activos a una actividad */}
+                {targetActivityForAddingStudents && (
+                  <div 
+                    className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-[120] overflow-y-auto"
+                    onClick={(e) => {
+                      if (e.target === e.currentTarget && !isSavingStudentsToActivity) {
+                        setTargetActivityForAddingStudents(null);
+                      }
+                    }}
+                  >
+                    <div className={`rounded-[2.5rem] p-6 sm:p-10 w-full max-w-2xl shadow-2xl border ${
+                      isDarkMode ? 'bg-[#1a1a1a] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'
+                    } my-auto animate-in zoom-in-95 duration-300 relative max-h-[90vh] flex flex-col`}>
+                      
+                      {/* Encabezado */}
+                      <div className="flex items-start justify-between mb-5 shrink-0">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-black">
+                            <UserPlus size={24} />
+                          </div>
+                          <div>
+                            <h3 className="text-xl sm:text-2xl font-black tracking-tight">Agregar Alumnos a la Actividad</h3>
+                            <p className={`text-[10px] font-bold uppercase tracking-wider mt-0.5 ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                              Solo alumnos activos con servicio social en curso
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          disabled={isSavingStudentsToActivity}
+                          onClick={() => setTargetActivityForAddingStudents(null)}
+                          className={`p-2.5 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-slate-100 text-slate-400'}`}
+                        >
+                          <X size={20} />
+                        </button>
+                      </div>
+
+                      {/* Resumen de la Actividad */}
+                      {(() => {
+                        const act = targetActivityForAddingStudents;
+                        const cat = categories.find(c => c.id === act.categoryId);
+                        const hoursNum = Number(act.hours) || Number(act.horasCalculadas) || 0;
+                        const existingParticipants = act.participants || (act.records || []).map((r: any) => r.studentName || 'Alumno');
+
+                        return (
+                          <div className="overflow-y-auto pr-1 space-y-5 flex-1 custom-scrollbar">
+                            <div className={`p-4 rounded-2xl border ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'} space-y-3`}>
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-3 py-1 rounded-xl text-[9px] font-black text-white uppercase shadow-sm" style={{ backgroundColor: cat?.color || '#6366f1' }}>
+                                    {cat?.name || 'General'}
+                                  </span>
+                                  <span className={`text-xs font-bold ${isDarkMode ? 'text-gray-300' : 'text-slate-700'}`}>
+                                    📅 {safeFormatDate(act.date || selectedCalendarDate || '')}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2 text-xs font-black text-indigo-500">
+                                  <Clock size={14} />
+                                  <span>{act.startTime ? `${act.startTime} - ${act.endTime} (${hoursNum}h)` : `${hoursNum} hrs computadas`}</span>
+                                </div>
+                              </div>
+
+                              {act.description && (
+                                <p className={`text-xs font-medium italic line-clamp-2 ${isDarkMode ? 'text-gray-400' : 'text-slate-600'}`}>
+                                  "{act.description}"
+                                </p>
+                              )}
+
+                              {/* Participantes actuales */}
+                              <div className="pt-2 border-t border-slate-200 dark:border-white/10">
+                                <p className={`text-[10px] font-black uppercase tracking-wider mb-1.5 ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                                  Participantes ya registrados ({existingParticipants.length}):
+                                </p>
+                                <div className="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto custom-scrollbar">
+                                  {existingParticipants.map((pName: string, i: number) => (
+                                    <span 
+                                      key={`${pName}-${i}`} 
+                                      className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border ${
+                                        isDarkMode ? 'bg-white/5 border-white/10 text-gray-300' : 'bg-white border-slate-200 text-slate-700'
+                                      }`}
+                                    >
+                                      ✓ {String(pName)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Selector de Alumnos Activos */}
+                            <div className="space-y-3">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                <div>
+                                  <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                                    Seleccionar Alumnos Activos a Incorporar
+                                  </label>
+                                  <p className={`text-[11px] font-medium ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                                    {availableActiveStudentsForTargetActivity.length} alumnos activos disponibles (excluye finalizados y ya asignados)
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const allFilteredIds = filteredStudentsToAdd.map(s => s.id);
+                                      setSelectedStudentsToAdd(allFilteredIds);
+                                    }}
+                                    className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors ${
+                                      isDarkMode ? 'bg-white/5 hover:bg-white/10 text-indigo-400' : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-600'
+                                    }`}
+                                  >
+                                    Seleccionar Todos ({filteredStudentsToAdd.length})
+                                  </button>
+                                  {selectedStudentsToAdd.length > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedStudentsToAdd([])}
+                                      className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors ${
+                                        isDarkMode ? 'bg-white/5 hover:bg-white/10 text-gray-400' : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                                      }`}
+                                    >
+                                      Limpiar
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Barra de búsqueda con filtro */}
+                              <div className={`flex items-center gap-2 px-3.5 py-2.5 rounded-2xl border ${
+                                isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-slate-50 border-slate-200 text-slate-900'
+                              }`}>
+                                <Search size={16} className={isDarkMode ? 'text-gray-400' : 'text-slate-400'} />
+                                <input
+                                  type="text"
+                                  placeholder="Buscar por nombre, matrícula, carrera o brigada..."
+                                  value={searchStudentsToAdd}
+                                  onChange={e => setSearchStudentsToAdd(e.target.value)}
+                                  className="w-full bg-transparent text-xs font-bold outline-none"
+                                />
+                                {searchStudentsToAdd && (
+                                  <button onClick={() => setSearchStudentsToAdd('')} className="text-gray-400 hover:text-gray-600">
+                                    <X size={14} />
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* Listado de alumnos activos */}
+                              <div className="space-y-2 max-h-60 overflow-y-auto pr-1 custom-scrollbar">
+                                {filteredStudentsToAdd.length === 0 ? (
+                                  <div className={`p-8 rounded-2xl border text-center ${
+                                    isDarkMode ? 'bg-white/5 border-white/10 text-gray-400' : 'bg-slate-50 border-slate-200 text-slate-500'
+                                  }`}>
+                                    <p className="text-xs font-bold">
+                                      {availableActiveStudentsForTargetActivity.length === 0 
+                                        ? 'Todos los alumnos activos disponibles ya están asignados a esta actividad o han finalizado su servicio social.' 
+                                        : 'No se encontraron alumnos con ese criterio de búsqueda.'}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  filteredStudentsToAdd.map(student => {
+                                    const isSelected = selectedStudentsToAdd.includes(student.id);
+                                    const approvedHrs = (student.records || []).reduce((acc: number, r: any) => {
+                                      if (r.validationStatus === 'aprobado' || !r.validationStatus) {
+                                        return acc + (Number(r.hours) || Number(r.horasCalculadas) || 0);
+                                      }
+                                      return acc;
+                                    }, 0);
+
+                                    return (
+                                      <div
+                                        key={student.id}
+                                        onClick={() => {
+                                          setSelectedStudentsToAdd(prev => 
+                                            prev.includes(student.id) 
+                                              ? prev.filter(id => id !== student.id) 
+                                              : [...prev, student.id]
+                                          );
+                                        }}
+                                        className={`p-3 sm:p-3.5 rounded-2xl border flex items-center justify-between gap-3 cursor-pointer transition-all active:scale-[0.99] ${
+                                          isSelected
+                                            ? (isDarkMode ? 'bg-emerald-500/15 border-emerald-500/40 shadow-sm' : 'bg-emerald-50/80 border-emerald-300 shadow-sm')
+                                            : (isDarkMode ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-200 hover:bg-slate-50')
+                                        }`}
+                                      >
+                                        <div className="flex items-center gap-3 min-w-0">
+                                          <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            onChange={() => {}}
+                                            className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer pointer-events-none"
+                                          />
+                                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
+                                            isSelected 
+                                              ? 'bg-emerald-600 text-white' 
+                                              : (isDarkMode ? 'bg-white/10 text-gray-300' : 'bg-slate-100 text-slate-700')
+                                          }`}>
+                                            {(student.name || 'A')[0]}
+                                          </div>
+                                          <div className="min-w-0">
+                                            <p className="font-bold text-xs truncate">
+                                              {student.name || getFullName(student)}
+                                            </p>
+                                            <p className={`text-[10px] font-medium truncate ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                                              {student.career || 'Sin Carrera'} {student.studentId ? `• Mat: ${student.studentId}` : ''}
+                                            </p>
+                                          </div>
+                                        </div>
+
+                                        <div className="text-right shrink-0">
+                                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border ${
+                                            isDarkMode ? 'bg-white/5 border-white/10 text-emerald-400' : 'bg-slate-50 border-slate-200 text-emerald-700'
+                                          }`}>
+                                            {Number(approvedHrs.toFixed(1))} / {TOTAL_REQUIRED_HOURS}h
+                                          </span>
+                                        </div>
+                                      </div>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Botones de acción */}
+                            <div className="flex items-center gap-3 pt-4 border-t border-slate-200 dark:border-white/10 shrink-0">
+                              <button
+                                type="button"
+                                disabled={isSavingStudentsToActivity}
+                                onClick={() => setTargetActivityForAddingStudents(null)}
+                                className={`p-3.5 rounded-2xl border text-xs font-black uppercase tracking-wider transition-colors flex-1 ${
+                                  isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white' : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200'
+                                }`}
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={selectedStudentsToAdd.length === 0 || isSavingStudentsToActivity}
+                                onClick={handleSaveStudentsToActivity}
+                                className="flex-2 p-3.5 rounded-2xl bg-emerald-600 text-white text-xs font-black uppercase tracking-wider shadow-lg shadow-emerald-600/30 hover:bg-emerald-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                              >
+                                {isSavingStudentsToActivity && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                                <UserPlus size={16} />
+                                <span>
+                                  {selectedStudentsToAdd.length === 0 
+                                    ? 'Selecciona Alumnos' 
+                                    : `Agregar ${selectedStudentsToAdd.length} Alumno${selectedStudentsToAdd.length === 1 ? '' : 's'} a la Actividad`}
+                                </span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
+
+                {/* Modal para cambiar categoría y asignación a proyecto de una actividad */}
+                {activityToChangeCategoryProject && (
+                  <div 
+                    className="fixed inset-0 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 z-[125] overflow-y-auto"
+                    onClick={(e) => {
+                      if (e.target === e.currentTarget && !isSavingCategoryProjectChange) {
+                        setActivityToChangeCategoryProject(null);
+                      }
+                    }}
+                  >
+                    <div className={`rounded-[2.5rem] p-6 sm:p-10 w-full max-w-xl shadow-2xl border ${
+                      isDarkMode ? 'bg-[#1a1a1a] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'
+                    } my-auto animate-in zoom-in-95 duration-300 relative max-h-[90vh] flex flex-col overflow-hidden`}>
+                      
+                      {/* Encabezado */}
+                      <div className="flex items-start justify-between mb-5 shrink-0">
+                        <div className="flex items-center gap-3">
+                          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center font-black shrink-0">
+                            <Layers size={24} />
+                          </div>
+                          <div>
+                            <h3 className="text-xl sm:text-2xl font-black tracking-tight">Cambiar Categoría y Proyecto</h3>
+                            <p className={`text-[10px] font-bold uppercase tracking-wider mt-0.5 ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                              Actualiza la categoría y asignación de proyecto para esta actividad
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          disabled={isSavingCategoryProjectChange}
+                          onClick={() => setActivityToChangeCategoryProject(null)}
+                          className={`p-2.5 rounded-xl transition-colors ${isDarkMode ? 'hover:bg-white/10 text-gray-400' : 'hover:bg-slate-100 text-slate-400'}`}
+                        >
+                          <X size={20} />
+                        </button>
+                      </div>
+
+                      {/* Cuerpo Scrollable */}
+                      {(() => {
+                        const act = activityToChangeCategoryProject;
+                        const hoursNum = Number(act.hours) || Number(act.horasCalculadas) || 0;
+                        const currentParticipants = act.participants || (act.records || []).map((r: any) => r.studentName || 'Alumno');
+
+                        return (
+                          <div className="overflow-y-auto pr-1 space-y-5 flex-1 custom-scrollbar">
+                            {/* Resumen de la actividad */}
+                            <div className={`p-4 rounded-2xl border ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-200'} space-y-2`}>
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className={`text-xs font-bold ${isDarkMode ? 'text-gray-300' : 'text-slate-700'}`}>
+                                  📅 {safeFormatDate(act.date || selectedCalendarDate || '')}
+                                </span>
+                                <span className="text-xs font-black text-indigo-500 flex items-center gap-1.5">
+                                  <Clock size={13} />
+                                  {act.startTime ? `${act.startTime} - ${act.endTime} (${hoursNum}h)` : `${hoursNum} hrs computadas`}
+                                </span>
+                              </div>
+                              {act.description && (
+                                <p className={`text-xs italic line-clamp-2 ${isDarkMode ? 'text-gray-400' : 'text-slate-600'}`}>
+                                  "{act.description}"
+                                </p>
+                              )}
+                              <div className="text-[10px] font-bold text-gray-400 pt-1 border-t border-slate-200 dark:border-white/5 flex items-center gap-1.5 flex-wrap">
+                                <Users size={12} className="text-indigo-400" />
+                                <span>Afecta a {currentParticipants.length} alumno(s):</span>
+                                <span className="text-slate-600 dark:text-gray-300 font-semibold truncate max-w-full">
+                                  {currentParticipants.slice(0, 4).join(', ')}{currentParticipants.length > 4 ? ` y ${currentParticipants.length - 4} más` : ''}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Selector de Categoría */}
+                            <div className="space-y-2.5">
+                              <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                                1. Selecciona la Categoría
+                              </label>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                                {categories.map((c: any) => {
+                                  const isSelected = changeCategoryForm.categoryId === c.id;
+                                  return (
+                                    <button
+                                      key={c.id}
+                                      type="button"
+                                      onClick={() => setChangeCategoryForm(prev => ({ ...prev, categoryId: c.id }))}
+                                      className={`p-3 rounded-xl border flex items-center justify-between gap-2.5 transition-all text-left ${
+                                        isSelected
+                                          ? (isDarkMode ? 'bg-white/15 border-indigo-400 ring-2 ring-indigo-400/40 shadow-sm' : 'bg-indigo-50/80 border-indigo-400 ring-2 ring-indigo-400/30 shadow-sm')
+                                          : (isDarkMode ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-200 hover:bg-slate-50')
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2.5 min-w-0">
+                                        <span className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: c.color }} />
+                                        <span className="text-xs font-bold truncate">{c.name}</span>
+                                      </div>
+                                      {isSelected && <Check size={14} className="text-indigo-600 dark:text-indigo-400 shrink-0" />}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Selector de Proyecto */}
+                            <div className="space-y-2.5">
+                              <div className="flex items-center justify-between">
+                                <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                                  2. Asignar a un Proyecto Específico
+                                </label>
+                                {changeCategoryForm.projectId && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setChangeCategoryForm(prev => ({ ...prev, projectId: '' }))}
+                                    className="text-[10px] font-bold text-slate-400 hover:text-red-400 transition-colors"
+                                  >
+                                    Quitar asignación
+                                  </button>
+                                )}
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-52 overflow-y-auto custom-scrollbar pr-1">
+                                {/* Opción Sin Proyecto / General */}
+                                <button
+                                  type="button"
+                                  onClick={() => setChangeCategoryForm(prev => ({ ...prev, projectId: '' }))}
+                                  className={`p-3 rounded-xl border flex items-center justify-between gap-2.5 transition-all text-left ${
+                                    !changeCategoryForm.projectId
+                                      ? (isDarkMode ? 'bg-white/15 border-indigo-400 ring-2 ring-indigo-400/40 shadow-sm' : 'bg-indigo-50/80 border-indigo-400 ring-2 ring-indigo-400/30 shadow-sm')
+                                      : (isDarkMode ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-200 hover:bg-slate-50')
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2.5 min-w-0">
+                                    <div className="w-6 h-6 rounded-lg bg-slate-200 dark:bg-white/10 flex items-center justify-center shrink-0">
+                                      <Folder size={12} className="text-slate-500 dark:text-gray-400" />
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-bold truncate">Sin Proyecto / General</p>
+                                      <p className={`text-[9px] truncate ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>Actividad general</p>
+                                    </div>
+                                  </div>
+                                  {!changeCategoryForm.projectId && <Check size={14} className="text-indigo-600 dark:text-indigo-400 shrink-0" />}
+                                </button>
+
+                                {/* Proyectos registrados */}
+                                {projects.map((p: any) => {
+                                  const isSelected = changeCategoryForm.projectId === p.id;
+                                  return (
+                                    <button
+                                      key={p.id}
+                                      type="button"
+                                      onClick={() => setChangeCategoryForm(prev => ({ ...prev, projectId: p.id }))}
+                                      className={`p-3 rounded-xl border flex items-center justify-between gap-2.5 transition-all text-left ${
+                                        isSelected
+                                          ? (isDarkMode ? 'bg-white/15 border-indigo-400 ring-2 ring-indigo-400/40 shadow-sm' : 'bg-indigo-50/80 border-indigo-400 ring-2 ring-indigo-400/30 shadow-sm')
+                                          : (isDarkMode ? 'bg-white/5 border-white/5 hover:bg-white/10' : 'bg-white border-slate-200 hover:bg-slate-50')
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2.5 min-w-0">
+                                        <div 
+                                          className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0 shadow-sm text-white font-black text-[10px]"
+                                          style={{ backgroundColor: p.color || '#6366f1' }}
+                                        >
+                                          <Folder size={12} />
+                                        </div>
+                                        <div className="min-w-0">
+                                          <p className="text-xs font-bold truncate">{p.name}</p>
+                                          {p.description && (
+                                            <p className={`text-[9px] truncate ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                                              {p.description}
+                                            </p>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {isSelected && <Check size={14} className="text-indigo-600 dark:text-indigo-400 shrink-0" />}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Botones de acción */}
+                            <div className="flex items-center gap-3 pt-4 border-t border-slate-200 dark:border-white/10 shrink-0">
+                              <button
+                                type="button"
+                                disabled={isSavingCategoryProjectChange}
+                                onClick={() => setActivityToChangeCategoryProject(null)}
+                                className={`p-3.5 rounded-2xl border text-xs font-black uppercase tracking-wider transition-colors flex-1 ${
+                                  isDarkMode ? 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-white' : 'bg-slate-100 border-slate-200 text-slate-500 hover:bg-slate-200'
+                                }`}
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                disabled={isSavingCategoryProjectChange}
+                                onClick={handleSaveCategoryProjectChange}
+                                className="flex-2 p-3.5 rounded-2xl bg-indigo-600 text-white text-xs font-black uppercase tracking-wider shadow-lg shadow-indigo-600/30 hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                              >
+                                {isSavingCategoryProjectChange && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />}
+                                <Check size={16} />
+                                <span>Guardar Cambios</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
              </div>
           )}
 
@@ -5255,6 +7596,67 @@ const App = () => {
               currentUserId={currentUserId || ''}
               isDarkMode={isDarkMode}
             />
+          )}
+
+          {view === 'google-tasks' && (
+            <div className="max-w-7xl mx-auto">
+              {!googleAccessToken ? (
+                <div className="flex flex-col items-center justify-center min-h-[400px] text-center p-8 bg-white dark:bg-white/5 rounded-[2.5rem] border border-slate-200 dark:border-white/10">
+                  <div className="bg-indigo-500/10 p-6 rounded-full mb-6">
+                    <CheckSquare size={48} className="text-indigo-500" />
+                  </div>
+                  <h2 className={`text-2xl font-black mb-4 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Conecta con Google Tasks</h2>
+                  <p className={`max-w-md mx-auto mb-8 text-sm leading-relaxed ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                    Para gestionar tus tareas pendientes, necesitas autenticarte con tu cuenta de Google.
+                  </p>
+                  <button 
+                    onClick={async (e) => {
+                      const btn = e.currentTarget;
+                      btn.disabled = true;
+                      btn.style.opacity = '0.5';
+                      const loadingAuth = toast.loading("Autenticando con Google...");
+                      try {
+                        const provider = new GoogleAuthProvider();
+                        provider.addScope('https://www.googleapis.com/auth/tasks');
+                        provider.addScope('https://www.googleapis.com/auth/tasks.readonly');
+                        provider.setCustomParameters({ prompt: 'select_account' });
+                        const result = await signInWithPopup(auth, provider);
+                        const credential = GoogleAuthProvider.credentialFromResult(result);
+                        const token = credential?.accessToken || null;
+                        if (token) setGoogleAccessToken(token);
+                      } catch (error: any) {
+                        if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+                          console.warn("Autenticación para Tasks cancelada o ventana cerrada por el usuario.");
+                          toast("Ventana de autenticación cerrada. Vuelve a intentarlo cuando desees conectar Google Tasks.", { icon: 'ℹ️' });
+                        } else if (error.code === 'auth/blocked-at-iframe-start' || error.code === 'auth/popup-blocked') {
+                          console.warn("Ventana emergente bloqueada por el navegador.");
+                          showErrorToast("El navegador bloqueó la ventana emergente. Por favor, habilita los popups para este sitio.");
+                        } else {
+                          console.error("Error authenticating for Tasks:", error);
+                          showErrorToast("Error al autenticar con Google: " + (error.message || "Error desconocido"));
+                        }
+                      } finally {
+                        toast.dismiss(loadingAuth);
+                        btn.disabled = false;
+                        btn.style.opacity = '1';
+                      }
+                    }}
+                    className="flex items-center gap-3 px-6 py-3 bg-white dark:bg-[#121212] border border-slate-200 dark:border-white/10 rounded-2xl font-black text-xs tracking-widest hover:bg-slate-50 dark:hover:bg-white/5 transition-all shadow-sm active:scale-95 mx-auto"
+                  >
+                    <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-5 h-5">
+                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
+                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
+                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
+                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
+                      <path fill="none" d="M0 0h48v48H0z"></path>
+                    </svg>
+                    <span className={isDarkMode ? 'text-white' : 'text-slate-700'}>INICIAR SESIÓN</span>
+                  </button>
+                </div>
+              ) : (
+                <GoogleTasksView accessToken={googleAccessToken} isDarkMode={isDarkMode} />
+              )}
+            </div>
           )}
 
           {view === 'categories' && (
@@ -5867,7 +8269,7 @@ const App = () => {
             <div className="flex flex-col sm:flex-row gap-4 sm:gap-10 mt-10 sm:mt-20">
               <button onClick={() => { setShowAddStudent(false); setStudentFormErrors({}); }} className={`flex-1 px-6 py-4 sm:px-10 sm:py-8 border-4 sm:border-8 rounded-2xl sm:rounded-[3rem] font-black uppercase text-[10px] sm:text-xs shadow-lg transition-all ${isDarkMode ? 'bg-white/5 border-white/5 text-gray-500 hover:bg-white/10' : 'bg-slate-50 border-slate-50 text-slate-300 hover:bg-slate-100'}`}>Cancelar</button>
               <button onClick={handleAddStudent} className={`flex-2 px-6 py-4 sm:px-20 sm:py-8 rounded-2xl sm:rounded-[3rem] font-black uppercase text-[10px] sm:text-xs shadow-2xl active:scale-[0.98] transition-all ${isDarkMode ? 'bg-white text-black hover:bg-gray-200 shadow-white/5' : 'bg-slate-900 text-white hover:bg-black shadow-slate-900/20'}`}>
-                {showEditStudent ? (studentForm.status === 'Finalizada' ? 'Certificar y Guardar' : 'Guardar Cambios') : 'Registrar Prestador'}
+                {showEditStudent ? (studentForm.status === 'Finalizado' ? 'Certificar y Guardar' : 'Guardar Cambios') : 'Registrar Prestador'}
               </button>
             </div>
           </div>
@@ -5875,64 +8277,207 @@ const App = () => {
       )}
         {showManualHours && (
           <div className={`fixed inset-0 backdrop-blur-sm z-50 flex items-center justify-center p-4 ${isDarkMode ? 'bg-black/70' : 'bg-black/50'}`}>
-            <div className={`rounded-[2rem] p-8 max-w-md w-full shadow-2xl border ${isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-slate-200'}`}>
-              <h2 className={`text-2xl font-black mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Agregar Horas Manuales</h2>
-              <div className="space-y-4">
+            <div className={`rounded-[2rem] p-6 sm:p-8 max-w-lg w-full shadow-2xl border ${isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-slate-200'}`}>
+              <div className="flex items-center justify-between mb-6">
                 <div>
-                  <label className={`block text-[10px] font-black uppercase mb-2 ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Fecha</label>
-                  <input type="date" max={getCDMXDateString()} className={`w-full p-4 rounded-xl border outline-none transition-all font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-indigo-400' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-indigo-500'}`} value={manualHoursForm.date} onChange={e => setManualHoursForm({...manualHoursForm, date: e.target.value})} />
+                  <h2 className={`text-2xl font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Agregar Horas Manuales</h2>
+                  <p className={`text-[10px] font-bold uppercase tracking-wider mt-0.5 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Asignación directa para alumnos activos</p>
                 </div>
-                <div>
-                  <label className={`block text-[10px] font-black uppercase mb-2 ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Horas</label>
-                  <input type="number" className={`w-full p-4 rounded-xl border outline-none transition-all font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-indigo-400' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-indigo-500'}`} value={manualHoursForm.hours} onChange={e => setManualHoursForm({...manualHoursForm, hours: parseFloat(e.target.value)})} />
-                </div>
-                <div>
-                  <label className={`block text-[10px] font-black uppercase mb-2 ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Categoría</label>
-                  <select className={`w-full p-4 rounded-xl border outline-none transition-all font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-indigo-400' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-indigo-500'}`} value={manualHoursForm.category} onChange={e => setManualHoursForm({...manualHoursForm, category: e.target.value})}>
-                    <option value="Otra Brigada" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>Otra Brigada</option>
-                    <option value="ND en Sistema" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>ND en Sistema</option>
-                  </select>
-                </div>
-                <div className="flex gap-4 mt-8">
-                  <button onClick={() => setShowManualHours(false)} className={`flex-1 p-4 rounded-xl font-black uppercase text-[10px] tracking-widest transition-colors ${isDarkMode ? 'bg-white/5 text-gray-500 hover:bg-white/10' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>Cancelar</button>
-                  <button onClick={async () => {
-                    if (manualHoursForm.hours < 0.5) {
-                      showErrorToast("El registro mínimo es de media hora");
-                      return;
-                    }
-                    if (manualHoursForm.hours > 240) {
-                      showErrorToast("Un registro no puede exceder las 240 horas");
-                      return;
-                    }
-                    const recordId = `${Date.now()}-${selectedStudentId}`;
-                    const sessionData = {
-                      id: recordId,
-                      userId: selectedStudentId,
-                      projectId: 'p-general',
-                      categoryId: manualHoursForm.category === 'Otra Brigada' ? 'cat-otra' : 'cat-nd',
-                      description: 'Manual: ' + manualHoursForm.category,
-                      date: manualHoursForm.date,
-                      startTime: '',
-                      endTime: '',
-                      horasCalculadas: manualHoursForm.hours,
-                      estado: 'aprobado',
-                      status: 'A',
-                      evidenceLink: '',
-                      updatedBy: auth.currentUser?.uid || 'admin',
-                      acknowledgedRejection: false
-                    };
-                    
-                    try {
-                      await setDoc(doc(db, 'sesiones', recordId), sessionData);
-                      setShowManualHours(false);
-                      showSuccessToast("Horas manuales agregadas");
-                      setManualHoursForm({ hours: 0, category: 'Otra Brigada', date: getCDMXDateString() });
-                    } catch (error) {
-                      handleFirestoreError(error, OperationType.WRITE, `sesiones/${recordId}`);
-                    }
-                  }} className={`flex-1 p-4 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all shadow-lg active:scale-95 ${isDarkMode ? 'bg-white text-black hover:bg-gray-200 shadow-white/5' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/20'}`}>Guardar</button>
-                </div>
+                <button 
+                  onClick={() => setShowManualHours(false)}
+                  className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'text-gray-400 hover:text-white hover:bg-white/5' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
+                >
+                  <X size={20} />
+                </button>
               </div>
+
+              {(() => {
+                const effectiveStudentId = manualHoursStudentId || selectedStudentId;
+                const targetStudent = getStudentData(effectiveStudentId);
+                const isTargetFinished = isStudentFinished(targetStudent);
+
+                return (
+                  <div className="space-y-4">
+                    {/* Selector y Barra de Búsqueda de Alumno */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className={`block text-[10px] font-black uppercase ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
+                          Alumno Activo
+                        </label>
+                        <span className={`text-[10px] font-black uppercase tracking-wider ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>
+                          {filteredActiveStudentsForManualHours.length} disponible{filteredActiveStudentsForManualHours.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
+
+                      {/* Barra de búsqueda para filtrar alumnos */}
+                      <div className="relative mb-2">
+                        <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                          <Search size={15} className={isDarkMode ? 'text-gray-500' : 'text-slate-400'} />
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="Buscar alumno por nombre, matrícula o carrera..."
+                          value={manualHoursSearch}
+                          onChange={e => setManualHoursSearch(e.target.value)}
+                          className={`w-full pl-9 pr-8 py-2.5 rounded-xl border text-xs font-bold outline-none transition-all ${
+                            isDarkMode
+                              ? 'bg-white/5 border-white/10 text-white placeholder-gray-500 focus:bg-white/10 focus:border-indigo-400'
+                              : 'bg-slate-50 border-slate-200 text-slate-900 placeholder-slate-400 focus:bg-white focus:border-indigo-500'
+                          }`}
+                        />
+                        {manualHoursSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setManualHoursSearch('')}
+                            className={`absolute inset-y-0 right-0 pr-3 flex items-center ${isDarkMode ? 'text-gray-400 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
+                          >
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+
+                      <select
+                        className={`w-full p-3.5 rounded-xl border outline-none transition-all font-bold text-xs ${
+                          isDarkMode
+                            ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-indigo-400'
+                            : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-indigo-500'
+                        }`}
+                        value={effectiveStudentId || ''}
+                        onChange={e => {
+                          setManualHoursStudentId(e.target.value);
+                          setSelectedStudentId(e.target.value);
+                        }}
+                      >
+                        <option value="" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>
+                          {filteredActiveStudentsForManualHours.length === 0 ? 'Sin alumnos activos disponibles' : 'Seleccionar Alumno...'}
+                        </option>
+                        {filteredActiveStudentsForManualHours.map((s, idx) => {
+                          const approvedHrs = (s.records || []).reduce((acc: number, r: any) => {
+                            if (r.validationStatus === 'aprobado' || !r.validationStatus) {
+                              return acc + (Number(r.hours) || Number(r.horasCalculadas) || 0);
+                            }
+                            return acc;
+                          }, 0);
+                          return (
+                            <option key={`${s.id || 'student'}-${idx}`} value={s.id} className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>
+                              {s.name || getFullName(s)} {s.studentId ? `(${s.studentId})` : ''} — {s.career || ''} [{Number(approvedHrs.toFixed(1))}/{TOTAL_REQUIRED_HOURS}h]
+                            </option>
+                          );
+                        })}
+                      </select>
+
+                      {/* Tarjeta de resumen del alumno seleccionado */}
+                      {targetStudent && !isTargetFinished && (
+                        <div className={`mt-2.5 p-3 rounded-xl border text-xs flex items-center justify-between ${
+                          isDarkMode ? 'bg-white/5 border-white/10 text-gray-300' : 'bg-indigo-50/50 border-indigo-100 text-indigo-950'
+                        }`}>
+                          <div className="min-w-0 pr-2">
+                            <p className="font-black text-xs truncate">{targetStudent.name || getFullName(targetStudent)}</p>
+                            <p className={`text-[10px] font-bold ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                              {targetStudent.career || 'Prestador'} {targetStudent.studentId ? `• Matrícula: ${targetStudent.studentId}` : ''}
+                            </p>
+                          </div>
+                          <div className="text-right shrink-0">
+                            {(() => {
+                              const approvedHrs = (targetStudent.records || []).reduce((acc: number, r: any) => {
+                                if (r.validationStatus === 'aprobado' || !r.validationStatus) {
+                                  return acc + (Number(r.hours) || Number(r.horasCalculadas) || 0);
+                                }
+                                return acc;
+                              }, 0);
+                              return (
+                                <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg border ${
+                                  isDarkMode ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400' : 'bg-white border-indigo-200 text-indigo-700 shadow-sm'
+                                }`}>
+                                  {Number(approvedHrs.toFixed(1))} / {TOTAL_REQUIRED_HOURS}h
+                                </span>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      )}
+
+                      {targetStudent && isTargetFinished && (
+                        <div className="mt-2.5 p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-red-600 dark:text-red-400 text-xs font-bold flex items-center gap-2">
+                          <AlertCircle size={16} className="shrink-0" />
+                          <span>Este alumno ya finalizó su servicio social. No se le pueden asignar más horas.</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className={`block text-[10px] font-black uppercase mb-2 ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Fecha</label>
+                      <input type="date" max={getCDMXDateString()} className={`w-full p-4 rounded-xl border outline-none transition-all font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-indigo-400' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-indigo-500'}`} value={manualHoursForm.date} onChange={e => setManualHoursForm({...manualHoursForm, date: e.target.value})} />
+                    </div>
+                    <div>
+                      <label className={`block text-[10px] font-black uppercase mb-2 ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Horas</label>
+                      <input type="number" min="0.5" max="240" step="0.5" className={`w-full p-4 rounded-xl border outline-none transition-all font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-indigo-400' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-indigo-500'}`} value={manualHoursForm.hours || ''} onChange={e => setManualHoursForm({...manualHoursForm, hours: parseFloat(e.target.value) || 0})} />
+                    </div>
+                    <div>
+                      <label className={`block text-[10px] font-black uppercase mb-2 ml-1 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Categoría</label>
+                      <select className={`w-full p-4 rounded-xl border outline-none transition-all font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:border-indigo-400' : 'bg-slate-50 border-slate-200 text-slate-900 focus:bg-white focus:border-indigo-500'}`} value={manualHoursForm.category} onChange={e => setManualHoursForm({...manualHoursForm, category: e.target.value})}>
+                        <option value="Otra Brigada" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>Otra Brigada</option>
+                        <option value="ND en Sistema" className={isDarkMode ? 'bg-[#1a1a1a] text-white' : ''}>ND en Sistema</option>
+                      </select>
+                    </div>
+
+                    <div className="flex gap-4 mt-8">
+                      <button onClick={() => setShowManualHours(false)} className={`flex-1 p-4 rounded-xl font-black uppercase text-[10px] tracking-widest transition-colors ${isDarkMode ? 'bg-white/5 text-gray-500 hover:bg-white/10' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>Cancelar</button>
+                      <button 
+                        disabled={!effectiveStudentId || isTargetFinished}
+                        onClick={async () => {
+                          if (!effectiveStudentId) {
+                            showErrorToast("Por favor selecciona un alumno.");
+                            return;
+                          }
+                          if (isTargetFinished) {
+                            showErrorToast("El alumno ya ha finalizado su servicio social y no se le pueden asignar más horas.");
+                            return;
+                          }
+                          if (manualHoursForm.hours < 0.5) {
+                            showErrorToast("El registro mínimo es de media hora");
+                            return;
+                          }
+                          if (manualHoursForm.hours > 240) {
+                            showErrorToast("Un registro no puede exceder las 240 horas");
+                            return;
+                          }
+                          const recordId = `${Date.now()}-${effectiveStudentId}`;
+                          const sessionData = {
+                            id: recordId,
+                            userId: effectiveStudentId,
+                            projectId: 'p-general',
+                            categoryId: manualHoursForm.category === 'Otra Brigada' ? 'cat-otra' : 'cat-nd',
+                            description: 'Manual: ' + manualHoursForm.category,
+                            date: manualHoursForm.date,
+                            startTime: '',
+                            endTime: '',
+                            horasCalculadas: manualHoursForm.hours,
+                            estado: 'aprobado',
+                            status: 'A',
+                            evidenceLink: '',
+                            updatedBy: auth.currentUser?.uid || 'admin',
+                            acknowledgedRejection: false
+                          };
+                          
+                          try {
+                            await setDoc(doc(db, 'sesiones', recordId), sessionData);
+                            setShowManualHours(false);
+                            showSuccessToast("Horas manuales agregadas");
+                            setManualHoursForm({ hours: 0, category: 'Otra Brigada', date: getCDMXDateString() });
+                            setManualHoursSearch('');
+                          } catch (error) {
+                            handleFirestoreError(error, OperationType.WRITE, `sesiones/${recordId}`);
+                          }
+                        }} 
+                        className={`flex-1 p-4 rounded-xl font-black uppercase text-[10px] tracking-widest transition-all shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed ${isDarkMode ? 'bg-white text-black hover:bg-gray-200 shadow-white/5' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-indigo-600/20'}`}
+                      >
+                        Guardar
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Save, Edit2, Trash2, MessageSquare, Clock, User, Users, Tag, Star, Calendar, FileText, History, CheckCircle2, XCircle, GitBranch, Mail, Phone, MapPin, AlertTriangle } from 'lucide-react';
+import { X, Save, Edit2, Trash2, MessageSquare, Clock, User, Users, Tag, Star, Calendar, FileText, History, CheckCircle2, XCircle, GitBranch, Mail, Phone, MapPin, AlertTriangle, Zap } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, getDoc, updateDoc, collection, query, onSnapshot, addDoc, deleteDoc, orderBy } from 'firebase/firestore';
 import toast from 'react-hot-toast';
@@ -12,6 +12,7 @@ import { notifyNoteAdded, getProjectAdmins } from '../services/notificationServi
 import { KANBAN_COLUMNS } from '../config/kanbanColumns';
 import { dedupeById } from '../utils/dedupe';
 import { formatName, formatFullName } from '../utils/formatters';
+import { safeFormatDate } from '../utils/dateUtils';
 
 const STATUS_OPTIONS = KANBAN_COLUMNS.map(col => ({
   value: col.id,
@@ -44,7 +45,8 @@ const FIELD_LABELS: Record<string, string> = {
   assignedTo: 'Responsable',
   assignedUsers: 'Alumnos Asignados',
   type: 'Tipo',
-  phase: 'Fase/Sprint',
+  phase: 'Fase',
+  sprintId: 'Sprint / Iteración',
   resources: 'Recursos',
   color: 'Color',
   isMilestone: 'Es Hito'
@@ -57,6 +59,7 @@ const TaskSidePanel = ({
   userRole, 
   currentUser, 
   students,
+  sprints = [],
   updateTaskStatus,
   updateTaskField,
   updateTaskFields,
@@ -545,17 +548,17 @@ const TaskSidePanel = ({
               <div className="space-y-1">
                 <span className={`text-[10px] font-black ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-1`}><Calendar size={12}/> Inicio</span>
                 {isEditing ? (
-                  <input type="date" value={editForm.startDate?.split('T')[0] || ''} onChange={e => setEditForm({...editForm, startDate: new Date(e.target.value).toISOString()})} className={`w-full text-sm font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg px-2 py-1 outline-none`} />
+                  <input type="date" value={editForm.startDate?.split('T')[0] || ''} onChange={e => setEditForm({...editForm, startDate: new Date(`${e.target.value}T00:00:00`).toISOString()})} className={`w-full text-sm font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg px-2 py-1 outline-none`} />
                 ) : (
-                  <p className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} text-sm`}>{task?.startDate ? new Intl.DateTimeFormat('es-MX').format(new Date(task.startDate)) : '-'}</p>
+                  <p className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} text-sm`}>{safeFormatDate(task?.startDate, { day: 'numeric', month: 'numeric', year: 'numeric' })}</p>
                 )}
               </div>
               <div className="space-y-1">
                 <span className={`text-[10px] font-black ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-1`}><Calendar size={12}/> Fin</span>
                 {isEditing ? (
-                  <input type="date" value={editForm.endDate?.split('T')[0] || ''} onChange={e => setEditForm({...editForm, endDate: new Date(e.target.value).toISOString()})} className={`w-full text-sm font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg px-2 py-1 outline-none`} />
+                  <input type="date" value={editForm.endDate?.split('T')[0] || ''} onChange={e => setEditForm({...editForm, endDate: new Date(`${e.target.value}T00:00:00`).toISOString()})} className={`w-full text-sm font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg px-2 py-1 outline-none`} />
                 ) : (
-                  <p className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} text-sm`}>{task?.endDate ? new Intl.DateTimeFormat('es-MX').format(new Date(task.endDate)) : '-'}</p>
+                  <p className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} text-sm`}>{safeFormatDate(task?.endDate, { day: 'numeric', month: 'numeric', year: 'numeric' })}</p>
                 )}
               </div>
               <div className="space-y-1">
@@ -614,11 +617,32 @@ const TaskSidePanel = ({
                 * Calculado automáticamente
               </div>
               <div className="space-y-1">
-                <span className={`text-[10px] font-black ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-1`}><Tag size={12}/> Sprint/Fase</span>
+                <span className={`text-[10px] font-black ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-1`}><Tag size={12}/> Fase</span>
                 {isEditing ? (
                   <input type="text" value={editForm.phase || ''} onChange={e => setEditForm({...editForm, phase: e.target.value})} className={`w-full text-sm font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg px-2 py-1 outline-none`} />
                 ) : (
                   <p className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} text-sm`}>{task?.phase || '-'}</p>
+                )}
+              </div>
+              <div className="space-y-1">
+                <span className={`text-[10px] font-black ${isDarkMode ? 'text-slate-500' : 'text-slate-400'} uppercase tracking-widest flex items-center gap-1`}><Zap size={12} className="text-amber-500"/> Sprint / Iteración</span>
+                {isEditing ? (
+                  <select 
+                    value={editForm.sprintId || ''} 
+                    onChange={e => setEditForm({...editForm, sprintId: e.target.value || null})} 
+                    className={`w-full text-sm font-bold ${isDarkMode ? 'bg-white/5 border-white/10 text-white' : 'bg-white border-slate-200'} rounded-lg px-2 py-1 outline-none`}
+                  >
+                    <option value="" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Sin Sprint (Backlog)</option>
+                    {(sprints || []).map((sp: any) => (
+                      <option key={sp.id} value={sp.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>
+                        {sp.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className={`font-bold ${isDarkMode ? 'text-slate-300' : 'text-slate-700'} text-sm`}>
+                    {(sprints || []).find((s: any) => s.id === task?.sprintId)?.name || 'Sin Sprint'}
+                  </p>
                 )}
               </div>
               <div className="space-y-1 col-span-2 sm:col-span-3">

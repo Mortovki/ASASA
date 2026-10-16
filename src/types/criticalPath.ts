@@ -11,6 +11,8 @@ export interface Task {
   effort?: number;
   resources?: string[];
   phase?: string;
+  stageId?: string | null;
+  sprintId?: string | null;
   x?: number;
   y?: number;
   color?: string;
@@ -26,6 +28,27 @@ export interface Task {
   duration?: number;
 }
 
+export interface StageCPM {
+  id: string;
+  name: string;
+  color: string;
+  startDate: string;
+  endDate: string;
+  duration: number; // in days
+  predecessors: string[];
+  earlyStart?: number;
+  earlyFinish?: number;
+  lateStart?: number;
+  lateFinish?: number;
+  slack?: number;
+  isCritical?: boolean;
+  status?: string;
+  description?: string | null;
+  taskCount?: number;
+  completedTaskCount?: number;
+  progressPercent?: number;
+}
+
 export interface CriticalPathResult {
   tasks: Task[];
   criticalPath: string[];
@@ -35,3 +58,4 @@ export interface CriticalPathResult {
 export interface DependencyGraph {
   [taskId: string]: string[];
 }
+

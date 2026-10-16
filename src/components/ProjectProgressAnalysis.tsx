@@ -32,7 +32,7 @@ const ProjectProgressAnalysis: React.FC<ProjectProgressAnalysisProps> = ({ proje
   const analysis = useMemo(() => {
     if (!project) return null;
 
-    const stages = project.stages || [];
+    const stages = project?.stages || [];
     
     // Derive project start/end from stages if not present
     let startStr = project.startDate;

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Check, X, Clock, CheckCircle2, XCircle, Send, MessageSquare, ShieldAlert, CheckSquare, Square, Filter, User, Search, Calendar, MapPin, Activity, FileText, ExternalLink, Save, ChevronDown, Edit2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Check, X, Clock, CheckCircle2, XCircle, Send, MessageSquare, ShieldAlert, CheckSquare, Square, Filter, User, Search, Calendar, MapPin, Activity, FileText, ExternalLink, Save, ChevronDown, Edit2, ChevronLeft, ChevronRight, LayoutList, CalendarDays, ChevronUp } from 'lucide-react';
 import { doc, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../firebase';
@@ -13,7 +13,7 @@ const VALIDATION_STATUS = {
   'disputado': { label: 'Disputado', color: 'bg-indigo-100 text-indigo-700 border-indigo-200', icon: MessageSquare },
 };
 
-const SUPER_ADMIN_EMAILS = ["luisedgar.gutierrez17@gmail.com", "luisedgar.gutierrez1@gmail.com"];
+const SUPER_ADMIN_EMAILS = ["luisedgar.gutierrez17@gmail.com", "luisedgar.gutierrez1@gmail.com", "mortovki@gmail.com", "legc.1794@gmail.com", "apoyo.comunitario.ss@fa.unam.mx"];
 
 const toMins = (t: string) => {
   if (!t) return 0;
@@ -21,8 +21,120 @@ const toMins = (t: string) => {
   return h * 60 + m;
 };
 
+// Sub-component for Calendar View
+const CalendarView = ({ records, categories, projects, isDarkMode, onSelectRecord }: any) => {
+  const [currentMonth, setCurrentMonth] = React.useState(new Date());
+
+  const daysInMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+  const startDayOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1).getDay();
+
+  const prevMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+  const nextMonth = () => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+
+  const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+  const dayNames = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+
+  const recordsByDate = React.useMemo(() => {
+    const map = new Map();
+    records.forEach((r: any) => {
+      const dateKey = r.date; // YYYY-MM-DD
+      if (!map.has(dateKey)) map.set(dateKey, []);
+      map.get(dateKey).push(r);
+    });
+    return map;
+  }, [records]);
+
+  const days = [];
+  const totalDays = daysInMonth(currentMonth);
+  const startOffset = startDayOfMonth(currentMonth);
+
+  // Add empty days for the start offset
+  for (let i = 0; i < startOffset; i++) {
+    days.push(null);
+  }
+
+  // Add month days
+  for (let i = 1; i <= totalDays; i++) {
+    const date = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), i);
+    const dateString = date.toISOString().split('T')[0];
+    days.push({ day: i, date: dateString, records: recordsByDate.get(dateString) || [] });
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center mb-6">
+        <h3 className={`text-xl font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+          {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
+        </h3>
+        <div className="flex gap-2">
+          <button onClick={prevMonth} className={`p-2 rounded-xl border transition-all ${isDarkMode ? 'bg-white/5 border-white/10 hover:bg-white/10 text-white' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600 shadow-sm'}`}>
+            <ChevronLeft size={20} />
+          </button>
+          <button onClick={nextMonth} className={`p-2 rounded-xl border transition-all ${isDarkMode ? 'bg-white/5 border-white/10 hover:bg-white/10 text-white' : 'bg-white border-slate-200 hover:bg-slate-50 text-slate-600 shadow-sm'}`}>
+            <ChevronRight size={20} />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-7 gap-px rounded-3xl overflow-hidden border border-transparent shadow-2xl shadow-indigo-500/5 bg-slate-200/50 dark:bg-white/5">
+        {dayNames.map(day => (
+          <div key={day} className={`py-4 text-center text-[10px] font-black uppercase tracking-[0.2em] ${isDarkMode ? 'bg-[#1a1a1a] text-gray-500' : 'bg-slate-50 text-slate-400'}`}>
+            {day}
+          </div>
+        ))}
+        {days.map((day, idx) => {
+          if (!day) return <div key={`empty-${idx}`} className={`${isDarkMode ? 'bg-[#121212]' : 'bg-slate-50/30'}`} />;
+          
+          const isToday = new Date().toISOString().split('T')[0] === day.date;
+          
+          return (
+            <div 
+              key={day.date} 
+              className={`min-h-[120px] p-2 flex flex-col gap-1 transition-all ${isDarkMode ? 'bg-[#161616] hover:bg-[#1c1c1c]' : 'bg-white hover:bg-slate-50/50'}`}
+            >
+              <div className="flex justify-between items-center mb-1">
+                <span className={`text-xs font-black ${isToday ? 'bg-indigo-500 text-white w-6 h-6 flex items-center justify-center rounded-full shadow-lg shadow-indigo-500/30' : (isDarkMode ? 'text-gray-400' : 'text-slate-400')}`}>
+                  {day.day}
+                </span>
+                {day.records.length > 0 && (
+                  <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
+                    {day.records.reduce((acc: number, r: any) => acc + r.hours, 0).toFixed(1)}h
+                  </span>
+                )}
+              </div>
+              
+              <div className="flex flex-col gap-1 overflow-y-auto max-h-[80px] custom-scrollbar">
+                {day.records.map((r: any) => {
+                  const studentInitial = r.studentName ? r.studentName.charAt(0) : '?';
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => onSelectRecord(r)}
+                      className={`text-[9px] font-black text-left p-1.5 rounded-lg border flex items-center gap-2 truncate transition-all active:scale-95 ${
+                        isDarkMode 
+                          ? 'bg-white/5 border-white/5 text-gray-300 hover:bg-white/10' 
+                          : 'bg-slate-50 border-slate-100 text-slate-600 hover:bg-indigo-50 hover:border-indigo-100 hover:text-indigo-700'
+                      }`}
+                    >
+                      <div className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] shrink-0 ${isDarkMode ? 'bg-indigo-500/30 text-indigo-300' : 'bg-indigo-100 text-indigo-700'}`}>
+                        {studentInitial}
+                      </div>
+                      <span className="truncate">{r.hours}h • {r.studentName}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
 export const AdminValidation = ({ students, setStudents, categories, projects, isDarkMode }: any) => {
   const [activeTab, setActiveTab] = React.useState<'pending' | 'disputed'>('pending');
+  const [viewMode, setViewMode] = React.useState<'list' | 'calendar'>('list');
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [rejectingRecords, setRejectingRecords] = React.useState<any[]>([]);
   const [rejectReason, setRejectReason] = React.useState('');
@@ -388,54 +500,90 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
         </div>
       </div>
 
-      <div className={`${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'} p-6 rounded-[2rem] border shadow-sm`}>
-        <div className="flex justify-between items-center mb-6 px-2">
-          <div className="flex items-center gap-4">
-            <button 
-              onClick={() => selectAll(filteredRecords)}
-              className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest transition-colors ${isDarkMode ? 'text-gray-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}
-            >
-              {selectedIds.length === filteredRecords.length && filteredRecords.length > 0 ? <CheckSquare size={18} className="text-indigo-500" /> : <Square size={18} />}
-              {selectedIds.length === filteredRecords.length && filteredRecords.length > 0 ? 'Deseleccionar todo' : 'Seleccionar todo'}
-            </button>
-            {selectedIds.length > 0 && (
-              <span className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>
-                {selectedIds.length} seleccionados
-              </span>
-            )}
-          </div>
+      {/* View Mode & Selection Toggle */}
+      <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mb-6 px-2">
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => selectAll(filteredRecords)}
+            className={`flex items-center gap-2 text-[10px] font-black uppercase tracking-widest transition-colors ${isDarkMode ? 'text-gray-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}
+          >
+            {selectedIds.length === filteredRecords.length && filteredRecords.length > 0 ? <CheckSquare size={18} className="text-indigo-500" /> : <Square size={18} />}
+            {selectedIds.length === filteredRecords.length && filteredRecords.length > 0 ? 'Deseleccionar todo' : 'Seleccionar todo'}
+          </button>
+          
+          <div className={`h-4 w-px ${isDarkMode ? 'bg-white/10' : 'bg-slate-200'}`}></div>
 
-          {selectedIds.length > 0 && (
-            <div className="flex gap-2">
-              <button 
-                onClick={() => {
-                  const toApprove = selectedIds.map(id => {
-                    const [studentId, recordId] = id.split('|');
-                    return { studentId, recordId };
-                  });
-                  handleApproveRecords(toApprove);
-                }}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 flex items-center gap-2"
-              >
-                <Check size={14} /> Aprobar
-              </button>
-              <button 
-                onClick={() => {
-                  const toReject = selectedIds.map(id => {
-                    const [studentId, recordId] = id.split('|');
-                    return currentRecords.find(r => r.studentId === studentId && r.id === recordId);
-                  }).filter(Boolean);
-                  setRejectingRecords(toReject);
-                }}
-                className="px-4 py-2 bg-rose-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 transition-all shadow-lg shadow-rose-600/20 flex items-center gap-2"
-              >
-                <X size={14} /> Rechazar
-              </button>
-            </div>
-          )}
+          <div className={`p-1 rounded-xl flex items-center ${isDarkMode ? 'bg-white/5' : 'bg-slate-100 shadow-inner'}`}>
+            <button 
+              onClick={() => setViewMode('list')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                viewMode === 'list' 
+                  ? (isDarkMode ? 'bg-white/10 text-white' : 'bg-white text-slate-900 shadow-sm') 
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <LayoutList size={14} /> Lista
+            </button>
+            <button 
+              onClick={() => setViewMode('calendar')}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                viewMode === 'calendar' 
+                  ? (isDarkMode ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20') 
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              <CalendarDays size={14} /> Calendario
+            </button>
+          </div>
         </div>
 
-        {filteredRecords.length === 0 ? (
+        {selectedIds.length > 0 && (
+          <div className="flex gap-2 animate-in fade-in slide-in-from-right-2">
+            <span className={`hidden sm:flex items-center mr-2 text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-indigo-400' : 'text-indigo-600'}`}>
+              {selectedIds.length} seleccionados
+            </span>
+            <button 
+              onClick={() => {
+                const toApprove = selectedIds.map(id => {
+                  const [studentId, recordId] = id.split('|');
+                  return { studentId, recordId };
+                });
+                handleApproveRecords(toApprove);
+              }}
+              className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-600/20 flex items-center gap-2"
+            >
+              <Check size={14} /> Aprobar
+            </button>
+            <button 
+              onClick={() => {
+                const toReject = selectedIds.map(id => {
+                  const [studentId, recordId] = id.split('|');
+                  return currentRecords.find(r => r.studentId === studentId && r.id === recordId);
+                }).filter(Boolean);
+                setRejectingRecords(toReject);
+              }}
+              className="px-4 py-2 bg-rose-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-700 transition-all shadow-lg shadow-rose-600/20 flex items-center gap-2"
+            >
+              <X size={14} /> Rechazar
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className={`${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'} p-6 rounded-[2rem] border shadow-sm`}>
+        {viewMode === 'calendar' ? (
+          <CalendarView 
+            records={filteredRecords}
+            categories={categories}
+            projects={projects}
+            isDarkMode={isDarkMode}
+            onSelectRecord={(r: any) => {
+              setViewingRecord(r);
+              setIsEditing(false);
+              setEditFormData({ ...r });
+            }}
+          />
+        ) : filteredRecords.length === 0 ? (
           <div className="text-center py-20">
             <div className={`w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center ${isDarkMode ? 'bg-white/5 text-gray-600' : 'bg-slate-50 text-slate-300'}`}>
               {activeTab === 'pending' ? <Clock size={32} /> : <ShieldAlert size={32} />}

@@ -12,19 +12,17 @@ const Login = () => {
       await signInWithPopup(auth, googleProvider);
       showSuccessToast('Sesión iniciada correctamente');
     } catch (error: any) {
-      console.error("Error signing in with Google", error);
-      
-      // Handle specific Firebase Auth errors
-      if (error.code === 'auth/popup-blocked') {
+      if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+        console.warn('Inicio de sesión cancelado o ventana cerrada por el usuario');
+        showErrorToast('Se cerró la ventana de inicio de sesión. Vuelve a intentarlo y mantén la ventana abierta.');
+      } else if (error.code === 'auth/popup-blocked') {
+        console.warn('Ventana emergente bloqueada por el navegador');
         showErrorToast('El navegador bloqueó la ventana emergente. Por favor, permite las ventanas emergentes para este sitio.');
-      } else if (error.code === 'auth/popup-closed-by-user') {
-        showErrorToast('Se cerró la ventana de inicio de sesión. Por favor, asegúrate de no cerrarla manualmente y que tu navegador no la bloquee.');
-      } else if (error.code === 'auth/cancelled-popup-request') {
-        // This can happen if user clicks twice rapidly
-        console.log("Cancelled popup request");
       } else if (error.code === 'auth/unauthorized-domain') {
+        console.error("Error signing in with Google: unauthorized domain", error);
         showErrorToast('Este dominio no está autorizado para el inicio de sesión con Google. Revisa la configuración en la consola de Firebase.');
       } else {
+        console.error("Error signing in with Google", error);
         showErrorToast(`Error al iniciar sesión: ${error.message || 'Inténtalo de nuevo'}`);
       }
     } finally {

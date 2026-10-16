@@ -82,7 +82,13 @@ export const showLoadingToast = (message: string) => {
   ), { duration: Infinity });
 };
 
-export const showConfirmToast = (message: string, onConfirm: () => void) => {
+export const showConfirmToast = (
+  message: string, 
+  onConfirm: () => void, 
+  confirmText: string = "Confirmar", 
+  cancelText: string = "Cancelar",
+  onCancel?: () => void
+) => {
   const isDark = document.documentElement.classList.contains('dark');
   toast.custom((t) => createPortal(
     <div className={`fixed inset-0 flex items-center justify-center z-[99999] pointer-events-none p-4 transition-all duration-500 ease-out ${t.visible ? 'opacity-100 scale-100' : 'opacity-0 scale-90'}`}>
@@ -96,16 +102,16 @@ export const showConfirmToast = (message: string, onConfirm: () => void) => {
         </div>
         <div className="flex gap-3 w-full">
           <button 
-            onClick={() => toast.dismiss(t.id)} 
+            onClick={() => { toast.dismiss(t.id); if (onCancel) onCancel(); }} 
             className={`flex-1 px-6 py-3 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 shadow-sm ${isDark ? 'bg-white/5 text-gray-400 hover:bg-white/10' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
           >
-            Cancelar
+            {cancelText}
           </button>
           <button 
             onClick={() => { toast.dismiss(t.id); onConfirm(); }} 
             className="flex-1 px-6 py-3 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-indigo-700 transition-all active:scale-95 shadow-lg"
           >
-            Confirmar
+            {confirmText}
           </button>
         </div>
       </div>

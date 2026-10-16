@@ -1,5 +1,8 @@
 {
   "name": "Asistencia Prestadores",
   "description": "Sistema de gestión de proyectos con tableros Kanban, diagramas de Gantt, análisis de ruta crítica y seguimiento de tareas para prestadores de servicio social.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

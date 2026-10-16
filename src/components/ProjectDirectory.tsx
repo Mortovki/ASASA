@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Folder, FileText, ExternalLink, Plus, Edit2, Save, Trash2, X, PlayCircle, ChevronRight, Search, MoreHorizontal, Copy, Download, Pencil, AlertTriangle } from 'lucide-react';
+import { Folder, FileText, ExternalLink, Plus, Edit2, Save, Trash2, X, PlayCircle, ChevronRight, Search, MoreHorizontal, Copy, Download, Pencil, AlertTriangle, Sparkles, Layers, Play } from 'lucide-react';
 import { ConfirmModal } from './ui/ConfirmModal';
 import { db } from '../firebase';
 import { doc, setDoc, collection, getDocs, collectionGroup } from 'firebase/firestore';
@@ -60,7 +60,9 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
   }, [openMenuId]);
 
   const enrolledProjectIds = userProfile?.projectIds || [];
-  const displayProjects = projects.filter((p: any) => {
+  // Filtrar únicamente los documentos donde isDeleted no sea verdadero (excluir isDeleted === true)
+  const displayProjects = (projects || []).filter((p: any) => {
+    if (p.isDeleted === true) return false;
     const matchesSearch = (p.name || '').toLowerCase().includes((searchQuery || '').toLowerCase());
     const isEnrolled = enrolledProjectIds.includes(p.id);
     const isAdminOrCoordinator = userRole === 'admin' || userRole === 'coordinator';
@@ -113,102 +115,33 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
     }
   };
 
+  const [isLoadingExample, setIsLoadingExample] = useState(false);
+
   const loadExampleProject = async () => {
-    if (userRole !== 'admin') {
-      toast.error('Solo administradores pueden cargar el proyecto de ejemplo');
-      return;
-    }
-    
-    const toastId = toast.loading('Cargando proyecto de ejemplo...');
+    setIsLoadingExample(true);
+    const toastId = toast.loading('Cargando proyecto completo de 6 fases...');
     try {
-      // 1. Create Project
-      const newProjectId = `p-cpm-example-${Date.now()}`;
-      const newProject = {
-        id: newProjectId,
-        name: 'Ejemplo CPM (Construcción)',
-        color: '#ef4444',
-        description: 'Proyecto de ejemplo para demostrar la Ruta Crítica (CPM).',
-        createdAt: new Date().toISOString(),
-        createdBy: 'admin'
-      };
+      const { saveCompleteSampleProjectToFirestore, generateCompleteSampleProject } = await import('../utils/sampleProjectGenerator');
+      const sample = generateCompleteSampleProject();
+      const newProjectId = await saveCompleteSampleProjectToFirestore(userRole || 'admin');
       
       // Add to local state
-      setProjects([...projects, newProject]);
-      
-      // Save project to Firestore
-      await setDoc(doc(db, 'projects', newProjectId), newProject);
-      
-      // 2. Create Tasks
-      const now = new Date();
-      // Helper to add days
-      const addDays = (date: Date, days: number) => {
-        const result = new Date(date);
-        result.setDate(result.getDate() + days);
-        return result;
-      };
-      
-      // Define tasks
-      const exampleTasks = [
-        { id: `t1-${Date.now()}`, title: 'A. Preparación del terreno', duration: 3, deps: [], phase: 'Fase 1: Cimientos' },
-        { id: `t2-${Date.now()}`, title: 'B. Compra de materiales', duration: 2, deps: [], phase: 'Fase 1: Cimientos' },
-        { id: `t3-${Date.now()}`, title: 'C. Excavación', duration: 4, deps: [0], phase: 'Fase 1: Cimientos' },
-        { id: `t4-${Date.now()}`, title: 'D. Cimientos', duration: 5, deps: [1, 2], phase: 'Fase 1: Cimientos' },
-        { id: `t5-${Date.now()}`, title: 'E. Estructura', duration: 6, deps: [3], phase: 'Fase 2: Estructura' },
-        { id: `t6-${Date.now()}`, title: 'F. Techo', duration: 3, deps: [4], phase: 'Fase 2: Estructura' },
-        { id: `t7-${Date.now()}`, title: 'G. Plomería', duration: 4, deps: [4], phase: 'Fase 3: Instalaciones' },
-        { id: `t8-${Date.now()}`, title: 'H. Electricidad', duration: 5, deps: [4], phase: 'Fase 3: Instalaciones' },
-        { id: `t9-${Date.now()}`, title: 'I. Acabados', duration: 7, deps: [5, 6, 7], phase: 'Fase 4: Acabados' },
-      ];
-      
-      const taskDocs: any[] = [];
-      const taskMap: any = {};
-      
-      exampleTasks.forEach((t, index) => {
-        let maxEnd = now;
-        const actualDeps = t.deps.map(depIndex => exampleTasks[depIndex].id);
-
-        if (actualDeps.length > 0) {
-          const depEnds = actualDeps.map(dId => taskMap[dId].endDate);
-          maxEnd = new Date(Math.max(...depEnds.map(d => d.getTime())));
-        }
-        
-        const startDate = new Date(maxEnd);
-        const endDate = addDays(startDate, t.duration);
-        
-        const taskDoc = {
-          id: t.id,
-          projectId: newProjectId,
-          title: t.title,
-          description: `Tarea de ejemplo: ${t.title}`,
-          status: 'todo',
-          priority: 3,
-          effort: t.duration * 8,
-          type: 'LEVANTAMIENTO',
-          assignedTo: '',
-          startDate: startDate.toISOString(),
-          endDate: endDate.toISOString(),
-          phase: t.phase,
-          epic: 'Construcción Casa',
-          estimatedSP: t.duration,
-          categoryId: '',
-          createdAt: new Date().toISOString(),
-          createdBy: 'admin',
-          dependencies: actualDeps
-        };
-        
-        taskMap[t.id] = { startDate, endDate };
-        taskDocs.push(taskDoc);
+      setProjects((prev: any[]) => {
+        const filtered = prev.filter(p => p.id !== newProjectId);
+        return [sample.project, ...filtered];
       });
       
-      // Write to Firestore
-      for (const t of taskDocs) {
-        await setDoc(doc(db, `projects/${newProjectId}/tasks/${t.id}`), t);
-      }
+      toast.success('¡Proyecto de 6 fases interdependientes cargado con éxito!', { id: toastId });
       
-      toast.success('Proyecto de ejemplo cargado exitosamente', { id: toastId });
+      // Open workspace directly
+      if (onOpenWorkspace) {
+        onOpenWorkspace(newProjectId);
+      }
     } catch (error) {
       console.error("Error loading example project:", error);
       toast.error('Error al cargar proyecto de ejemplo', { id: toastId });
+    } finally {
+      setIsLoadingExample(false);
     }
   };
 
@@ -230,7 +163,15 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
               className={`w-full pl-12 pr-4 py-3 border rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none text-sm font-bold transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-white placeholder:text-gray-600' : 'bg-white border-slate-200 text-slate-900 shadow-sm'}`}
             />
           </div>
-          {userRole === 'admin' && (
+          <button 
+            onClick={loadExampleProject}
+            disabled={isLoadingExample}
+            className="w-full sm:w-auto bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white px-5 py-3 rounded-2xl flex items-center justify-center gap-2 font-black text-[10px] sm:text-xs uppercase tracking-widest shadow-xl shadow-indigo-600/30 transition-all active:scale-95 whitespace-nowrap disabled:opacity-50"
+            title="Cargar proyecto completo de 6 fases con interdependencias, barras resumen en Gantt y ruta crítica"
+          >
+            <Sparkles size={18} /> <span>Cargar Ejemplo (6 Fases)</span>
+          </button>
+          {(userRole === 'admin' || userRole === 'coordinator') && (
             <button 
               onClick={() => {
                 const newProjectId = `p-${Date.now()}`;
@@ -239,8 +180,10 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
                   name: 'Nuevo Proyecto',
                   color: '#6366f1',
                   description: '',
+                  isDeleted: false,
+                  deletedAt: null,
                   createdAt: new Date().toISOString(),
-                  createdBy: 'admin'
+                  createdBy: userRole
                 };
                 setProjects([...projects, newProject]);
                 setDoc(doc(db, 'projects', newProjectId), newProject);
@@ -254,6 +197,35 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
           )}
         </div>
       </div>
+
+      {/* Banner destacado para visualizar interdependencia de fases */}
+      <div className={`p-4 sm:p-5 rounded-3xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${isDarkMode ? 'bg-gradient-to-r from-indigo-950/40 via-purple-950/20 to-slate-900 border-indigo-500/20' : 'bg-gradient-to-r from-indigo-50 via-purple-50 to-blue-50 border-indigo-200/70 shadow-sm'}`}>
+        <div className="flex items-start sm:items-center gap-3.5">
+          <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/30">
+            <Layers size={24} />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className={`text-sm sm:text-base font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                Proyecto de Ejemplo: Complejo Bioclimático y Regeneración Urbana
+              </h3>
+              <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-500/10 text-indigo-500 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
+                6 Fases Interdependientes • CPM • Gantt
+              </span>
+            </div>
+            <p className={`text-xs mt-1 max-w-3xl ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+              Demuestra la interdependencia total entre fases: desde estudios preliminares hasta certificación y entrega. Incluye barras resumen en Gantt, cálculo de Ruta Crítica (CPM) de etapas y tareas, y holguras.
+            </p>
+          </div>
+        </div>
+        <button
+          onClick={loadExampleProject}
+          disabled={isLoadingExample}
+          className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/20 transition-all active:scale-95 shrink-0 whitespace-nowrap disabled:opacity-50"
+        >
+          <Play size={16} /> Cargar Proyecto Completo
+        </button>
+      </div>
       {displayProjects.length === 0 ? (
         <div className={`text-center py-10 rounded-2xl border ${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100'}`}>
           <p className={`font-medium ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
@@ -266,7 +238,7 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
             <div 
               key={project.id} 
               ref={el => { projectRefs.current[project.id] = el; }}
-              className={`p-5 sm:p-6 rounded-3xl shadow-sm border transition-all duration-300 flex flex-col overflow-hidden h-72 sm:h-80 ${selectedProjectId === project.id ? 'border-indigo-500 ring-4 ring-indigo-500/20' : (isDarkMode ? 'bg-[#1a1a1a] border-white/5 hover:border-white/10' : 'bg-white border-slate-200 hover:border-indigo-200 hover:shadow-md')}`}
+              className={`p-5 sm:p-6 rounded-3xl shadow-sm border transition-all duration-300 flex flex-col justify-between overflow-hidden min-h-[19rem] sm:min-h-[20rem] ${selectedProjectId === project.id ? 'border-indigo-500 ring-4 ring-indigo-500/20' : (isDarkMode ? 'bg-[#1a1a1a] border-white/5 hover:border-white/10' : 'bg-white border-slate-200 hover:border-indigo-200 hover:shadow-md')}`}
             >
               {editingProjectId === project.id ? (
                 <div className="space-y-4 sm:space-y-6 flex flex-col h-full">
@@ -303,14 +275,19 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
                 </div>
               ) : (
                 <>
-                  <div className="flex justify-between items-start gap-4 mb-4 shrink-0">
-                    <div className="flex items-start gap-3 min-w-0">
-                      <div className="w-12 h-12 rounded-2xl shrink-0 mt-1 shadow-sm flex items-center justify-center text-white font-black text-xl" style={{ backgroundColor: project.color || '#6366f1' }}>
+                  <div className="flex justify-between items-start gap-3 sm:gap-4 mb-3 shrink-0">
+                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                      <div className="w-12 h-12 rounded-2xl shrink-0 mt-0.5 shadow-sm flex items-center justify-center text-white font-black text-xl" style={{ backgroundColor: project.color || '#6366f1' }}>
                         {project.name.charAt(0)}
                       </div>
-                      <div className="min-w-0">
-                        <h3 className={`text-lg sm:text-xl font-black break-words leading-tight line-clamp-1 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{project.name}</h3>
-                        <div className="flex items-center gap-2 mt-1">
+                      <div className="min-w-0 flex-1">
+                        <h3 
+                          title={project.name}
+                          className={`text-base sm:text-lg font-black break-words leading-snug ${isDarkMode ? 'text-white' : 'text-slate-900'}`}
+                        >
+                          {project.name}
+                        </h3>
+                        <div className="flex items-center flex-wrap gap-2 mt-1">
                           <span className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
                             {projectTasks[project.id]?.filter(t => t.status !== 'done' && !t.deletedAt).length || 0} tareas pendientes
                           </span>
@@ -348,7 +325,13 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
                             <button 
                               onClick={(e) => { 
                                 e.stopPropagation();
-                                const newProject = { ...project, id: `p-${Date.now()}`, name: `${project.name} (Copia)` };
+                                const newProject = { 
+                                  ...project, 
+                                  id: `p-${Date.now()}`, 
+                                  name: `${project.name} (Copia)`,
+                                  isDeleted: false,
+                                  deletedAt: null
+                                };
                                 setProjects([...projects, newProject]);
                                 setOpenMenuId(null); 
                               }} 

@@ -109,7 +109,7 @@ export const StageNode: React.FC<StageNodeProps> = ({
       </motion.button>
 
       {/* Información de la Etapa */}
-      <div className="mt-4 text-center px-4">
+      <div className="mt-4 text-center px-4 w-full">
         <h4 className="text-sm font-bold text-slate-800 uppercase tracking-tight line-clamp-1">
           {stage.name}
         </h4>
@@ -123,6 +123,17 @@ export const StageNode: React.FC<StageNodeProps> = ({
           <span>-</span>
           <span>{format(new Date(stage.endDate), 'dd MMM', { locale: es })}</span>
         </div>
+
+        {/* Descripción de la Etapa (Alta visibilidad y contraste) */}
+        {stage.description ? (
+          <div className="mt-2.5 p-2 bg-slate-50/90 border border-slate-200/80 rounded-xl text-left">
+            <p className="text-[11px] font-semibold text-slate-700 leading-snug line-clamp-3">
+              {stage.description}
+            </p>
+          </div>
+        ) : (
+          <p className="mt-1 text-[10px] italic text-slate-400">Sin descripción</p>
+        )}
 
         {/* Barra de Progreso Lineal */}
         <div className="mt-3 w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
@@ -145,10 +156,10 @@ export const StageNode: React.FC<StageNodeProps> = ({
         </div>
       </div>
 
-      {/* Tooltip de Predecesoras (si existen) */}
-      {stage.predecessors.length > 0 && (
-        <div className="absolute -top-8 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-800 text-white text-[9px] px-2 py-1 rounded whitespace-nowrap">
-          Depende de {stage.predecessors.length} etapa(s)
+      {/* Tooltip o Badge de Predecesoras */}
+      {stage.predecessors && stage.predecessors.length > 0 && (
+        <div className="mt-2 flex items-center gap-1 text-[9px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+          <span>Predecesoras: {stage.predecessors.length}</span>
         </div>
       )}
     </div>

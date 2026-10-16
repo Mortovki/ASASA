@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart, Bar, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, BarChart, Bar } from 'recharts';
+import { ChartContainer } from './ChartContainer';
 import { Target, CheckCircle2, AlertTriangle, Clock, Calendar, LayoutGrid, BarChart3, PieChart as PieChartIcon, Activity, Users, MessageSquare, ChevronRight, Trash2, X } from 'lucide-react';
 import { formatName, formatFullName } from '../utils/formatters';
 import { db } from '../firebase';
@@ -161,8 +162,8 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
     const stage = project?.stages?.find((s: any) => s.id === selectedStageId);
     if (!stage || selectedStageId === 'all') return [];
 
-    const start = new Date(stage.startDate);
-    const end = new Date(stage.endDate);
+    const start = new Date(`${stage.startDate?.split('T')[0]}T00:00:00`);
+    const end = new Date(`${stage.endDate?.split('T')[0]}T00:00:00`);
     const diffTime = Math.abs(end.getTime() - start.getTime());
     const totalDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
@@ -341,8 +342,8 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
             </div>
             <div className={`text-xs font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Distribución</div>
           </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+          <div className="h-64 flex flex-col">
+            <ChartContainer height={256} minHeight={240} isDarkMode={isDarkMode}>
               <PieChart>
                 <Pie
                   data={statusData}
@@ -361,13 +362,15 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
                   contentStyle={{ 
                     backgroundColor: isDarkMode ? '#1a1a1a' : '#fff',
                     borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
-                    color: isDarkMode ? '#fff' : '#000'
+                    borderRadius: '12px',
+                    color: isDarkMode ? '#fff' : '#000',
+                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
                   }}
                   itemStyle={{ color: isDarkMode ? '#fff' : '#000' }}
                 />
                 <Legend />
               </PieChart>
-            </ResponsiveContainer>
+            </ChartContainer>
           </div>
         </div>
 
@@ -380,8 +383,8 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
             </div>
             <div className={`text-xs font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Esfuerzo Activo</div>
           </div>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+          <div className="h-64 flex flex-col">
+            <ChartContainer height={256} minHeight={240} isDarkMode={isDarkMode}>
               <BarChart data={userLoadData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={isDarkMode ? 'rgba(255,255,255,0.05)' : '#e2e8f0'} />
                 <XAxis type="number" tick={{ fill: isDarkMode ? '#64748b' : '#94a3b8' }} />
@@ -390,13 +393,15 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
                   contentStyle={{ 
                     backgroundColor: isDarkMode ? '#1a1a1a' : '#fff',
                     borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
-                    color: isDarkMode ? '#fff' : '#000'
+                    borderRadius: '12px',
+                    color: isDarkMode ? '#fff' : '#000',
+                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
                   }}
                   itemStyle={{ color: isDarkMode ? '#fff' : '#000' }}
                 />
                 <Bar dataKey="esfuerzo" fill="#6366f1" radius={[0, 4, 4, 0]} />
               </BarChart>
-            </ResponsiveContainer>
+            </ChartContainer>
           </div>
         </div>
       </div>
@@ -413,9 +418,9 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
             {selectedStageId === 'all' ? 'Proyecto Completo' : 'Etapa Seleccionada'}
           </div>
         </div>
-        <div className="h-72">
+        <div className="h-72 flex flex-col">
           {burndownData.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+            <ChartContainer height={288} minHeight={260} isDarkMode={isDarkMode}>
               <LineChart data={burndownData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? 'rgba(255,255,255,0.05)' : '#e2e8f0'} />
                 <XAxis dataKey="day" tick={{ fontSize: 10, fontWeight: 'bold', fill: isDarkMode ? '#64748b' : '#94a3b8' }} />
@@ -424,7 +429,9 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
                   contentStyle={{ 
                     backgroundColor: isDarkMode ? '#1a1a1a' : '#fff',
                     borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
-                    color: isDarkMode ? '#fff' : '#000'
+                    borderRadius: '12px',
+                    color: isDarkMode ? '#fff' : '#000',
+                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
                   }}
                   itemStyle={{ color: isDarkMode ? '#fff' : '#000' }}
                 />
@@ -432,7 +439,7 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
                 <Line type="monotone" dataKey="ideal" stroke="#94a3b8" strokeDasharray="5 5" name="Ideal" dot={false} />
                 <Line type="monotone" dataKey="actual" stroke="#3b82f6" strokeWidth={3} name="Restante" dot={{ r: 4 }} />
               </LineChart>
-            </ResponsiveContainer>
+            </ChartContainer>
           ) : (
             <div className={`flex flex-col items-center justify-center h-full font-medium gap-2 ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>
               <Clock size={48} className="opacity-20" />

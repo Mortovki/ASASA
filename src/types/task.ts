@@ -31,6 +31,7 @@ export interface Task {
   y?: number;
   color?: string;
   stageId?: string | null;
+  sprintId?: string | null;
   epic?: string;
   isMilestone?: boolean;
   estimatedSP?: number;

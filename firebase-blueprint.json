@@ -67,7 +67,9 @@
         },
         "currentStageIndex": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" },
-        "createdBy": { "type": "string" }
+        "createdBy": { "type": "string" },
+        "isDeleted": { "type": "boolean", "default": false, "description": "Indica si el proyecto ha sido eliminado de forma suave" },
+        "deletedAt": { "type": "string", "format": "date-time", "description": "Fecha y hora en que se eliminó el proyecto" }
       },
       "required": ["id", "name"]
     },
@@ -146,6 +148,7 @@
         "endDate": { "type": "string", "format": "date-time" },
         "phase": { "type": "string" },
         "stageId": { "type": "string" },
+        "sprintId": { "type": "string", "description": "ID del Sprint o iteración al que pertenece la tarea" },
         "epic": { "type": "string" },
         "isMilestone": { "type": "boolean", "description": "Si la tarea es un hito" },
         "estimatedSP": { "type": "number" },

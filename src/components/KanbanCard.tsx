@@ -26,6 +26,10 @@ interface KanbanCardProps {
   initials: string; // Not used as primary but kept for compatibility
   assignedStudent: any; // Not used as primary but kept for compatibility
   students?: any[]; // Added to find all assigned students
+  stages?: any[]; // Project stages for badge display
+  sprints?: any[]; // Project sprints for badge display
+  onFilterByStage?: (stageId: string) => void;
+  onFilterBySprint?: (sprintId: string) => void;
   onSelect: (taskId: string) => void;
   onDelete: (taskId: string) => void;
   onApprove: (task: any) => void;
@@ -85,7 +89,11 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
   onDragEnd,
   onMoveTask,
   isDarkMode,
-  students = []
+  students = [],
+  stages = [],
+  sprints = [],
+  onFilterByStage,
+  onFilterBySprint
 }) => {
   const isPending = task.status === 'pending_approval';
   const isCompact = layout === 'mobile';
@@ -93,6 +101,8 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
 
   const assignedUids = task.assignedUsers || (task.assignedTo ? [task.assignedTo] : []);
   const assignedList = assignedUids.map((uid: string) => students.find(s => s.id === uid)).filter(Boolean);
+  const taskStage = stages.find((s: any) => s.id === task.stageId || s.name === task.phase);
+  const taskSprint = sprints.find((s: any) => s.id === task.sprintId);
 
   const renderPriority = (priority: number) => {
     if (isCompact) return <PriorityDot priority={priority} />;
@@ -155,12 +165,62 @@ const KanbanCard: React.FC<KanbanCardProps> = ({
         {/* Header: Badges & Priority */}
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5 overflow-hidden">
+            {taskStage && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onFilterByStage?.(taskStage.id);
+                }}
+                className={`inline-flex items-center gap-1 text-[9px] font-black uppercase px-2 py-0.5 rounded-md border truncate max-w-[130px] transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-xs`}
+                style={{
+                  backgroundColor: `${taskStage.color || '#3b82f6'}15`,
+                  color: taskStage.color || '#3b82f6',
+                  borderColor: `${taskStage.color || '#3b82f6'}35`
+                }}
+                title={`Etapa: ${taskStage.name}. Clic para filtrar.`}
+              >
+                <span 
+                  className="w-1.5 h-1.5 rounded-full shrink-0" 
+                  style={{ backgroundColor: taskStage.color || '#3b82f6' }} 
+                />
+                <span className="truncate">{taskStage.name}</span>
+              </button>
+            )}
+            {taskSprint && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onFilterBySprint?.(taskSprint.id);
+                }}
+                className={`inline-flex items-center gap-1 text-[9px] font-black uppercase px-2 py-0.5 rounded-md border truncate max-w-[125px] transition-all hover:scale-105 active:scale-95 cursor-pointer shadow-xs ${
+                  isDarkMode 
+                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25' 
+                    : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                }`}
+                title={`Sprint: ${taskSprint.name}. Clic para filtrar.`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                <span className="truncate">{taskSprint.name}</span>
+              </button>
+            )}
             <span 
               className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-md truncate max-w-[90px] shadow-xs border ${!task.color ? (isDarkMode ? (darkTypeBadgeColors[task.type] || 'bg-white/5 text-gray-400 border-white/5') : (typeBadgeColors[task.type] || 'bg-slate-100 text-slate-700 border-slate-200')) : ''}`}
               style={task.color ? { backgroundColor: `${task.color}15`, color: task.color, borderColor: `${task.color}30` } : {}}
             >
               {typeLabels[task.type] || task.type}
             </span>
+            {task.epic && (
+              <span 
+                className={`text-[9px] font-black px-1.5 py-0.5 rounded-md truncate max-w-[80px] border ${
+                  isDarkMode ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/20' : 'bg-indigo-50 text-indigo-700 border-indigo-100'
+                }`}
+                title={task.epic}
+              >
+                {task.epic}
+              </span>
+            )}
             {task.isMilestone && (
               <span className={`flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded-md shrink-0 border ${isDarkMode ? 'text-amber-400 bg-amber-400/10 border-amber-400/20' : 'text-amber-600 bg-amber-50 border-amber-100'}`} title="Hito">
                 <MapPin size={10} /> HITO

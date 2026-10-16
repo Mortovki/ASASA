@@ -128,9 +128,33 @@ export function Sidebar({
 
         {/* Categorías Section */}
         <section className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Filter size={12} className={isDarkMode ? 'text-gray-500' : 'text-slate-400'} />
-            <h3 className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Categorías</h3>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Filter size={12} className={isDarkMode ? 'text-gray-500' : 'text-slate-400'} />
+              <h3 className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Categorías</h3>
+            </div>
+            <div className="flex gap-3">
+              <button 
+                onClick={() => {
+                  SKILL_CATEGORIES.forEach(cat => {
+                    if (!activeCategories.includes(cat.id as SkillCategory)) {
+                      toggleCategory(cat.id as SkillCategory);
+                    }
+                  });
+                }}
+                className="text-[10px] text-indigo-500 hover:text-indigo-600 font-black uppercase tracking-widest transition-colors"
+              >
+                Todas
+              </button>
+              <button 
+                onClick={() => {
+                  activeCategories.forEach(catId => toggleCategory(catId));
+                }}
+                className="text-[10px] text-gray-400 hover:text-gray-500 font-black uppercase tracking-widest transition-colors"
+              >
+                Ninguna
+              </button>
+            </div>
           </div>
           <div className="space-y-2">
             {SKILL_CATEGORIES.map(cat => {

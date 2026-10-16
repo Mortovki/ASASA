@@ -1,9 +1,12 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Star, ChevronDown, ChevronRight, Filter, User, AlertTriangle, Plus, Send, Loader2, MapPin } from 'lucide-react';
+import { Star, ChevronDown, ChevronRight, Filter, User, AlertTriangle, Plus, Send, Loader2, MapPin, Search, X, CheckSquare, Square, MinusSquare, Zap } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
 import toast from 'react-hot-toast';
 import TaskSidePanel from './TaskSidePanel';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts';
+import { ChartContainer } from './ChartContainer';
+import { BulkActionsDock } from './BulkActionsDock';
+import { ConfirmModal } from './ui/ConfirmModal';
 import { StatusBadge } from './ui/StatusBadge';
 import { computeCriticalPath } from '../utils/criticalPath';
 import { Task } from '../types/criticalPath';
@@ -18,6 +21,8 @@ const SprintTable = ({
   userRole, 
   currentUser, 
   students,
+  sprints = [],
+  onOpenSprintConfig,
   updateTaskStatus,
   updateTaskField,
   updateTaskFields,
@@ -30,6 +35,11 @@ const SprintTable = ({
   const [expandedPhases, setExpandedPhases] = useState<Record<string, boolean>>({});
   const [filterUser, setFilterUser] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [filterPriority, setFilterPriority] = useState('');
+  const [filterStage, setFilterStage] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleteModalOpen, setIsBulkDeleteModalOpen] = useState(false);
   const [newTasks, setNewTasks] = useState<Record<string, { title: string, status: KanbanColumnId, isSubmitting: boolean }>>({});
   const { isMobile } = useBreakpoint();
 
@@ -70,7 +80,7 @@ const SprintTable = ({
     setNewTasks(prev => ({ ...prev, [groupKey]: { ...prev[groupKey], isSubmitting: true } }));
 
     try {
-      const stage = isStage ? project.stages.find((s: any) => s.id === groupKey) : null;
+      const stage = isStage ? project?.stages?.find((s: any) => s.id === groupKey) : null;
       
       const isUser = userRole === 'user';
       const task = {
@@ -113,19 +123,151 @@ const SprintTable = ({
       }
       
       if (filterStatus && t.status !== filterStatus) return false;
+
+      if (filterPriority && t.priority !== Number(filterPriority)) return false;
+
+      if (filterStage) {
+        const matchesStageId = t.stageId === filterStage;
+        const stageObj = project?.stages?.find((s: any) => s.id === filterStage);
+        const matchesStageName = stageObj && (t.phase === stageObj.name || t.phase === stageObj.id);
+        if (!matchesStageId && !matchesStageName) return false;
+      }
+
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const titleMatch = (t.title || '').toLowerCase().includes(q);
+        const epicMatch = (t.epic || '').toLowerCase().includes(q);
+        const descMatch = (t.description || '').toLowerCase().includes(q);
+        const assignedStudent = students.find((s: any) => s.id === (t.assignedUsers?.[0] || t.assignedTo));
+        const studentMatch = assignedStudent ? `${assignedStudent.firstName} ${assignedStudent.lastNamePaterno}`.toLowerCase().includes(q) : false;
+        if (!titleMatch && !epicMatch && !descMatch && !studentMatch) return false;
+      }
+
       return true;
     });
-  }, [cpmTasks, filterUser, filterStatus]);
+  }, [cpmTasks, filterUser, filterStatus, filterPriority, filterStage, searchQuery, students, project?.stages]);
 
   const groupedTasks = useMemo(() => {
     const groups: Record<string, any[]> = {};
     filteredTasks.forEach((t: any) => {
-      const groupKey = t.stageId || t.phase || 'Sin Sprint';
+      const sprint = sprints.find((s: any) => s.id === t.sprintId);
+      const stage = project?.stages?.find((s: any) => s.id === t.stageId);
+      const groupKey = sprint ? sprint.name : (stage ? stage.name : (t.phase || 'Sin Sprint (Backlog)'));
       if (!groups[groupKey]) groups[groupKey] = [];
       groups[groupKey].push(t);
     });
     return groups;
-  }, [filteredTasks]);
+  }, [filteredTasks, sprints, project?.stages]);
+
+  const handleToggleSelectTask = (taskId: string, e?: any) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllVisible = () => {
+    if (selectedTaskIds.size === filteredTasks.length && filteredTasks.length > 0) {
+      setSelectedTaskIds(new Set());
+    } else {
+      setSelectedTaskIds(new Set(filteredTasks.map((t: any) => t.id)));
+    }
+  };
+
+  const handleTogglePhaseSelection = (phaseTasks: any[], e?: any) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    const phaseIds = phaseTasks.map((t: any) => t.id);
+    const allSelected = phaseIds.length > 0 && phaseIds.every(id => selectedTaskIds.has(id));
+    setSelectedTaskIds(prev => {
+      const next = new Set(prev);
+      if (allSelected) {
+        phaseIds.forEach(id => next.delete(id));
+      } else {
+        phaseIds.forEach(id => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const handleBulkUpdateStatus = async (newStatus: string) => {
+    if (!permissions.canEditTask) {
+      toast.error('No tienes permisos para editar tareas');
+      return;
+    }
+    const ids = Array.from(selectedTaskIds);
+    try {
+      await Promise.all(ids.map(id => {
+        const task = tasks.find((t: any) => t.id === id);
+        return updateTaskStatus(id, newStatus, task?.status);
+      }));
+      toast.success(`${ids.length} tareas actualizadas a ${newStatus}`);
+      setSelectedTaskIds(new Set());
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al actualizar tareas en lote');
+    }
+  };
+
+  const handleBulkUpdateAssignee = async (assigneeId: string) => {
+    if (!permissions.canEditTask) {
+      toast.error('No tienes permisos para reasignar tareas');
+      return;
+    }
+    const ids = Array.from(selectedTaskIds);
+    try {
+      await Promise.all(ids.map(id => {
+        const task = tasks.find((t: any) => t.id === id);
+        return updateTaskField(id, 'assignedTo', assigneeId, task?.assignedTo);
+      }));
+      toast.success(`${ids.length} tareas reasignadas`);
+      setSelectedTaskIds(new Set());
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al reasignar tareas');
+    }
+  };
+
+  const handleBulkUpdatePriority = async (newPriority: number) => {
+    if (!permissions.canEditTask) {
+      toast.error('No tienes permisos para cambiar prioridad');
+      return;
+    }
+    const ids = Array.from(selectedTaskIds);
+    try {
+      await Promise.all(ids.map(id => {
+        const task = tasks.find((t: any) => t.id === id);
+        return updateTaskField(id, 'priority', newPriority, task?.priority || 3);
+      }));
+      toast.success(`Prioridad actualizada para ${ids.length} tareas`);
+      setSelectedTaskIds(new Set());
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al actualizar prioridades');
+    }
+  };
+
+  const handleBulkDeleteConfirm = async () => {
+    if (!permissions.canDeleteTask) {
+      toast.error('No tienes permisos para eliminar tareas');
+      return;
+    }
+    const ids = Array.from(selectedTaskIds);
+    try {
+      await Promise.all(ids.map(id => deleteTask(id)));
+      toast.success(`${ids.length} tareas eliminadas`);
+      setSelectedTaskIds(new Set());
+      setIsBulkDeleteModalOpen(false);
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al eliminar tareas');
+    }
+  };
 
   const renderStars = (taskId: string, priority: number) => {
     return (
@@ -176,15 +318,24 @@ const SprintTable = ({
         style={task.color ? { borderLeftColor: task.color } : {}}
       >
         <div className="flex justify-between items-start mb-2">
-          <div className="flex gap-1.5 flex-wrap">
-            <StatusBadge status={task.status} size="sm" />
-            {task.isMilestone && (
-              <span className={`flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-md ${
-                isDarkMode ? 'bg-amber-400/10 text-amber-400' : 'bg-amber-50 text-amber-600'
-              }`} title="Hito">
-                <MapPin size={10} /> HITO
-              </span>
-            )}
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={selectedTaskIds.has(task.id)}
+              onChange={() => handleToggleSelectTask(task.id)}
+              onClick={(e) => e.stopPropagation()}
+              className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4"
+            />
+            <div className="flex gap-1.5 flex-wrap">
+              <StatusBadge status={task.status} size="sm" />
+              {task.isMilestone && (
+                <span className={`flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-md ${
+                  isDarkMode ? 'bg-amber-400/10 text-amber-400' : 'bg-amber-50 text-amber-600'
+                }`} title="Hito">
+                  <MapPin size={10} /> HITO
+                </span>
+              )}
+            </div>
           </div>
           {renderStars(task.id, task.priority || 3)}
         </div>
@@ -198,7 +349,31 @@ const SprintTable = ({
             </span>
           )}
         </div>
-        <div className={`text-xs mb-3 ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>{task.epic || 'Sin Epic'}</div>
+        {(() => {
+          const taskStage = project?.stages?.find((s: any) => s.id === task.stageId || s.name === task.phase);
+          return (
+            <div className="flex items-center gap-1.5 flex-wrap mb-3 text-xs">
+              {taskStage && (
+                <span 
+                  className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-md border"
+                  style={{
+                    backgroundColor: `${taskStage.color || '#3b82f6'}15`,
+                    color: taskStage.color || '#3b82f6',
+                    borderColor: `${taskStage.color || '#3b82f6'}30`
+                  }}
+                >
+                  <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: taskStage.color || '#3b82f6' }} />
+                  {taskStage.name}
+                </span>
+              )}
+              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                isDarkMode ? 'bg-white/5 text-gray-400' : 'bg-slate-100 text-slate-600'
+              }`}>
+                {task.epic || 'Sprint general'}
+              </span>
+            </div>
+          );
+        })()}
         
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">
@@ -212,8 +387,8 @@ const SprintTable = ({
             </span>
           </div>
           <div className="flex gap-2 text-[10px] font-black uppercase tracking-widest">
-            <span className={`px-2 py-1 rounded-md ${isDarkMode ? 'bg-white/5 text-gray-500' : 'bg-slate-100 text-slate-500'}`}>Esfuerzo: {task.effort || 0}</span>
-            <span className={`px-2 py-1 rounded-md ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>SP: {task.estimatedSP || 0}</span>
+            <span className={`px-2 py-1 rounded-md tabular-nums ${isDarkMode ? 'bg-white/5 text-gray-500' : 'bg-slate-100 text-slate-500'}`}>Esfuerzo: {task.effort || 0}</span>
+            <span className={`px-2 py-1 rounded-md tabular-nums ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>SP: {task.estimatedSP || 0}</span>
           </div>
         </div>
       </div>
@@ -224,20 +399,99 @@ const SprintTable = ({
     <div className={`h-full flex flex-col rounded-2xl shadow-sm border overflow-hidden transition-colors ${
       isDarkMode ? 'bg-[#121212] border-white/10' : 'bg-white border-slate-200'
     }`}>
-      {/* Filters */}
-      <div className={`p-4 border-b flex flex-col sm:flex-row gap-4 items-start sm:items-center transition-colors ${
+      {/* Search and Multi-Column Filters */}
+      <div className={`p-4 border-b flex flex-col gap-3 transition-colors ${
         isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-slate-50 border-slate-200'
       }`}>
-        <div className={`flex items-center gap-2 font-bold text-xs uppercase tracking-widest ${
-          isDarkMode ? 'text-gray-500' : 'text-slate-500'
-        }`}>
-          <Filter size={16} /> Filtros:
+        <div className="flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+          {/* Global Search Bar */}
+          <div className="relative flex-1 min-w-[240px]">
+            <Search size={16} className={`absolute left-3 top-1/2 -translate-y-1/2 ${
+              isDarkMode ? 'text-slate-500' : 'text-slate-400'
+            }`} />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Buscar por título, epic o estudiante..."
+              className={`w-full pl-9 pr-9 py-2 rounded-xl text-xs font-semibold outline-none focus:ring-2 transition-all ${
+                isDarkMode
+                  ? 'bg-white/5 border border-white/10 text-white focus:ring-white/20 placeholder:text-gray-500'
+                  : 'bg-white border border-slate-200 text-slate-900 focus:ring-indigo-500 placeholder:text-slate-400'
+              }`}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className={`absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md transition-colors ${
+                  isDarkMode ? 'text-gray-400 hover:text-white' : 'text-slate-400 hover:text-slate-700'
+                }`}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* Quick Stats & Active Filter Count */}
+          <div className="flex items-center gap-2 self-end md:self-auto text-xs font-bold">
+            <span className={`tabular-nums ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+              {filteredTasks.length} de {cpmTasks.length} tareas
+            </span>
+            {(searchQuery || filterUser || filterStatus || filterPriority || filterStage) && (
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  setFilterUser('');
+                  setFilterStatus('');
+                  setFilterPriority('');
+                  setFilterStage('');
+                }}
+                className="px-2 py-1 rounded-lg text-[11px] font-bold text-red-500 hover:bg-red-500/10 transition-colors flex items-center gap-1 cursor-pointer"
+                title="Limpiar todos los filtros"
+              >
+                <X size={12} />
+                <span>Limpiar</span>
+              </button>
+            )}
+          </div>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+
+        {/* Multi-Criteria Selects */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className={`flex items-center gap-1.5 font-bold text-[11px] uppercase tracking-wider ${
+            isDarkMode ? 'text-gray-500' : 'text-slate-500'
+          }`}>
+            <Filter size={13} />
+            <span>Filtrar:</span>
+          </div>
+
+          {/* Etapa */}
+          {project?.stages && project.stages.length > 0 && (
+            <select
+              value={filterStage}
+              onChange={e => setFilterStage(e.target.value)}
+              className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold outline-none focus:ring-2 transition-all cursor-pointer ${
+                filterStage ? (isDarkMode ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/40' : 'bg-indigo-50 text-indigo-700 border border-indigo-200') : ''
+              } ${
+                isDarkMode 
+                  ? 'bg-white/5 border border-white/10 text-white focus:ring-white/20' 
+                  : 'bg-white border border-slate-200 text-slate-900 focus:ring-indigo-500'
+              }`}
+            >
+              <option value="" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Todas las Etapas</option>
+              {project.stages.map((st: any) => (
+                <option key={st.id} value={st.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>
+                  {st.name}
+                </option>
+              ))}
+            </select>
+          )}
+
+          {/* Responsable */}
           <select 
             value={filterUser} 
             onChange={e => setFilterUser(e.target.value)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 transition-all w-full sm:w-auto ${
+            className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold outline-none focus:ring-2 transition-all ${
               isDarkMode 
                 ? 'bg-white/5 border border-white/10 text-white focus:ring-white/20' 
                 : 'bg-white border border-slate-200 text-slate-900 focus:ring-indigo-500'
@@ -250,10 +504,12 @@ const SprintTable = ({
               </option>
             ))}
           </select>
+
+          {/* Estado */}
           <select 
             value={filterStatus} 
             onChange={e => setFilterStatus(e.target.value)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-semibold outline-none focus:ring-2 transition-all w-full sm:w-auto ${
+            className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold outline-none focus:ring-2 transition-all ${
               isDarkMode 
                 ? 'bg-white/5 border border-white/10 text-white focus:ring-white/20' 
                 : 'bg-white border border-slate-200 text-slate-900 focus:ring-indigo-500'
@@ -266,6 +522,60 @@ const SprintTable = ({
               </option>
             ))}
           </select>
+
+          {/* Prioridad */}
+          <select 
+            value={filterPriority} 
+            onChange={e => setFilterPriority(e.target.value)}
+            className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold outline-none focus:ring-2 transition-all ${
+              isDarkMode 
+                ? 'bg-white/5 border border-white/10 text-white focus:ring-white/20' 
+                : 'bg-white border border-slate-200 text-slate-900 focus:ring-indigo-500'
+            }`}
+          >
+            <option value="" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>Toda Prioridad</option>
+            <option value="5" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>5 Estrellas (Urgente)</option>
+            <option value="4" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>4 Estrellas (Alta)</option>
+            <option value="3" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>3 Estrellas (Media)</option>
+            <option value="2" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>2 Estrellas (Baja)</option>
+            <option value="1" className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>1 Estrella (Mínima)</option>
+          </select>
+
+          {/* Configurar Sprints Action */}
+          {onOpenSprintConfig && (
+            <button
+              type="button"
+              onClick={onOpenSprintConfig}
+              className={`ml-auto px-3 py-1.5 rounded-lg text-xs font-bold transition-all border flex items-center gap-1.5 cursor-pointer shadow-xs ${
+                isDarkMode 
+                  ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20' 
+                  : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+              }`}
+              title="Configurar Sprints e Iteraciones"
+            >
+              <Zap size={13} className="text-amber-500 fill-amber-500" />
+              <span>Configurar Sprints</span>
+            </button>
+          )}
+
+          {/* Selection indicator if any items selected */}
+          {selectedTaskIds.size > 0 && (
+            <div className={`${!onOpenSprintConfig ? 'ml-auto' : ''} flex items-center gap-2`}>
+              <span className={`text-xs font-bold tabular-nums px-2 py-1 rounded-lg ${
+                isDarkMode ? 'bg-indigo-500/20 text-indigo-300' : 'bg-indigo-50 text-indigo-700'
+              }`}>
+                {selectedTaskIds.size} seleccionadas
+              </span>
+              <button
+                onClick={handleSelectAllVisible}
+                className={`text-xs font-semibold underline transition-colors ${
+                  isDarkMode ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-indigo-600'
+                }`}
+              >
+                {selectedTaskIds.size === filteredTasks.length ? 'Deseleccionar todas' : 'Seleccionar visibles'}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
@@ -308,10 +618,10 @@ const SprintTable = ({
 
                   {isExpanded && (
                     <div className={`pl-2 border-l-2 space-y-3 ${isDarkMode ? 'border-white/10' : 'border-indigo-100'}`}>
-                      <div className={`p-3 rounded-xl border shadow-sm h-40 transition-colors ${
+                      <div className={`p-3 rounded-xl border shadow-sm h-44 flex flex-col transition-colors ${
                         isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'
                       }`}>
-                        <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                        <ChartContainer height={155} minHeight={140} isDarkMode={isDarkMode}>
                           <LineChart data={generateBurndownData(phaseTasks)} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? 'rgba(255,255,255,0.05)' : '#e2e8f0'} />
                             <XAxis dataKey="day" tick={{fontSize: 10, fill: isDarkMode ? '#666' : '#94a3b8'}} />
@@ -322,59 +632,9 @@ const SprintTable = ({
                             <Line type="monotone" dataKey="ideal" stroke={isDarkMode ? '#444' : '#94a3b8'} strokeDasharray="5 5" dot={false} />
                             <Line type="monotone" dataKey="actual" stroke="#6366f1" strokeWidth={2} />
                           </LineChart>
-                        </ResponsiveContainer>
+                        </ChartContainer>
                       </div>
-                      {phaseTasks.map(task => {
-                        const assignedStudent = students.find((s: any) => s.id === task.assignedTo);
-                        const statusConfig = KANBAN_COLUMNS.find(c => c.id === task.status);
-                        const textColor = statusConfig?.color.replace('bg-', 'text-') || (isDarkMode ? 'text-white' : 'text-slate-800');
-                        const borderColor = statusConfig?.color.replace('bg-', 'border-') || (isDarkMode ? 'border-white/10' : 'border-slate-200');
-
-                        return (
-                          <div 
-                            key={task.id} 
-                            onClick={() => setSelectedTaskId(task.id)}
-                            className={`p-4 rounded-xl shadow-sm border-l-4 mb-3 cursor-pointer active:scale-95 transition-all ${
-                              task.isCritical ? 'border-red-500' : borderColor
-                            } border-y border-r ${
-                              isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'
-                            }`}
-                          >
-                            <div className="flex justify-between items-start mb-2">
-                              <StatusBadge status={task.status} size="sm" />
-                              {renderStars(task.id, task.priority || 3)}
-                            </div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <h4 className={`font-bold text-sm ${textColor}`}>{task.title}</h4>
-                              {task.isCritical && (
-                                <span className={`flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded-md ${
-                                  isDarkMode ? 'bg-red-500/20 text-red-400' : 'bg-red-50 text-red-600'
-                                }`} title="Ruta Crítica">
-                                  <AlertTriangle size={10} /> CPM
-                                </span>
-                              )}
-                            </div>
-                            <div className={`text-xs mb-3 ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>{task.epic || 'Sin Epic'}</div>
-                            
-                            <div className="flex justify-between items-center">
-                              <div className="flex items-center gap-2">
-                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black ${
-                                  isDarkMode ? 'bg-white/10 text-white' : 'bg-slate-200 text-slate-600'
-                                }`}>
-                                  {assignedStudent ? `${assignedStudent.firstName.charAt(0)}${assignedStudent.lastNamePaterno.charAt(0)}` : '?'}
-                                </div>
-                                <span className={`text-xs font-semibold ${isDarkMode ? 'text-gray-400' : 'text-slate-600'}`}>
-                                  {assignedStudent ? formatName(assignedStudent.firstName, assignedStudent.lastNamePaterno) : 'Sin asignar'}
-                                </span>
-                              </div>
-                              <div className="flex gap-2 text-[10px] font-black uppercase tracking-widest">
-                                <span className={`px-2 py-1 rounded-md ${isDarkMode ? 'bg-white/5 text-gray-500' : 'bg-slate-100 text-slate-500'}`}>Esfuerzo: {task.effort || 0}</span>
-                                <span className={`px-2 py-1 rounded-md ${isDarkMode ? 'bg-indigo-500/20 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>SP: {task.estimatedSP || 0}</span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                      {phaseTasks.map(task => renderMobileTaskCard(task))}
                       
                       {/* Mobile Quick Add */}
                       {permissions.canCreateTask && (
@@ -436,6 +696,15 @@ const SprintTable = ({
           <table className={`w-full text-left border-collapse transition-colors ${isDarkMode ? 'bg-[#121212]' : 'bg-white'}`}>
             <thead className={`sticky top-0 shadow-sm z-10 transition-colors ${isDarkMode ? 'bg-[#1a1a1a]' : 'bg-white'}`}>
               <tr>
+                <th className={`p-4 w-12 text-center border-b ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`}>
+                  <input
+                    type="checkbox"
+                    checked={filteredTasks.length > 0 && selectedTaskIds.size === filteredTasks.length}
+                    onChange={handleSelectAllVisible}
+                    className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4"
+                    title="Seleccionar todas las tareas visibles"
+                  />
+                </th>
                 <th className={`p-4 text-xs font-black uppercase tracking-widest border-b ${isDarkMode ? 'text-gray-500 border-white/10' : 'text-slate-400 border-slate-200'}`}>Tarea</th>
                 <th className={`p-4 text-xs font-black uppercase tracking-widest border-b ${isDarkMode ? 'text-gray-500 border-white/10' : 'text-slate-400 border-slate-200'}`}>Responsable</th>
                 <th className={`p-4 text-xs font-black uppercase tracking-widest border-b ${isDarkMode ? 'text-gray-500 border-white/10' : 'text-slate-400 border-slate-200'}`}>Estado</th>
@@ -467,9 +736,17 @@ const SprintTable = ({
                       }`} 
                       onClick={() => togglePhase(groupKey)}
                     >
-                      <td colSpan={7} className={`p-4 border-b ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`}>
+                      <td colSpan={8} className={`p-4 border-b ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={phaseTasks.length > 0 && phaseTasks.every((t: any) => selectedTaskIds.has(t.id))}
+                              onChange={(e) => handleTogglePhaseSelection(phaseTasks, e)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4 mr-1"
+                              title="Seleccionar fase completa"
+                            />
                             {isExpanded ? <ChevronDown size={18} className="text-slate-400 group-hover:text-indigo-600" /> : <ChevronRight size={18} className="text-slate-400 group-hover:text-indigo-600" />}
                             <div className={`w-1 h-4 rounded-full ${isStage ? '' : (isDarkMode ? 'bg-white/20' : 'bg-slate-300')}`} style={isStage ? { backgroundColor: stage.color } : {}} />
                             <span className={`font-black uppercase tracking-widest ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{displayName}</span>
@@ -479,7 +756,7 @@ const SprintTable = ({
                           </div>
                           <div className={`flex gap-4 text-xs font-bold ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
                             <span>Progreso: {Math.round((doneCount / phaseTasks.length) * 100) || 0}%</span>
-                            <span>Total SP: {totalSP}</span>
+                            <span className="tabular-nums">Total SP: {totalSP}</span>
                           </div>
                         </div>
                       </td>
@@ -488,9 +765,9 @@ const SprintTable = ({
                     {/* Burndown Chart (if expanded) */}
                     {isExpanded && (
                       <tr>
-                        <td colSpan={7} className={`p-0 border-b transition-colors ${isDarkMode ? 'bg-[#121212] border-white/10' : 'bg-white border-slate-200'}`}>
-                          <div className="h-48 p-4 border-l-4 border-indigo-500">
-                            <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
+                        <td colSpan={8} className={`p-0 border-b transition-colors ${isDarkMode ? 'bg-[#121212] border-white/10' : 'bg-white border-slate-200'}`}>
+                          <div className="h-48 p-4 border-l-4 border-indigo-500 flex flex-col">
+                            <ChartContainer height={192} minHeight={180} isDarkMode={isDarkMode}>
                               <LineChart data={generateBurndownData(phaseTasks)} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? 'rgba(255,255,255,0.05)' : '#e2e8f0'} />
                                 <XAxis dataKey="day" tick={{fontSize: 10, fill: isDarkMode ? '#666' : '#94a3b8'}} />
@@ -501,7 +778,7 @@ const SprintTable = ({
                                 <Line type="monotone" dataKey="ideal" stroke={isDarkMode ? '#444' : '#94a3b8'} strokeDasharray="5 5" dot={false} />
                                 <Line type="monotone" dataKey="actual" stroke="#6366f1" strokeWidth={2} />
                               </LineChart>
-                            </ResponsiveContainer>
+                            </ChartContainer>
                           </div>
                         </td>
                       </tr>
@@ -520,10 +797,18 @@ const SprintTable = ({
                           onClick={() => setSelectedTaskId(task.id)}
                           className={`border-b transition-colors cursor-pointer ${
                             isDarkMode 
-                              ? `border-white/5 hover:bg-white/[0.02] ${task.isCritical ? 'bg-red-500/5' : ''}` 
-                              : `border-slate-100 hover:bg-indigo-50/30 ${task.isCritical ? 'bg-red-50/10' : ''}`
+                              ? `border-white/5 hover:bg-white/[0.02] ${task.isCritical ? 'bg-red-500/5' : ''} ${selectedTaskIds.has(task.id) ? 'bg-indigo-500/10' : ''}` 
+                              : `border-slate-100 hover:bg-indigo-50/30 ${task.isCritical ? 'bg-red-50/10' : ''} ${selectedTaskIds.has(task.id) ? 'bg-indigo-50/50' : ''}`
                           }`}
                         >
+                          <td className="p-4 w-12 text-center" onClick={e => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selectedTaskIds.has(task.id)}
+                              onChange={() => handleToggleSelectTask(task.id)}
+                              className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer w-4 h-4"
+                            />
+                          </td>
                           <td className="p-4 relative">
                             {/* Status Indicator Bar */}
                             <div className={`absolute left-0 top-0 bottom-0 w-1 ${task.isCritical ? 'bg-red-500' : borderColor}`} style={task.color ? { backgroundColor: task.color } : {}} />
@@ -545,7 +830,31 @@ const SprintTable = ({
                                 </span>
                               )}
                             </div>
-                            <div className={`text-xs ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>{task.epic || 'Sin Epic'}</div>
+                            {(() => {
+                              const taskStage = project?.stages?.find((s: any) => s.id === task.stageId || s.name === task.phase);
+                              return (
+                                <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                                  {taskStage && (
+                                    <span 
+                                      className="inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded-md border"
+                                      style={{
+                                        backgroundColor: `${taskStage.color || '#3b82f6'}15`,
+                                        color: taskStage.color || '#3b82f6',
+                                        borderColor: `${taskStage.color || '#3b82f6'}30`
+                                      }}
+                                    >
+                                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: taskStage.color || '#3b82f6' }} />
+                                      {taskStage.name}
+                                    </span>
+                                  )}
+                                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                                    isDarkMode ? 'text-gray-400 bg-white/5' : 'text-slate-600 bg-slate-100'
+                                  }`}>
+                                    {task.epic || 'Sprint general'}
+                                  </span>
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td className="p-4" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center gap-2">
@@ -638,6 +947,7 @@ const SprintTable = ({
                     {/* Quick Add Row */}
                     {isExpanded && permissions.canCreateTask && (
                       <tr className={`border-b transition-colors ${isDarkMode ? 'border-white/5 bg-white/[0.01]' : 'border-slate-100 bg-slate-50/30'}`}>
+                        <td className="p-4 w-12 text-center"></td>
                         <td className="p-4 relative">
                           <div className={`absolute left-0 top-0 bottom-0 w-1 ${borderColor}`} />
                           <div className="flex gap-2">
@@ -690,8 +1000,8 @@ const SprintTable = ({
                         <td className="p-4">
                           <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>LEVANTAMIENTO</span>
                         </td>
-                        <td className={`p-4 text-sm font-bold ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>1</td>
-                        <td className={`p-4 text-sm font-bold ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>1</td>
+                        <td className={`p-4 text-sm font-bold tabular-nums ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>1</td>
+                        <td className={`p-4 text-sm font-bold tabular-nums ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>1</td>
                       </tr>
                     )}
                   </React.Fragment>
@@ -699,7 +1009,7 @@ const SprintTable = ({
               })}
               {Object.keys(groupedTasks).length === 0 && (
                 <tr>
-                  <td colSpan={7} className={`p-8 text-center font-medium ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
+                  <td colSpan={8} className={`p-8 text-center font-medium ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
                     No hay tareas que coincidan con los filtros.
                   </td>
                 </tr>
@@ -708,6 +1018,33 @@ const SprintTable = ({
           </table>
         )}
       </div>
+
+      {/* Floating Bulk Actions Bar */}
+      <BulkActionsDock
+        selectedCount={selectedTaskIds.size}
+        onClearSelection={() => setSelectedTaskIds(new Set())}
+        onUpdateStatus={handleBulkUpdateStatus}
+        onUpdateAssignee={handleBulkUpdateAssignee}
+        onUpdatePriority={handleBulkUpdatePriority}
+        onBulkDelete={() => setIsBulkDeleteModalOpen(true)}
+        students={students}
+        isDarkMode={isDarkMode}
+        canEdit={permissions.canEditTask}
+        canDelete={permissions.canDeleteTask}
+      />
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <ConfirmModal
+        isOpen={isBulkDeleteModalOpen}
+        onClose={() => setIsBulkDeleteModalOpen(false)}
+        onConfirm={handleBulkDeleteConfirm}
+        title="Eliminar tareas seleccionadas"
+        message={`¿Estás seguro de que deseas eliminar permanentemente las ${selectedTaskIds.size} tareas seleccionadas? Esta acción no se puede revertir.`}
+        confirmText="Eliminar tareas"
+        cancelText="Cancelar"
+        type="danger"
+        isDarkMode={isDarkMode}
+      />
 
       <AnimatePresence>
         {selectedTaskId && (
@@ -719,6 +1056,7 @@ const SprintTable = ({
             userRole={userRole}
             currentUser={currentUser}
             students={students}
+            sprints={sprints}
             updateTaskStatus={updateTaskStatus}
             updateTaskField={updateTaskField}
             updateTaskFields={updateTaskFields}

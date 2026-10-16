@@ -5,6 +5,7 @@ import { BubbleChart } from './BubbleChart';
 import { RadarChart } from './RadarChart';
 import { SharedBars } from './SharedBars';
 import { MatrixTable } from './MatrixTable';
+import { CategoryComparison } from './CategoryComparison';
 import { StudentModal } from './StudentModal';
 import { SkillMapUser, SkillCategory } from '../../types/skills';
 import { SKILL_CATEGORIES } from '../../constants/skills';
@@ -22,7 +23,7 @@ interface SkillMapProps {
 
 export function SkillMap({ users, onAddUser, onUpdateUser, isAdmin, currentUserId, isDarkMode }: SkillMapProps) {
   const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'conjuntos' | 'burbujas' | 'pares'>('conjuntos');
+  const [activeTab, setActiveTab] = useState<'conjuntos' | 'burbujas' | 'pares' | 'comparativa'>('conjuntos');
   const [activeCategories, setActiveCategories] = useState<SkillCategory[]>(
     SKILL_CATEGORIES.map(c => c.id as SkillCategory)
   );
@@ -101,7 +102,8 @@ export function SkillMap({ users, onAddUser, onUpdateUser, isAdmin, currentUserI
                 {[
                   { id: 'conjuntos', label: 'Conjuntos' },
                   { id: 'burbujas', label: 'Burbujas' },
-                  { id: 'pares', label: 'Pares' }
+                  { id: 'pares', label: 'Pares' },
+                  { id: 'comparativa', label: 'Comparativa' }
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -140,6 +142,7 @@ export function SkillMap({ users, onAddUser, onUpdateUser, isAdmin, currentUserI
                 {activeTab === 'conjuntos' && 'Diagrama de Conjuntos — habilidades compartidas'}
                 {activeTab === 'burbujas' && 'Mapa de Burbujas — densidad de habilidades'}
                 {activeTab === 'pares' && 'Análisis de Pares — comparación directa'}
+                {activeTab === 'comparativa' && 'Comparativa Categorizada — detalle por prestador'}
               </h2>
               <button className="flex items-center gap-2 text-xs text-gray-500 hover:text-white transition-colors">
                 <Info size={14} />
@@ -173,6 +176,13 @@ export function SkillMap({ users, onAddUser, onUpdateUser, isAdmin, currentUserI
                   )}
                   {activeTab === 'pares' && (
                     <RadarChart 
+                      users={selectedUsers} 
+                      activeCategories={activeCategories}
+                      isDarkMode={isDarkMode}
+                    />
+                  )}
+                  {activeTab === 'comparativa' && (
+                    <CategoryComparison 
                       users={selectedUsers} 
                       activeCategories={activeCategories}
                       isDarkMode={isDarkMode}
