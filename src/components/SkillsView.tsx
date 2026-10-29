@@ -44,14 +44,26 @@ const SkillsView = ({ users, currentUserRole, currentUserId, projects, isDarkMod
 
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
-      const fullName = `${user.firstName} ${user.lastNamePaterno} ${user.lastNameMaterno}`.toLowerCase();
+      // 1. Debe ser alumno (prestador)
+      if (user.role !== 'user' && user.role !== 'student_coordinator') return false;
+
+      // 2. Debe estar activo (no archivado, no baja, no concluido)
+      const st = (user.status || '').toLowerCase().trim();
+      if (st === 'baja' || st === 'finalizado' || st === 'inactivo' || st === 'concluido' || st === 'terminado') return false;
+      if ((user as any).isArchived) return false;
+
+      // 3. Actualmente enrolado en proyectos
+      const hasEnrolledProject = Array.isArray(user.projectIds) && user.projectIds.length > 0;
+      if (!hasEnrolledProject) return false;
+
+      const fullName = `${user.firstName || ''} ${user.lastNamePaterno || ''} ${user.lastNameMaterno || ''}`.toLowerCase();
       const matchesSearch = fullName.includes((searchTerm || '').toLowerCase()) || 
                            (user.skills || []).some((s: any) => {
                              const skillStr = typeof s === 'string' ? s : (s.name || s.id || JSON.stringify(s));
                              return (skillStr || '').toLowerCase().includes((searchTerm || '').toLowerCase());
                            });
       const matchesCareer = selectedCareer === 'Todas' || user.career === selectedCareer;
-      return matchesSearch && matchesCareer && user.role === 'user'; // Only show "prestadores"
+      return matchesSearch && matchesCareer;
     });
   }, [users, searchTerm, selectedCareer]);
 
@@ -105,7 +117,7 @@ const SkillsView = ({ users, currentUserRole, currentUserId, projects, isDarkMod
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className={`text-3xl sm:text-5xl font-black tracking-tighter ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Habilidades</h2>
-          <p className={`font-medium mt-1 uppercase text-[9px] sm:text-[11px] tracking-[0.2em] italic ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>Directorio de competencias de prestadores</p>
+          <p className={`font-medium mt-1 uppercase text-[9px] sm:text-[11px] tracking-[0.2em] italic ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>Directorio de competencias de alumnxs activos enrolados</p>
         </div>
       </div>
 
@@ -244,7 +256,7 @@ const SkillsView = ({ users, currentUserRole, currentUserId, projects, isDarkMod
             <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6 ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}>
               <Search className={isDarkMode ? 'text-gray-700' : 'text-slate-300'} size={32} />
             </div>
-            <p className={`font-black uppercase tracking-widest text-sm ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>No se encontraron prestadores con esos criterios</p>
+            <p className={`font-black uppercase tracking-widest text-sm ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>No se encontraron alumnxs activos enrolados con esos criterios</p>
           </div>
         )}
       </div>

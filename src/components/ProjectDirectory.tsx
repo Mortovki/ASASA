@@ -60,13 +60,21 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
   }, [openMenuId]);
 
   const enrolledProjectIds = userProfile?.projectIds || [];
+  const isCoordinatorRole = 
+    userRole === 'admin' || 
+    userRole === 'master_coordinator' || 
+    userRole === 'super_coordinator' || 
+    userRole === 'coordinator' || 
+    userRole === 'student_coordinator' ||
+    Boolean(userProfile?.role && ['admin', 'master_coordinator', 'super_coordinator', 'coordinator', 'student_coordinator'].includes(userProfile.role));
+
   // Filtrar únicamente los documentos donde isDeleted no sea verdadero (excluir isDeleted === true)
+  // Para todos los tipos de coordinadores, se muestran todos los proyectos activos
   const displayProjects = (projects || []).filter((p: any) => {
     if (p.isDeleted === true) return false;
     const matchesSearch = (p.name || '').toLowerCase().includes((searchQuery || '').toLowerCase());
     const isEnrolled = enrolledProjectIds.includes(p.id);
-    const isAdminOrCoordinator = userRole === 'admin' || userRole === 'coordinator';
-    return matchesSearch && (isAdminOrCoordinator || isEnrolled);
+    return matchesSearch && (isCoordinatorRole || isEnrolled);
   });
 
   const handleEnroll = async (projectId: string) => {
@@ -171,7 +179,7 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
           >
             <Sparkles size={18} /> <span>Cargar Ejemplo (6 Fases)</span>
           </button>
-          {(userRole === 'admin' || userRole === 'coordinator') && (
+          {isCoordinatorRole && (
             <button 
               onClick={() => {
                 const newProjectId = `p-${Date.now()}`;
@@ -229,7 +237,7 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
       {displayProjects.length === 0 ? (
         <div className={`text-center py-10 rounded-2xl border ${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100'}`}>
           <p className={`font-medium ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
-            {searchQuery ? "No se encontraron proyectos con ese nombre" : "No estás enrolado en ningún proyecto actualmente."}
+            {searchQuery ? "No se encontraron proyectos con ese nombre" : (isCoordinatorRole ? "No hay proyectos activos registrados en el sistema." : "No estás enrolado en ningún proyecto actualmente.")}
           </p>
         </div>
       ) : (

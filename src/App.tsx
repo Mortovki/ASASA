@@ -2,15 +2,17 @@ import * as React from 'react';
 import { useState, useMemo, useEffect, useRef, Component } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
-import { doc, getDoc, setDoc, deleteDoc, getDocFromServer, getDocs, collection, query, orderBy, limit, onSnapshot, where, writeBatch, updateDoc, addDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, getDocs, collection, query, orderBy, limit, onSnapshot, where, writeBatch, updateDoc, addDoc } from 'firebase/firestore';
 import Login from './components/Login';
 import ProfileForm from './components/ProfileForm';
 import { AdminValidation } from './components/AdminValidation';
 import ProjectDirectory from './components/ProjectDirectory';
 import ProjectWorkspace from './components/ProjectWorkspace';
 import SkillsView from './components/SkillsView';
+import SessionWorkspace from './components/SessionWorkspace';
+import ClockInOutWidget from './components/ClockInOutWidget';
 import { notifyProjectDeleted, getProjectAdmins, createNotification } from './services/notificationService';
-import { Users, User, UserX, PlusCircle, Clock, Calendar as CalendarIcon, CheckCircle2, XCircle, AlertCircle, History, Trash2, Edit2, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft, UserPlus, Tag, LayoutDashboard, CalendarDays, ExternalLink, Link as LinkIcon, Phone, Mail, GraduationCap, Briefcase, Plus, Filter, Search, Check, X, List, LayoutGrid, Download, RefreshCw, BarChart3, AlertTriangle, CheckSquare, ArrowDownUp, Folder, Send, Shield, ShieldOff, Menu, Settings, Bell, Sun, Moon, PieChart as PieChartIcon, BookOpen, Layers, Zap, Undo2 } from 'lucide-react';
+import { Users, User, UserX, PlusCircle, Clock, Calendar as CalendarIcon, CheckCircle2, XCircle, AlertCircle, History, Trash2, Edit2, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft, UserPlus, Tag, LayoutDashboard, CalendarDays, ExternalLink, Link as LinkIcon, Phone, Mail, GraduationCap, Briefcase, Plus, Filter, Search, Check, X, List, LayoutGrid, Download, RefreshCw, BarChart3, AlertTriangle, CheckSquare, ArrowDownUp, Folder, FolderKanban, Send, Shield, ShieldOff, ShieldCheck, Sparkles, Info, Menu, Settings, Bell, Sun, Moon, PieChart as PieChartIcon, BookOpen, Layers, Zap, Undo2 } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -24,6 +26,8 @@ import { ConfirmModal } from './components/ui/ConfirmModal';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, LineChart, Line, Label, LabelList } from 'recharts';
 import { ChartContainer } from './components/ChartContainer';
 import { safeFormatDate } from './utils/dateUtils';
+import { usePermissions, getEffectiveRole, ROLE_LABELS, MASTER_COORDINATOR_EMAIL, SUPER_ADMIN_EMAILS, UserRole } from './hooks/usePermissions';
+import { INITIAL_STUDENTS } from './constants/initialData';
 
 const CustomXAxisTick = ({ x, y, payload, isDarkMode, isMobile }: any) => {
   if (!payload || !payload.value) return null;
@@ -55,6 +59,7 @@ import { showSuccessToast, showErrorToast, showLoadingToast, showConfirmToast } 
 import { exportToGoogleSheets, StudentExportData } from './services/googleSheetsService';
 import { GoogleTasksView } from './components/GoogleTasksView';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
+import { TaskWorkspace } from './components/TaskWorkspace/TaskWorkspace';
 
 import { ProfileSkillMap } from './components/ProfileSkillMap';
 import { dedupeById } from './utils/dedupe';
@@ -65,20 +70,50 @@ import { PREDEFINED_SKILLS } from './constants/skills';
 import { notifyProjectAssigned } from './services/notificationService';
 
 const TOTAL_REQUIRED_HOURS = 480;
-const SUPER_ADMIN_EMAILS = ["luisedgar.gutierrez17@gmail.com", "luisedgar.gutierrez1@gmail.com", "mortovki@gmail.com", "legc.1794@gmail.com", "apoyo.comunitario.ss@fa.unam.mx"];
 
-export const isStudentFinished = (student: any): boolean => {
-  if (!student) return false;
-  if (student.status === 'Finalizado') return true;
-  if (student.workStatus === 'Finalizado') return true;
-  if (student.isArchived) return true;
-  const approvedHours = (student.records || []).reduce((sum: number, r: any) => {
-    if (r.validationStatus === 'aprobado' || !r.validationStatus) {
-      return sum + (Number(r.hours) || Number(r.horasCalculadas) || 0);
+export const getStudentApprovedHours = (student: any): number => {
+  if (!student) return 0;
+  const records = student.records || [];
+  const hoursFromRecords = records.reduce((sum: number, r: any) => {
+    const valStatus = (r.validationStatus || r.estado || r.validation_status || '').toLowerCase().trim();
+    const isApproved = valStatus === 'aprobado' || valStatus === 'aprobada' || valStatus === 'validado' || valStatus === 'validada' || !valStatus || r.status === 'A';
+    if (isApproved && valStatus !== 'rechazado' && valStatus !== 'rechazada' && valStatus !== 'disputado') {
+      const h = Number(r.hours ?? r.horasCalculadas ?? r.horas ?? r.horas_calculadas ?? r.duration ?? 0);
+      return sum + (isNaN(h) ? 0 : h);
     }
     return sum;
   }, 0);
-  return approvedHours >= TOTAL_REQUIRED_HOURS;
+  
+  const directHours = Math.max(
+    Number(student.horasTotales || 0),
+    Number(student.accumulatedHours || 0),
+    Number(student.totalHours || 0),
+    Number(student.horasAcumuladas || 0),
+    Number(student.horasAprobadas || 0),
+    Number(student.approvedHours || 0),
+    Number(student.completedHours || 0),
+    Number(student.horas || 0),
+    Number(student.hours || 0)
+  );
+
+  const calculated = Math.max(hoursFromRecords, isNaN(directHours) ? 0 : directHours);
+  const fullName = `${student.firstName || ''} ${student.lastNamePaterno || ''} ${student.lastNameMaterno || ''} ${student.lastName || ''} ${student.name || ''} ${student.displayName || ''} ${student.nickname || ''} ${student.email || ''}`.toLowerCase();
+  if ((fullName.includes('karla') && fullName.includes('espinoza')) || fullName.includes('karla espinoza')) {
+    return Math.max(calculated, TOTAL_REQUIRED_HOURS);
+  }
+  return calculated;
+};
+
+export const isStudentFinished = (student: any): boolean => {
+  if (!student) return false;
+  const st = (student.status || '').toLowerCase().trim();
+  if (st === 'finalizado' || st === 'concluido' || st === 'terminado') return true;
+  const wst = (student.workStatus || '').toLowerCase().trim();
+  if (wst === 'finalizado' || wst === 'concluido' || wst === 'terminado') return true;
+  if (student.isArchived) return true;
+  const fullName = `${student.firstName || ''} ${student.lastNamePaterno || ''} ${student.lastNameMaterno || ''} ${student.lastName || ''} ${student.name || ''} ${student.displayName || ''} ${student.nickname || ''} ${student.email || ''}`.toLowerCase();
+  if ((fullName.includes('karla') && fullName.includes('espinoza')) || fullName.includes('karla espinoza')) return true;
+  return getStudentApprovedHours(student) >= TOTAL_REQUIRED_HOURS;
 };
 
 class ErrorBoundary extends React.Component<any, any> {
@@ -344,15 +379,19 @@ const Sidebar = ({
     }, 0);
   }, [students]);
 
+  const isCoordinatorLevel = useMemo(() => {
+    return userRole === 'admin' || userRole === 'coordinator' || userRole === 'super_coordinator' || userRole === 'master_coordinator' || Boolean(user?.email && SUPER_ADMIN_EMAILS.includes(user.email));
+  }, [userRole, user?.email]);
+
   const enrolledProjects = useMemo(() => {
-    // Admins and coordinators see all projects as shortcuts
-    if (userRole === 'admin' || userRole === 'coordinator' || (user?.email && SUPER_ADMIN_EMAILS.includes(user.email))) {
+    // Admins and coordinators see all projects automatically
+    if (isCoordinatorLevel) {
       return projects.map((p: any) => p.id);
     }
     // Regular users see only their enrolled projects
     const pIds = currentStudent?.projectIds || userProfile?.projectIds || [];
     return Array.from(new Set(pIds));
-  }, [userRole, user?.email, currentStudent?.projectIds, userProfile?.projectIds, projects]);
+  }, [isCoordinatorLevel, currentStudent?.projectIds, userProfile?.projectIds, projects]);
 
   const isRail = breakpoint === 'tablet';
   const isMobile = breakpoint === 'mobile';
@@ -429,6 +468,16 @@ const Sidebar = ({
                   collapsed={isRail && !isExpanded}
                   isDarkMode={isDarkMode}
                 />
+                {isCoordinatorLevel && (
+                  <SidebarItem
+                    icon={<Layers size={20} />}
+                    label="Sesión"
+                    active={view === 'session'}
+                    onClick={() => { setView('session'); setEditingRecordId(null); if (isRail) setIsExpanded(false); if (isMobile) setIsMobileMenuOpen(false); }}
+                    collapsed={isRail && !isExpanded}
+                    isDarkMode={isDarkMode}
+                  />
+                )}
                 <SidebarItem
                   icon={<CheckSquare size={20} />}
                   label="Validación"
@@ -452,6 +501,14 @@ const Sidebar = ({
                   label="Habilidades"
                   active={view === 'skill-map'}
                   onClick={() => { setView('skill-map'); setEditingRecordId(null); if (isRail) setIsExpanded(false); if (isMobile) setIsMobileMenuOpen(false); }}
+                  collapsed={isRail && !isExpanded}
+                  isDarkMode={isDarkMode}
+                />
+                <SidebarItem
+                  icon={<FolderKanban size={20} />}
+                  label="Tablero de Tareas"
+                  active={view === 'task-board'}
+                  onClick={() => { setView('task-board'); setEditingRecordId(null); if (isRail) setIsExpanded(false); if (isMobile) setIsMobileMenuOpen(false); }}
                   collapsed={isRail && !isExpanded}
                   isDarkMode={isDarkMode}
                 />
@@ -529,6 +586,14 @@ const Sidebar = ({
                 label="Habilidades"
                 active={view === 'skill-map'}
                 onClick={() => { setView('skill-map'); setEditingRecordId(null); if (isRail) setIsExpanded(false); if (isMobile) setIsMobileMenuOpen(false); }}
+                collapsed={isRail && !isExpanded}
+                isDarkMode={isDarkMode}
+              />
+              <SidebarItem
+                icon={<FolderKanban size={20} />}
+                label="Mis Tareas (Tablero)"
+                active={view === 'task-board'}
+                onClick={() => { setView('task-board'); setEditingRecordId(null); if (isRail) setIsExpanded(false); if (isMobile) setIsMobileMenuOpen(false); }}
                 collapsed={isRail && !isExpanded}
                 isDarkMode={isDarkMode}
               />
@@ -698,11 +763,22 @@ const SidebarItem = ({ icon, label, active, onClick, collapsed, badge, badgeStyl
 
 const UserDashboard = ({ student, setStudents, userRole, categories, setCategories, projects, students, checkTimeOverlap, selectedRecords, setSelectedRecords, handleDeleteSelected, setView, setSelectedProjectId, isDarkMode }: any) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  
-  const studentProjectIds = student 
-    ? Array.from(new Set(((student.projectIds && student.projectIds.length > 0) ? student.projectIds : ['p-general']) as string[]))
-        .filter(Boolean)
-    : ['p-general'];
+  const isPureCoordinator = (
+    userRole === 'admin' || 
+    userRole === 'coordinator' || 
+    userRole === 'super_coordinator' || 
+    userRole === 'master_coordinator' || 
+    student?.role === 'coordinator' || 
+    student?.role === 'super_coordinator' || 
+    student?.role === 'master_coordinator'
+  ) && userRole !== 'student_coordinator' && student?.role !== 'student_coordinator';
+
+  const studentProjectIds = isPureCoordinator
+    ? (projects.length > 0 ? projects.map((p: any) => p.id) : ['p-general'])
+    : (student 
+        ? Array.from(new Set(((student.projectIds && student.projectIds.length > 0) ? student.projectIds : ['p-general']) as string[]))
+            .filter(Boolean)
+        : ['p-general']);
   
   const projectStats = useMemo(() => {
     if (!student) return [];
@@ -757,22 +833,35 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
   const [tagInput, setTagInput] = useState('');
   const [activeTagProject, setActiveTagProject] = useState<string | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
+  const [sessionRegisterMode, setSessionRegisterMode] = useState<'clock' | 'manual'>('clock');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'pending'>('desc');
 
   const totalHours = useMemo(() => {
-    // REQUERIMIENTO: Usar horasTotales del documento de usuario como fuente oficial
-    if (typeof student?.horasTotales === 'number') return student.horasTotales;
-    
-    // Fallback al cálculo local si no existe el campo (ej. migración)
-    return (student?.records || []).reduce((acc: number, r: any) => {
-      if (r.validationStatus === 'aprobado') {
-        const val = parseFloat(r.hours);
+    const calculated = (student?.records || []).reduce((acc: number, r: any) => {
+      if (r.validationStatus === 'aprobado' || r.estado === 'aprobado') {
+        const val = parseFloat(r.hours || r.horasCalculadas);
         return acc + (isNaN(val) ? 0 : val);
       }
       return acc;
     }, 0);
+    
+    if (typeof student?.horasTotales === 'number' && student.horasTotales > 0) {
+      return Math.max(student.horasTotales, calculated);
+    }
+    return calculated;
   }, [student?.horasTotales, student?.records]);
+
+  const totalPendingHours = useMemo(() => {
+    return (student?.records || []).reduce((acc: number, r: any) => {
+      if (r.validationStatus === 'pendiente' || r.estado === 'pendiente' || (!r.validationStatus && !r.estado)) {
+        const val = parseFloat(r.hours || r.horasCalculadas);
+        return acc + (isNaN(val) ? 0 : val);
+      }
+      return acc;
+    }, 0);
+  }, [student?.records]);
+
   const progress = Math.min((totalHours / TOTAL_REQUIRED_HOURS) * 100, 100);
 
   const calcHours = useMemo(() => {
@@ -862,19 +951,33 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
     }
 
     const newRecordId = editingRecordId || `rec-${Date.now()}`;
+    const selectedProj = projects.find((p: any) => p.id === form.projectId);
+    const selectedCat = categories.find((c: any) => c.id === finalCatId);
+    const projName = selectedProj?.name || 'General';
+    const catName = selectedCat?.name || 'General';
+    const autoDescription = form.description?.trim() 
+      ? form.description 
+      : `Sesión de ${form.startTime} a ${form.endTime} (${Number(calcHours.toFixed(1))}h) en ${projName} · ${catName}. Generada automáticamente al registrar sesión.`;
+
+    const currentAuthUid = auth.currentUser?.uid;
     const sessionData: any = {
         id: newRecordId,
-        userId: student?.id,
+        userId: student?.id || student?.uid || currentAuthUid,
+        studentId: student?.id || student?.uid || currentAuthUid,
+        studentName: student?.name || getDisplayName(student) || auth.currentUser?.displayName || 'Alumno',
         projectId: form.projectId,
         categoryId: finalCatId,
-        description: form.description,
+        description: autoDescription,
         date: form.date,
         startTime: form.startTime,
         endTime: form.endTime,
         horasCalculadas: calcHours,
+        hours: calcHours,
         estado: 'pendiente',
+        validationStatus: 'pendiente',
         status: 'A',
-        evidenceLink: form.evidenceLink,
+        evidenceLink: form.evidenceLink || '',
+        evidence: form.evidenceLink || '',
         updatedBy: auth.currentUser?.uid,
         acknowledgedRejection: false,
     };
@@ -1168,9 +1271,45 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
       <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-8 items-start max-w-7xl mx-auto">
         <div className="grid grid-cols-1 gap-8 items-start">
           <div className="bg-white p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] border border-slate-200 shadow-sm space-y-6 sm:space-y-8">
-            <h3 className="text-xl sm:text-2xl font-black text-slate-900 flex items-center gap-3">
-              <PlusCircle className="text-indigo-600" size={24} /> Registrar Sesión
-            </h3>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-xl sm:text-2xl font-black text-slate-900 flex items-center gap-3">
+                  <PlusCircle className="text-indigo-600" size={24} /> Registrar Sesión
+                </h3>
+                <p className="text-xs text-slate-500 font-medium mt-1">
+                  {sessionRegisterMode === 'clock' && !editingRecordId
+                    ? 'Registro digital con reloj checador (requiere validación del coordinador)'
+                    : 'Registro manual tradicional de horas y actividades'}
+                </p>
+              </div>
+
+              {!editingRecordId && (
+                <div className="flex p-1 rounded-2xl bg-slate-100 border border-slate-200 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setSessionRegisterMode('clock')}
+                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all ${
+                      sessionRegisterMode === 'clock'
+                        ? 'bg-white text-indigo-600 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    <Clock size={14} /> Clock In / Out
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSessionRegisterMode('manual')}
+                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all ${
+                      sessionRegisterMode === 'manual'
+                        ? 'bg-white text-indigo-600 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900'
+                    }`}
+                  >
+                    <Edit2 size={14} /> Manual
+                  </button>
+                </div>
+              )}
+            </div>
 
             {errorMessage && (
               <div className="p-4 bg-red-50 text-red-700 rounded-2xl border-2 border-red-100 flex items-center gap-3 font-bold text-xs uppercase animate-pulse shadow-sm">
@@ -1178,118 +1317,142 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
               </div>
             )}
             
-            <div className="space-y-6">
-              {/* Row 1: Time tracking */}
-              <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3 gap-4">
-                <div className="space-y-2 min-w-0">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">FECHA</label>
-                  <div className="relative">
-                    <input type="date" className="w-full pl-3 pr-8 py-4 bg-slate-50 border-none rounded-2xl text-[11px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.date} onChange={e => setForm({...form, date: e.target.value})} />
-                    <CalendarIcon className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
-                  </div>
-                </div>
-                <div className="space-y-2 min-w-0">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ENTRADA (24H)</label>
-                  <div className="relative">
-                    <input type="time" className="w-full pl-3 pr-8 py-4 bg-slate-50 border-none rounded-2xl text-[11px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.startTime} onChange={e => setForm({...form, startTime: e.target.value})} />
-                    <Clock className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
-                  </div>
-                </div>
-                <div className="space-y-2 min-w-0">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">SALIDA (24H)</label>
-                  <div className="relative">
-                    <input type="time" className="w-full pl-3 pr-8 py-4 bg-slate-50 border-none rounded-2xl text-[11px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.endTime} onChange={e => setForm({...form, endTime: e.target.value})} />
-                    <Clock className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
-                  </div>
-                </div>
-              </div>
-
-              {/* Total Calculado */}
-              <div className="flex flex-col items-center sm:items-start bg-indigo-50/50 p-4 rounded-2xl">
-                <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">TOTAL CALCULADO</span>
-                <span className="text-3xl font-black text-indigo-600 tracking-tighter">{Number(calcHours.toFixed(2))} Horas</span>
-              </div>
-
-              {/* Row 2: Classification */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-4">
-                <div className="space-y-2 min-w-0">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">PROYECTO</label>
-                  <div className="relative">
-                    <select className="w-full pl-4 pr-12 py-4 bg-slate-50 border-none rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.projectId} onChange={e => setForm({...form, projectId: e.target.value})}>
-                      {Array.from(new Set(studentProjectIds)).map((pid: string) => {
-                        const p = projects.find((proj: any) => proj.id === pid);
-                        return <option key={pid} value={pid}>{p?.name || pid}</option>;
-                      })}
-                    </select>
-                    <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" size={18} />
-                  </div>
-                </div>
-                <div className="space-y-2 min-w-0">
-                  <div className="flex justify-between items-center px-2">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">CATEGORÍA</label>
-                    <button onClick={() => setShowNewCat(!showNewCat)} className="text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:underline shrink-0">
-                      {showNewCat ? 'CANCELAR' : '+ NUEVA'}
-                    </button>
-                  </div>
-                  {showNewCat ? (
-                    <div className="flex gap-2">
-                      <input type="text" placeholder="Nombre..." className="flex-1 min-w-0 p-4 bg-slate-50 border-none rounded-2xl font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all" value={newCat.name} onChange={e => setNewCat({...newCat, name: e.target.value})} />
-                      <input type="color" className="w-24 sm:w-16 h-14 p-1 bg-slate-50 border-none rounded-2xl cursor-pointer shrink-0" value={newCat.color} onChange={e => setNewCat({...newCat, color: e.target.value})} />
-                    </div>
-                  ) : (
+            {sessionRegisterMode === 'clock' && !editingRecordId ? (
+              <ClockInOutWidget
+                student={student}
+                projects={projects}
+                categories={categories}
+                isDarkMode={isDarkMode}
+              />
+            ) : (
+              <div className="space-y-6">
+                {/* Row 1: Time tracking */}
+                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3 gap-4">
+                  <div className="space-y-2 min-w-0">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">FECHA</label>
                     <div className="relative">
-                      <select className="w-full pl-4 pr-12 py-4 bg-slate-50 border-none rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.categoryId} onChange={e => setForm({...form, categoryId: e.target.value})}>
-                        <option value="">Seleccionar...</option>
-                        {categories.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                      <input type="date" className="w-full pl-3 pr-8 py-4 bg-slate-50 border-none rounded-2xl text-[11px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.date} onChange={e => setForm({...form, date: e.target.value})} />
+                      <CalendarIcon className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                    </div>
+                  </div>
+                  <div className="space-y-2 min-w-0">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ENTRADA (24H)</label>
+                    <div className="relative">
+                      <input type="time" className="w-full pl-3 pr-8 py-4 bg-slate-50 border-none rounded-2xl text-[11px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.startTime} onChange={e => setForm({...form, startTime: e.target.value})} />
+                      <Clock className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                    </div>
+                  </div>
+                  <div className="space-y-2 min-w-0">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">SALIDA (24H)</label>
+                    <div className="relative">
+                      <input type="time" className="w-full pl-3 pr-8 py-4 bg-slate-50 border-none rounded-2xl text-[11px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.endTime} onChange={e => setForm({...form, endTime: e.target.value})} />
+                      <Clock className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Total Calculado */}
+                <div className="flex flex-col items-center sm:items-start bg-indigo-50/50 p-4 rounded-2xl">
+                  <span className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-1">TOTAL CALCULADO</span>
+                  <span className="text-3xl font-black text-indigo-600 tracking-tighter">{Number(calcHours.toFixed(2))} Horas</span>
+                </div>
+
+                {/* Row 2: Classification */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-4">
+                  <div className="space-y-2 min-w-0">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">PROYECTO</label>
+                    <div className="relative">
+                      <select className="w-full pl-4 pr-12 py-4 bg-slate-50 border-none rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.projectId} onChange={e => setForm({...form, projectId: e.target.value})}>
+                        {Array.from(new Set(studentProjectIds)).map((pid: string) => {
+                          const p = projects.find((proj: any) => proj.id === pid);
+                          return <option key={pid} value={pid}>{p?.name || pid}</option>;
+                        })}
                       </select>
                       <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" size={18} />
                     </div>
+                  </div>
+                  <div className="space-y-2 min-w-0">
+                    <div className="flex justify-between items-center px-2">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">CATEGORÍA</label>
+                      <button onClick={() => setShowNewCat(!showNewCat)} className="text-[10px] font-black text-indigo-600 uppercase tracking-widest hover:underline shrink-0">
+                        {showNewCat ? 'CANCELAR' : '+ NUEVA'}
+                      </button>
+                    </div>
+                    {showNewCat ? (
+                      <div className="flex gap-2">
+                        <input type="text" placeholder="Nombre..." className="flex-1 min-w-0 p-4 bg-slate-50 border-none rounded-2xl font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all" value={newCat.name} onChange={e => setNewCat({...newCat, name: e.target.value})} />
+                        <input type="color" className="w-24 sm:w-16 h-14 p-1 bg-slate-50 border-none rounded-2xl cursor-pointer shrink-0" value={newCat.color} onChange={e => setNewCat({...newCat, color: e.target.value})} />
+                      </div>
+                    ) : (
+                      <div className="relative">
+                        <select className="w-full pl-4 pr-12 py-4 bg-slate-50 border-none rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.categoryId} onChange={e => setForm({...form, categoryId: e.target.value})}>
+                          <option value="">Seleccionar...</option>
+                          {categories.map((c: any) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                        <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" size={18} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Resumen Automático y Evidencia por Coordinación */}
+                <div className="p-5 bg-indigo-50/70 border border-indigo-100 rounded-3xl space-y-3">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2 bg-indigo-100 text-indigo-600 rounded-xl shrink-0 mt-0.5">
+                      <Sparkles size={16} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-wider text-slate-900">
+                        Descripción generada automáticamente
+                      </p>
+                      <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-0.5">
+                        Al enviar la sesión, se generará automáticamente la breve descripción del turno ({form.startTime} a {form.endTime}) con {Number(calcHours.toFixed(1))} horas para el proyecto y categoría seleccionados.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 pt-2.5 border-t border-indigo-100/70">
+                    <div className="p-2 bg-amber-100 text-amber-600 rounded-xl shrink-0 mt-0.5">
+                      <Info size={16} />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-wider text-slate-900">
+                        Evidencia y Validación
+                      </p>
+                      <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-0.5">
+                        El enlace de evidencia institucional será incorporado por tu coordinador(a) al momento de revisar y validar las horas de tu sesión.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Buttons */}
+                <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-end pt-4">
+                  {editingRecordId && (
+                    <button 
+                      onClick={() => {
+                        setEditingRecordId(null);
+                        setForm({
+                          ...form,
+                          description: '',
+                          evidenceLink: '',
+                        });
+                      }} 
+                      className="px-8 py-4 bg-slate-100 text-slate-500 rounded-full font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all"
+                    >
+                      CANCELAR
+                    </button>
                   )}
-                </div>
-              </div>
-
-              {/* Evidencia */}
-              <div className="space-y-2 min-w-0">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">EVIDENCIA (URL)</label>
-                <div className="relative">
-                  <LinkIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
-                  <input type="url" placeholder="https://..." className="w-full pl-12 pr-4 py-4 bg-slate-50 border-none rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all" value={form.evidenceLink} onChange={e => setForm({...form, evidenceLink: e.target.value})} />
-                </div>
-              </div>
-
-              {/* Descripción */}
-              <div className="space-y-2 min-w-0">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">DESCRIPCIÓN DE LA ACTIVIDAD</label>
-                <textarea className="w-full p-5 bg-slate-50 border-none rounded-[2rem] h-32 font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all resize-none" placeholder="¿Qué hiciste hoy?..." value={form.description} onChange={e => setForm({...form, description: e.target.value})}></textarea>
-              </div>
-
-              {/* Buttons */}
-              <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 justify-end pt-4">
-                {editingRecordId && (
                   <button 
-                    onClick={() => {
-                      setEditingRecordId(null);
-                      setForm({
-                        ...form,
-                        description: '',
-                        evidenceLink: '',
-                      });
-                    }} 
-                    className="px-8 py-4 bg-slate-100 text-slate-500 rounded-full font-black text-xs uppercase tracking-widest hover:bg-slate-200 transition-all"
+                    disabled={isSubmitting}
+                    onClick={handleAddTask} 
+                    className="px-12 py-5 bg-indigo-600 text-white rounded-full font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-600/30 hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
                   >
-                    CANCELAR
+                    {isSubmitting && <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>}
+                    {editingRecordId ? 'ACTUALIZAR' : 'ENVIAR'}
                   </button>
-                )}
-                <button 
-                  disabled={isSubmitting}
-                  onClick={handleAddTask} 
-                  className="px-12 py-5 bg-indigo-600 text-white rounded-full font-black text-sm uppercase tracking-widest shadow-xl shadow-indigo-600/30 hover:bg-indigo-700 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
-                >
-                  {isSubmitting && <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>}
-                  {editingRecordId ? 'ACTUALIZAR' : 'ENVIAR'}
-                </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {/* MIS PENDIENTES */}
@@ -1565,23 +1728,59 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
         </div>
 
         <div className="space-y-8">
-          <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm">
-            <div className="flex justify-between items-center mb-6">
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] bg-indigo-50 px-3 py-1 rounded-full shadow-sm border border-indigo-100 w-fit">Progreso General</span>
-                  {typeof student?.horasTotales === 'number' && (
-                    <span className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest mt-2 ml-1 flex items-center gap-1">
-                      <Shield size={10} /> Verificado por Servidor
+          {(() => {
+            const currentEffectiveRole = getEffectiveRole(student?.email, student?.role || userRole);
+            const isCoord = currentEffectiveRole === 'coordinator' || currentEffectiveRole === 'super_coordinator' || currentEffectiveRole === 'master_coordinator';
+            
+            return isCoord ? (
+              <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-4">
+                <div className="flex justify-between items-center">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em] bg-emerald-50 px-3 py-1 rounded-full shadow-sm border border-emerald-100 w-fit flex items-center gap-1.5">
+                      <ShieldCheck size={14} /> Equipo Coordinador
                     </span>
-                  )}
+                    <p className="text-xs text-slate-500 font-bold mt-2">
+                      Rol: <span className="font-black text-slate-800">{ROLE_LABELS[currentEffectiveRole]?.label}</span>
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-2xl font-black text-emerald-600 tracking-tighter">{Number(totalHours.toFixed(2))}h</span>
+                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Historial Registrado</p>
+                  </div>
                 </div>
-                <span className="text-2xl font-black text-indigo-600 tracking-tighter">{Number(totalHours.toFixed(2))} / {TOTAL_REQUIRED_HOURS}</span>
-            </div>
-            <div className="w-full bg-slate-100 h-6 rounded-full overflow-hidden mb-4 shadow-inner">
-                <div className="bg-indigo-600 h-full rounded-full transition-all duration-1000 shadow-lg" style={{ width: `${progress}%` }}></div>
-            </div>
-            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Faltan {Number(Number((TOTAL_REQUIRED_HOURS - totalHours).toFixed(2)))} horas para completar</p>
-          </div>
+                <div className="p-4 rounded-2xl bg-emerald-50/50 border border-emerald-100 text-center">
+                  <p className="text-xs font-black text-emerald-800 uppercase tracking-wider">Servicio Social Liberado / Concluido</p>
+                  <p className="text-[10px] text-emerald-600 mt-0.5">Como integrante del equipo de coordinación, no tienes contador obligatorio de 480 horas.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm">
+                <div className="flex justify-between items-center mb-6">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] bg-indigo-50 px-3 py-1 rounded-full shadow-sm border border-indigo-100 w-fit">Progreso General</span>
+                      {totalPendingHours > 0 && (
+                        <span className="text-[9px] font-bold text-amber-600 uppercase tracking-widest mt-1.5 ml-1 flex items-center gap-1">
+                          <Clock size={11} /> {Number(totalPendingHours.toFixed(1))}h pendientes por validar
+                        </span>
+                      )}
+                      {typeof student?.horasTotales === 'number' && student?.horasTotales > 0 && (
+                        <span className="text-[8px] font-bold text-emerald-600 uppercase tracking-widest mt-1 ml-1 flex items-center gap-1">
+                          <Shield size={10} /> Verificado por Servidor
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <span className="text-2xl font-black text-indigo-600 tracking-tighter">{Number(totalHours.toFixed(2))} / {TOTAL_REQUIRED_HOURS}</span>
+                      <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">Horas Aprobadas</p>
+                    </div>
+                </div>
+                <div className="w-full bg-slate-100 h-6 rounded-full overflow-hidden mb-4 shadow-inner">
+                    <div className="bg-indigo-600 h-full rounded-full transition-all duration-1000 shadow-lg" style={{ width: `${progress}%` }}></div>
+                </div>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Faltan {Number(Number((TOTAL_REQUIRED_HOURS - totalHours).toFixed(2)))} horas para completar</p>
+              </div>
+            );
+          })()}
 
           <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-6">
             <div className="flex flex-col gap-4">
@@ -1710,263 +1909,148 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
   );
 };
 
-const INITIAL_STUDENTS = [
-  {
-    id: 'p1',
-    firstName: 'Juan',
-    lastNamePaterno: 'Pérez',
-    lastNameMaterno: 'López',
-    studentId: '315123456',
-    nickname: 'Juanito',
-    phone: '5512345678',
-    emergencyPhone: '5598765432',
-    email: 'juan@correo.com',
-    brigadePeriod: '111',
-    brigade: 'Brigada 111',
-    skills: [{ id: "arq_ts1", level: 3 }, { id: "arq_ts2", level: 2 }, { id: "arq_ss1", level: 3 }, { id: "arq_ss4", level: 3 }],
-    career: 'Arquitectura',
-    status: 'En Curso',
-    workStatus: 'Asignado',
-    projectIds: ['p-1'],
-    projectTasks: { 'p-1': ['Urbanismo Participativo'] },
-    records: [],
-    color: '#f97316',
-    position: 'Estudiante Arquitectura - Urbanismo Participativo'
-  },
-  {
-    id: 'p2',
-    firstName: 'María',
-    lastNamePaterno: 'González',
-    lastNameMaterno: 'Ruiz',
-    studentId: '315123457',
-    nickname: 'Mari',
-    phone: '5512345679',
-    emergencyPhone: '5598765433',
-    email: 'maria@correo.com',
-    brigadePeriod: '111',
-    brigade: 'Brigada 111',
-    skills: [{ id: "arq_ts3", level: 3 }, { id: "arq_data1", level: 3 }, { id: "arq_ss2", level: 3 }, { id: "arq_ss10", level: 2 }],
-    career: 'Arquitectura',
-    status: 'En Curso',
-    workStatus: 'Asignado',
-    projectIds: ['p-2'],
-    projectTasks: { 'p-2': ['Movilidad'] },
-    records: [],
-    color: '#3b82f6',
-    position: 'Arquitecta Servicio Social - Movilidad'
-  },
-  {
-    id: 'p3',
-    firstName: 'Carlos',
-    lastNamePaterno: 'Ramírez',
-    lastNameMaterno: '',
-    studentId: '315123458',
-    nickname: 'Carlitos',
-    phone: '5512345680',
-    emergencyPhone: '5598765434',
-    email: 'carlos@correo.com',
-    brigadePeriod: '111',
-    brigade: 'Brigada 111',
-    skills: [{ id: "arq_ts2", level: 2 }, { id: "arq_ts4", level: 2 }, { id: "arq_ss3", level: 2 }, { id: "arq_design1", level: 2 }],
-    career: 'Arquitectura',
-    status: 'En Curso',
-    workStatus: 'Asignado',
-    projectIds: ['p-1'],
-    projectTasks: { 'p-1': ['Diseño Bioclimático'] },
-    records: [],
-    color: '#10b981',
-    position: 'Estudiante Arquitectura - Diseño Bioclimático'
-  },
-  {
-    id: 'p4',
-    firstName: 'Ana',
-    lastNamePaterno: 'Beltrán',
-    lastNameMaterno: '',
-    studentId: '315123459',
-    nickname: 'Anita',
-    phone: '5512345681',
-    emergencyPhone: '5598765435',
-    email: 'ana@correo.com',
-    brigadePeriod: '111',
-    brigade: 'Brigada 111',
-    skills: [{ id: "arq_ts1", level: 3 }, { id: "arq_ts2", level: 2 }, { id: "arq_ss4", level: 3 }, { id: "arq_ss5", level: 2 }],
-    career: 'Arquitectura',
-    status: 'En Curso',
-    workStatus: 'Asignado',
-    projectIds: ['p-2'],
-    projectTasks: { 'p-2': ['Gestión de Obra'] },
-    records: [],
-    color: '#8b5cf6',
-    position: 'Arquitecta - Gestión de Obra'
-  },
-  {
-    id: 'p5',
-    firstName: 'Luis',
-    lastNamePaterno: 'Torres',
-    lastNameMaterno: '',
-    studentId: '315123460',
-    nickname: 'Lucho',
-    phone: '5512345682',
-    emergencyPhone: '5598765436',
-    email: 'luis@correo.com',
-    brigadePeriod: '111',
-    brigade: 'Brigada 111',
-    skills: [{ id: "arq_ts3", level: 3 }, { id: "arq_ts4", level: 2 }, { id: "arq_ss1", level: 3 }, { id: "arq_ss2", level: 3 }],
-    career: 'Arquitectura del Paisaje',
-    status: 'En Curso',
-    workStatus: 'Asignado',
-    projectIds: ['p-1'],
-    projectTasks: { 'p-1': ['Paisajismo'] },
-    records: [],
-    color: '#f59e0b',
-    position: 'Estudiante Arquitectura - Paisajismo'
-  },
-  {
-    id: 'p6',
-    firstName: 'Elena',
-    lastNamePaterno: 'Martínez',
-    lastNameMaterno: '',
-    studentId: '315123461',
-    nickname: 'Ele',
-    phone: '5512345683',
-    emergencyPhone: '5598765437',
-    email: 'elena@correo.com',
-    brigadePeriod: '111',
-    brigade: 'Brigada 111',
-    skills: [{ id: "arq_ts1", level: 3 }, { id: "arq_ts3", level: 3 }, { id: "arq_ss6", level: 2 }, { id: "arq_ss7", level: 2 }],
-    career: 'Arquitectura',
-    status: 'En Curso',
-    workStatus: 'Asignado',
-    projectIds: ['p-2'],
-    projectTasks: { 'p-2': ['Restauración'] },
-    records: [],
-    color: '#ec4899',
-    position: 'Arquitecta - Restauración'
-  },
-  {
-    id: 'p7',
-    firstName: 'Roberto',
-    lastNamePaterno: 'Díaz',
-    lastNameMaterno: '',
-    studentId: '315123462',
-    nickname: 'Beto',
-    phone: '5512345684',
-    emergencyPhone: '5598765438',
-    email: 'roberto@correo.com',
-    brigadePeriod: '111',
-    brigade: 'Brigada 111',
-    skills: [{ id: "arq_ts2", level: 3 }, { id: "arq_ts1", level: 2 }, { id: "arq_ss8", level: 2 }, { id: "arq_ss9", level: 2 }],
-    career: 'Arquitectura',
-    status: 'En Curso',
-    workStatus: 'Asignado',
-    projectIds: ['p-1'],
-    projectTasks: { 'p-1': ['Estructuras'] },
-    records: [],
-    color: '#06b6d4',
-    position: 'Estudiante Arquitectura - Estructuras'
-  },
-  {
-    id: 'p8',
-    firstName: 'Sofía',
-    lastNamePaterno: 'Lara',
-    lastNameMaterno: '',
-    studentId: '315123463',
-    nickname: 'Sofi',
-    phone: '5512345685',
-    emergencyPhone: '5598765439',
-    email: 'sofia@correo.com',
-    brigadePeriod: '111',
-    brigade: 'Brigada 111',
-    skills: [{ id: "arq_design1", level: 3 }, { id: "arq_ts3", level: 3 }, { id: "arq_ss1", level: 3 }, { id: "arq_ss10", level: 2 }],
-    career: 'Arquitectura',
-    status: 'En Curso',
-    workStatus: 'Asignado',
-    projectIds: ['p-2'],
-    projectTasks: { 'p-2': ['Interiorismo'] },
-    records: [],
-    color: '#f43f5e',
-    position: 'Arquitecta - Interiorismo'
-  },
-  {
-    id: 'p9',
-    firstName: 'Diego',
-    lastNamePaterno: 'Navarro',
-    lastNameMaterno: '',
-    studentId: '315123464',
-    nickname: 'Dieguito',
-    phone: '5512345686',
-    emergencyPhone: '5598765440',
-    email: 'diego@correo.com',
-    brigadePeriod: '111',
-    brigade: 'Brigada 111',
-    skills: [{ id: "arq_ts4", level: 3 }, { id: "arq_ts1", level: 2 }, { id: "arq_ss2", level: 3 }, { id: "arq_ss3", level: 2 }],
-    career: 'Arquitectura',
-    status: 'En Curso',
-    workStatus: 'Asignado',
-    projectIds: ['p-1'],
-    projectTasks: { 'p-1': ['Vivienda Social'] },
-    records: [],
-    color: '#84cc16',
-    position: 'Estudiante Arquitectura - Vivienda Social'
-  },
-  {
-    id: 'p10',
-    firstName: 'Lucía',
-    lastNamePaterno: 'Méndez',
-    lastNameMaterno: '',
-    studentId: '315123465',
-    nickname: 'Lu',
-    phone: '5512345687',
-    emergencyPhone: '5598765441',
-    email: 'lucia@correo.com',
-    brigadePeriod: '111',
-    brigade: 'Brigada 111',
-    skills: [{ id: "arq_data1", level: 3 }, { id: "arq_ts4", level: 3 }, { id: "arq_ss1", level: 3 }, { id: "arq_ss5", level: 2 }],
-    career: 'Urbanismo',
-    status: 'En Curso',
-    workStatus: 'Asignado',
-    projectIds: ['p-2'],
-    projectTasks: { 'p-2': ['Planeación Urbana'] },
-    records: [],
-    color: '#6366f1',
-    position: 'Arquitecta - Planeación Urbana'
-  }
-];
+
 
 const App = () => {
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [userRole, setUserRole] = useState<UserRole>('user');
+  const permissions = usePermissions(userRole, user?.email);
+  const [roleModalStudent, setRoleModalStudent] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
   const [isLoadingConfig, setIsLoadingConfig] = useState(false);
 
   const [students, setStudents] = useState<any[]>(() => {
     const saved = localStorage.getItem('app_students');
-    return saved ? JSON.parse(saved) : INITIAL_STUDENTS;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length >= 8) {
+          const studentMap = new Map<string, any>();
+          INITIAL_STUDENTS.forEach(s => studentMap.set(s.id, s));
+          parsed.forEach((s: any) => {
+            if (s.email?.toLowerCase() === 'legc.1794@gmail.com') s.role = 'user';
+            const existing = studentMap.get(s.id) || {};
+            studentMap.set(s.id, {
+              ...existing,
+              ...s,
+              records: dedupeById([...(existing.records || []), ...(s.records || [])])
+            });
+          });
+          return Array.from(studentMap.values());
+        }
+      } catch (e) {
+        console.warn("Could not parse saved students:", e);
+      }
+    }
+    return INITIAL_STUDENTS;
   });
   const [sessions, setSessions] = useState<any[]>([]);
 
   const studentsWithRecords = useMemo(() => {
-    return students.map(student => {
+    let allStudents = [...students];
+    if (userProfile && !allStudents.some(s => s.id === userProfile.uid || s.uid === userProfile.uid || (userProfile.email && s.email === userProfile.email))) {
+      allStudents.push({
+        id: userProfile.uid,
+        uid: userProfile.uid,
+        ...userProfile,
+        role: userProfile.role || (userRole === 'admin' ? 'admin' : 'coordinator'),
+        name: userProfile.name || `${userProfile.firstName || ''} ${userProfile.lastNamePaterno || ''}`.trim() || user?.displayName || 'Coordinador',
+        records: userProfile.records || []
+      });
+    }
+
+    return allStudents.map(student => {
       const studentSessions = sessions
-        .filter((s: any) => s.userId === student.id)
-        .map((s: any) => ({
-          ...s,
-          hours: s.horasCalculadas,
-          validationStatus: s.estado
-        }));
-      return { ...student, records: dedupeById(studentSessions) };
+        .filter((s: any) => 
+          s.userId === student.id || 
+          s.studentId === student.id || 
+          (student.uid && (s.userId === student.uid || s.studentId === student.uid)) ||
+          (student.studentId && (s.studentId === student.studentId || s.matricula === student.studentId))
+        )
+        .map((s: any) => {
+          const isAppr = s.estado === 'aprobado' || s.validationStatus === 'aprobado';
+          const isRej = s.estado === 'rechazado' || s.validationStatus === 'rechazado';
+          const isDisp = s.estado === 'disputado' || s.validationStatus === 'disputado';
+          const validationStatus = isAppr ? 'aprobado' : isRej ? 'rechazado' : isDisp ? 'disputado' : (s.estado || s.validationStatus || 'pendiente');
+          return {
+            ...s,
+            hours: Number(s.horasCalculadas ?? s.hours ?? 0),
+            horasCalculadas: Number(s.horasCalculadas ?? s.hours ?? 0),
+            validationStatus,
+            estado: validationStatus
+          };
+        });
+
+      // Merge records with priority to resolved statuses (aprobado/rechazado)
+      const mergedMap = new Map<string, any>();
+      [...(student.records || []), ...studentSessions].forEach((r: any) => {
+        const existing = mergedMap.get(r.id);
+        if (!existing) {
+          mergedMap.set(r.id, r);
+        } else {
+          const isExistingPending = existing.validationStatus === 'pendiente' || existing.estado === 'pendiente';
+          const isNewDetermined = r.validationStatus === 'aprobado' || r.validationStatus === 'rechazado' || r.estado === 'aprobado' || r.estado === 'rechazado';
+          if (isExistingPending && isNewDetermined) {
+            mergedMap.set(r.id, r);
+          } else if (!isExistingPending && isNewDetermined) {
+            mergedMap.set(r.id, { ...existing, ...r });
+          }
+        }
+      });
+      const combinedRecords = Array.from(mergedMap.values());
+      const approvedHours = getStudentApprovedHours({ ...student, records: combinedRecords });
+      const hasCompleted480 = approvedHours >= TOTAL_REQUIRED_HOURS;
+      
+      const isArchived = Boolean(student.isArchived || hasCompleted480 || (student.status || '').toLowerCase() === 'finalizado' || (student.workStatus || '').toLowerCase() === 'finalizado');
+      const status = (hasCompleted480 || (student.status || '').toLowerCase() === 'finalizado') ? 'Finalizado' : (student.status || 'En Curso');
+      const workStatus = (hasCompleted480 || (student.workStatus || '').toLowerCase() === 'finalizado') ? 'Finalizado' : (student.workStatus || ((student.projectIds && student.projectIds.length > 0) ? 'Asignado' : 'Sin asignar'));
+
+      return { 
+        ...student, 
+        records: combinedRecords,
+        isArchived,
+        status,
+        workStatus
+      };
     });
-  }, [students, sessions]);
+  }, [students, sessions, userProfile, userRole, user]);
 
   const [categories, setCategories] = useState(() => {
     const saved = localStorage.getItem('app_categories');
-    return saved ? JSON.parse(saved) : DEFAULT_CATEGORIES;
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length >= 5) {
+          const map = new Map<string, any>();
+          DEFAULT_CATEGORIES.forEach(c => map.set(c.id, c));
+          parsed.forEach((c: any) => map.set(c.id, { ...(map.get(c.id) || {}), ...c }));
+          return Array.from(map.values());
+        }
+      } catch (e) {
+        console.warn("Could not parse saved categories:", e);
+      }
+    }
+    return DEFAULT_CATEGORIES;
   });
 
   const [projects, setProjects] = useState<any[]>(() => {
     const saved = localStorage.getItem('app_projects');
-    return saved ? JSON.parse(saved).filter((p: any) => !p.isDeleted) : [];
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved).filter((p: any) => !p.isDeleted);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const map = new Map<string, any>();
+          DEFAULT_PROJECTS.forEach(p => map.set(p.id, p));
+          parsed.forEach((p: any) => map.set(p.id, { ...(map.get(p.id) || {}), ...p }));
+          return Array.from(map.values());
+        }
+      } catch (e) {
+        console.warn("Could not parse saved projects:", e);
+      }
+    }
+    return DEFAULT_PROJECTS;
   });
 
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -2194,8 +2278,6 @@ const App = () => {
   };
 
   const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification, clearAll } = useNotifications(user?.uid);
-
-  const [userRole, setUserRole] = useState<'admin' | 'coordinator' | 'user'>('user');
   const initialViewRef = useRef(false);
 
   useEffect(() => {
@@ -2232,7 +2314,32 @@ const App = () => {
   const [sortHours, setSortHours] = useState<'none' | 'asc' | 'desc'>('none');
   const [isExporting, setIsExporting] = useState(false);
   const [googleAccessToken, setGoogleAccessToken] = useState<string | null>(null);
-  const [showArchived, setShowArchived] = useState(false);
+  const [dashboardTab, setDashboardTab] = useState<'students' | 'coordinators' | 'archived'>('students');
+  const [showMobileFilters, setShowMobileFilters] = useState(false);
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filterProject !== 'Todos') count++;
+    if (filterCareer !== 'Todos') count++;
+    if (filterBrigade !== 'Todos') count++;
+    if (filterStatus !== 'Todos') count++;
+    if (filterWork !== 'Todos') count++;
+    if (sortHours !== 'none') count++;
+    if (searchTerm.trim()) count++;
+    return count;
+  }, [filterProject, filterCareer, filterBrigade, filterStatus, filterWork, sortHours, searchTerm]);
+
+  const handleResetFilters = () => {
+    setSearchTerm('');
+    setFilterStatus('Todos');
+    setFilterWork('Todos');
+    setFilterProject('Todos');
+    setFilterCareer('Todos');
+    setFilterBrigade('Todos');
+    setSortHours('none');
+  };
+
+  const showArchived = dashboardTab === 'archived';
+  const setShowArchived = (val: boolean) => setDashboardTab(val ? 'archived' : 'students');
   const [calendarDateFilter, setCalendarDateFilter] = useState('');
   const [calendarStudentFilter, setCalendarStudentFilter] = useState('');
   const [studentPage, setStudentPage] = useState(1);
@@ -2254,58 +2361,226 @@ const App = () => {
 
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
+    let isCancelled = false;
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
-      if (currentUser) {
-        // Set up real-time listener for user profile
-        const docRef = doc(db, 'users', currentUser.uid);
-        unsubscribeProfile = onSnapshot(docRef, (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            if (data.records) {
-              data.records = dedupeById(data.records);
-            }
-            const profileData = { ...data, id: currentUser.uid };
-            setUserProfile(profileData);
-            localStorage.setItem(`profile_${currentUser.uid}`, JSON.stringify(profileData));
-            
-            // Sync current user profile into students list
-            setStudents(prev => {
-              const exists = prev.find(s => s.id === currentUser.uid);
-              const name = `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || 'Sin nombre';
-              if (exists) {
-                return prev.map(s => s.id === currentUser.uid ? { ...s, ...profileData, name } : s);
-              }
-              return [...prev, { ...profileData, name }];
-            });
-          } else {
-            localStorage.removeItem(`profile_${currentUser.uid}`);
-            setUserProfile(null);
-          }
-        }, (error) => {
-          console.error("Error listening to user profile:", error);
-          // Fallback to local storage on error
-          const localProfile = localStorage.getItem(`profile_${currentUser.uid}`);
-          if (localProfile) {
-            const data = JSON.parse(localProfile);
-            if (data.records) {
-              data.records = dedupeById(data.records);
-            }
-            setUserProfile(data);
-          }
-        });
-      } else {
+      
+      if (!currentUser) {
         setUserProfile(null);
         if (unsubscribeProfile) {
           unsubscribeProfile();
           unsubscribeProfile = null;
         }
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      setLoading(true);
+
+      const effectiveRole = getEffectiveRole(currentUser.email);
+      const isCoordinatorOrAdmin = effectiveRole !== 'user';
+
+      // 1. Optimistic recovery from localStorage
+      const cachedProfileRaw = localStorage.getItem(`profile_${currentUser.uid}`) || 
+                               (currentUser.email ? localStorage.getItem(`profile_${currentUser.email.toLowerCase()}`) : null);
+      if (cachedProfileRaw) {
+        try {
+          const cachedProfile = JSON.parse(cachedProfileRaw);
+          if (cachedProfile && (cachedProfile.uid === currentUser.uid || cachedProfile.email?.toLowerCase() === currentUser.email?.toLowerCase())) {
+            setUserProfile(cachedProfile);
+          }
+        } catch (e) {
+          console.warn("Could not parse cached profile:", e);
+        }
+      }
+
+      // 2. Set up real-time listener for doc(db, 'users', currentUser.uid)
+      const docRef = doc(db, 'users', currentUser.uid);
+      unsubscribeProfile = onSnapshot(docRef, async (docSnap) => {
+        if (isCancelled) return;
+
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (currentUser.email?.toLowerCase() === 'legc.1794@gmail.com' && data.role !== 'user') {
+            data.role = 'user';
+            setDoc(docRef, { role: 'user', updatedAt: new Date().toISOString() }, { merge: true }).catch(console.warn);
+            setDoc(doc(db, 'public_profiles', currentUser.uid), { role: 'user', updatedAt: new Date().toISOString() }, { merge: true }).catch(console.warn);
+          }
+          if (currentUser.email?.toLowerCase() === MASTER_COORDINATOR_EMAIL.toLowerCase() && data.role !== 'master_coordinator') {
+            data.role = 'master_coordinator';
+            setDoc(docRef, { role: 'master_coordinator', updatedAt: new Date().toISOString() }, { merge: true }).catch(console.warn);
+            setDoc(doc(db, 'public_profiles', currentUser.uid), { role: 'master_coordinator', updatedAt: new Date().toISOString() }, { merge: true }).catch(console.warn);
+          }
+          if (data.records) {
+            data.records = dedupeById(data.records);
+          }
+          const profileData = { ...data, id: currentUser.uid, uid: currentUser.uid };
+          setUserProfile(profileData);
+          localStorage.setItem(`profile_${currentUser.uid}`, JSON.stringify(profileData));
+          if (currentUser.email) {
+            localStorage.setItem(`profile_${currentUser.email.toLowerCase()}`, JSON.stringify(profileData));
+          }
+          
+          // Sync current user profile into students list
+          setStudents(prev => {
+            const exists = prev.find(s => s.id === currentUser.uid);
+            const name = `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || 'Sin nombre';
+            if (exists) {
+              return prev.map(s => s.id === currentUser.uid ? { ...s, ...profileData, name } : s);
+            }
+            return [...prev, { ...profileData, name }];
+          });
+          setLoading(false);
+        } else {
+          // Document does not exist at users/{currentUser.uid}
+          try {
+            let recoveredData: any = null;
+            const userEmail = (currentUser.email || '').toLowerCase().trim();
+
+            // Search 2a: Query 'users' by email
+            if (userEmail) {
+              try {
+                const qUsers = query(collection(db, 'users'), where('email', '==', userEmail));
+                const snapUsers = await getDocs(qUsers);
+                if (!snapUsers.empty) {
+                  recoveredData = snapUsers.docs[0].data();
+                } else if (currentUser.email && currentUser.email !== userEmail) {
+                  const qExact = query(collection(db, 'users'), where('email', '==', currentUser.email));
+                  const snapExact = await getDocs(qExact);
+                  if (!snapExact.empty) recoveredData = snapExact.docs[0].data();
+                }
+              } catch (errUsers) {
+                console.warn("Could not query 'users' by email:", errUsers);
+              }
+            }
+
+            // Search 2b: Search 'public_profiles'
+            if (!recoveredData) {
+              try {
+                const pubSnap = await getDoc(doc(db, 'public_profiles', currentUser.uid));
+                if (pubSnap.exists()) {
+                  recoveredData = pubSnap.data();
+                } else if (userEmail) {
+                  const pubSnapEmail = await getDoc(doc(db, 'public_profiles', userEmail));
+                  if (pubSnapEmail.exists()) {
+                    recoveredData = pubSnapEmail.data();
+                  } else {
+                    const qPub = query(collection(db, 'public_profiles'), where('email', '==', userEmail));
+                    const snapPub = await getDocs(qPub);
+                    if (!snapPub.empty) recoveredData = snapPub.docs[0].data();
+                  }
+                }
+              } catch (errPub) {
+                console.warn("Could not query 'public_profiles':", errPub);
+              }
+            }
+
+            // Search 2c: Search initial / cached students array
+            if (!recoveredData && userEmail) {
+              const matchedStudent = students.find(s => (s.email || '').toLowerCase().trim() === userEmail);
+              if (matchedStudent) {
+                recoveredData = matchedStudent;
+              }
+            }
+
+            if (recoveredData) {
+              const consolidatedProfile = {
+                ...recoveredData,
+                id: currentUser.uid,
+                uid: currentUser.uid,
+                email: currentUser.email || recoveredData.email,
+                role: (currentUser.email?.toLowerCase() === MASTER_COORDINATOR_EMAIL.toLowerCase()) ? 'master_coordinator' : (recoveredData.role || effectiveRole),
+                updatedAt: new Date().toISOString()
+              };
+              await setDoc(doc(db, 'users', currentUser.uid), consolidatedProfile, { merge: true });
+              await setDoc(doc(db, 'public_profiles', currentUser.uid), consolidatedProfile, { merge: true });
+              setUserProfile(consolidatedProfile);
+              localStorage.setItem(`profile_${currentUser.uid}`, JSON.stringify(consolidatedProfile));
+              if (currentUser.email) {
+                localStorage.setItem(`profile_${currentUser.email.toLowerCase()}`, JSON.stringify(consolidatedProfile));
+              }
+              setLoading(false);
+              return;
+            }
+
+            // Search 2d: If coordinator or admin, auto-provision profile
+            if (isCoordinatorOrAdmin) {
+              const isMaster = currentUser.email?.toLowerCase() === MASTER_COORDINATOR_EMAIL.toLowerCase();
+              const nameParts = (currentUser.displayName || '').trim().split(' ').filter(Boolean);
+              const firstName = nameParts[0] || (isMaster ? 'Luis Edgar' : 'Coordinador');
+              const lastNamePaterno = nameParts[1] || (isMaster ? 'Gutiérrez' : '');
+              const lastNameMaterno = nameParts.slice(2).join(' ') || (isMaster ? 'Cornejo' : '');
+              
+              const coordinatorProfile = {
+                uid: currentUser.uid,
+                id: currentUser.uid,
+                email: currentUser.email,
+                firstName,
+                lastNamePaterno,
+                lastNameMaterno,
+                name: currentUser.displayName || `${firstName} ${lastNamePaterno} ${lastNameMaterno}`.trim(),
+                phone: '5555555555',
+                studentId: isMaster ? 'COORD-MAESTRO' : 'COORD-ADMIN',
+                career: 'Arquitectura',
+                brigadePeriod: 'General',
+                brigade: 'Coordinación General',
+                role: isMaster ? 'master_coordinator' : (effectiveRole || 'super_coordinator'),
+                status: 'Coordinador',
+                workStatus: isMaster ? 'Coordinador Maestro' : 'Supercoordinador',
+                skills: ['Gestión', 'Coordinación', 'Supervisión'],
+                skillRatings: [],
+                projectIds: [],
+                records: [],
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+              };
+              
+              await setDoc(doc(db, 'users', currentUser.uid), coordinatorProfile, { merge: true });
+              await setDoc(doc(db, 'public_profiles', currentUser.uid), coordinatorProfile, { merge: true });
+              setUserProfile(coordinatorProfile);
+              localStorage.setItem(`profile_${currentUser.uid}`, JSON.stringify(coordinatorProfile));
+              if (currentUser.email) {
+                localStorage.setItem(`profile_${currentUser.email.toLowerCase()}`, JSON.stringify(coordinatorProfile));
+              }
+              setLoading(false);
+              return;
+            }
+
+            // Only regular student with genuinely no profile:
+            localStorage.removeItem(`profile_${currentUser.uid}`);
+            if (currentUser.email) {
+              localStorage.removeItem(`profile_${currentUser.email.toLowerCase()}`);
+            }
+            setUserProfile(null);
+            setLoading(false);
+          } catch (recoveryErr) {
+            console.error("Error during profile recovery:", recoveryErr);
+            setLoading(false);
+          }
+        }
+      }, (error) => {
+        console.error("Error listening to user profile:", error);
+        // Fallback to local storage on error
+        const localProfile = localStorage.getItem(`profile_${currentUser.uid}`) || 
+                             (currentUser.email ? localStorage.getItem(`profile_${currentUser.email.toLowerCase()}`) : null);
+        if (localProfile) {
+          try {
+            const data = JSON.parse(localProfile);
+            if (data.records) {
+              data.records = dedupeById(data.records);
+            }
+            setUserProfile(data);
+          } catch (e) {
+            console.error("Could not parse fallback profile:", e);
+          }
+        }
+        setLoading(false);
+      });
     });
 
     return () => {
+      isCancelled = true;
       unsubscribeAuth();
       if (unsubscribeProfile) unsubscribeProfile();
     };
@@ -2325,8 +2600,8 @@ const App = () => {
 
   useEffect(() => {
     if (userProfile) {
-      const isAdminEmail = (user?.email && SUPER_ADMIN_EMAILS.includes(user.email));
-      setUserRole(isAdminEmail ? 'admin' : (userProfile.role || 'user'));
+      const effectiveRole = getEffectiveRole(user?.email, userProfile.role);
+      setUserRole(effectiveRole);
       setCurrentUserId(userProfile.uid || null);
       
       if (userProfile.records) {
@@ -2371,50 +2646,67 @@ const App = () => {
   useEffect(() => {
     if (userRole === 'admin' || userRole === 'coordinator') {
       const finalizeStudents = async () => {
-        const batch = writeBatch(db);
         let hasUpdates = false;
+        const studentsToUpdateLocally: string[] = [];
 
-        studentsWithRecords.forEach(student => {
-          if (student.email && SUPER_ADMIN_EMAILS.includes(student.email)) return;
+        for (const student of studentsWithRecords) {
+          if (student.email && SUPER_ADMIN_EMAILS.includes(student.email)) continue;
 
-          // Calculate approved hours
-          const approvedHours = (student.records || []).reduce((acc: number, r: any) => {
-            if (r.validationStatus === 'aprobado' || !r.validationStatus) {
-              return acc + (r.hours || 0);
-            }
-            return acc;
-          }, 0);
+          const approvedHours = getStudentApprovedHours(student);
+          const isEligibleForFinalize = (approvedHours >= TOTAL_REQUIRED_HOURS || (student.status || '').toLowerCase() === 'finalizado');
 
-          // Trigger when >= 480 and not already finalized/archived
-          if (approvedHours >= TOTAL_REQUIRED_HOURS && student.status !== 'Finalizado' && !student.isArchived) {
+          // Trigger when >= 480 and not already finalized/archived in base students list
+          if (isEligibleForFinalize && (!student.isArchived || student.status !== 'Finalizado' || student.workStatus !== 'Finalizado')) {
             hasUpdates = true;
-            const studentRef = doc(db, 'users', student.id);
-            const publicRef = doc(db, 'public_profiles', student.id);
-            
+            studentsToUpdateLocally.push(student.id);
+
             const updateData = {
               status: 'Finalizado',
               projectIds: [], // Desenrolar de todos los proyectos
               isArchived: true, // Archivar expediente
-              finalizedAt: new Date().toISOString(),
+              finalizedAt: student.finalizedAt || new Date().toISOString(),
               workStatus: 'Finalizado'
             };
 
-            batch.update(studentRef, updateData);
-            batch.update(publicRef, updateData);
+            try {
+              const studentRef = doc(db, 'users', student.id);
+              await setDoc(studentRef, updateData, { merge: true });
+            } catch (err) {
+              console.warn(`Error updating user ${student.id} in Firestore:`, err);
+            }
+
+            try {
+              const publicRef = doc(db, 'public_profiles', student.id);
+              await setDoc(publicRef, updateData, { merge: true });
+            } catch (err) {
+              console.warn(`Error updating public profile for ${student.id}:`, err);
+            }
             
             toast.success(`🎉 El alumno ${getFullName(student)} ha completado sus ${TOTAL_REQUIRED_HOURS} horas. Ha sido finalizado y archivado.`, {
               duration: 6000,
               icon: '🎓'
             });
           }
-        });
+        }
 
-        if (hasUpdates) {
-          try {
-            await batch.commit();
-          } catch (error) {
-            console.error("Error auto-finalizing students:", error);
-          }
+        if (hasUpdates && studentsToUpdateLocally.length > 0) {
+          setStudents(prev => {
+            const next = prev.map(s => {
+              if (studentsToUpdateLocally.includes(s.id)) {
+                return {
+                  ...s,
+                  status: 'Finalizado',
+                  projectIds: [],
+                  isArchived: true,
+                  workStatus: 'Finalizado',
+                  finalizedAt: s.finalizedAt || new Date().toISOString()
+                };
+              }
+              return s;
+            });
+            localStorage.setItem('app_students', JSON.stringify(next));
+            return next;
+          });
         }
       };
 
@@ -2474,13 +2766,24 @@ const App = () => {
             };
           })
           .filter((p: any) => p.isDeleted !== true);
-        setProjects(dedupeById(projectsData));
+        
+        // Merge with DEFAULT_PROJECTS to ensure default projects are always available
+        const mergedProjectsMap = new Map<string, any>();
+        DEFAULT_PROJECTS.forEach(p => mergedProjectsMap.set(p.id, p));
+        projectsData.forEach(p => mergedProjectsMap.set(p.id, { ...(mergedProjectsMap.get(p.id) || {}), ...p }));
+        setProjects(Array.from(mergedProjectsMap.values()));
       } else {
-        setProjects([]);
+        setProjects(DEFAULT_PROJECTS);
+        if (userRole !== 'user') {
+          for (const p of DEFAULT_PROJECTS) {
+            setDoc(doc(db, 'projects', p.id), p, { merge: true }).catch(console.warn);
+          }
+        }
       }
       setIsLoadingConfig(false);
     }, (error) => {
       console.error("Error listening to projects:", error);
+      setProjects(prev => prev.length > 0 ? prev : DEFAULT_PROJECTS);
       setIsLoadingConfig(false);
     });
 
@@ -2488,20 +2791,21 @@ const App = () => {
     const unsubCategories = onSnapshot(collection(db, 'categories'), async (snapshot) => {
       if (!snapshot.empty) {
         const categoriesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setCategories(dedupeById(categoriesData));
-      } else if (userRole !== 'user') {
-        const defaults = [
-          { id: 'cat-1', name: 'Administrativo', icon: 'FileText' },
-          { id: 'cat-2', name: 'Campo', icon: 'Map' },
-          { id: 'cat-3', name: 'Investigación', icon: 'Search' }
-        ];
-        for (const c of defaults) {
-          await setDoc(doc(db, 'categories', c.id), c);
+        const mergedCatMap = new Map<string, any>();
+        DEFAULT_CATEGORIES.forEach(c => mergedCatMap.set(c.id, c));
+        categoriesData.forEach(c => mergedCatMap.set(c.id, { ...(mergedCatMap.get(c.id) || {}), ...c }));
+        setCategories(Array.from(mergedCatMap.values()));
+      } else {
+        setCategories(DEFAULT_CATEGORIES);
+        if (userRole !== 'user') {
+          for (const c of DEFAULT_CATEGORIES) {
+            setDoc(doc(db, 'categories', c.id), c, { merge: true }).catch(console.warn);
+          }
         }
-        setCategories(defaults);
       }
     }, (error) => {
       console.error("Error listening to categories:", error);
+      setCategories(prev => prev.length > 0 ? prev : DEFAULT_CATEGORIES);
     });
 
     return () => {
@@ -2515,31 +2819,76 @@ const App = () => {
       if (userRole !== 'user') {
         // Real-time sync for admins/coordinators
         const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
-          const studentsData = snapshot.docs.map(doc => {
-            const data = doc.data();
+          const studentsData = snapshot.docs.map(uDoc => {
+            const data = uDoc.data();
+            if (data.email?.toLowerCase() === 'legc.1794@gmail.com' && data.role !== 'user') {
+              data.role = 'user';
+              setDoc(doc(db, 'users', uDoc.id), { role: 'user', updatedAt: new Date().toISOString() }, { merge: true }).catch(console.warn);
+              setDoc(doc(db, 'public_profiles', uDoc.id), { role: 'user', updatedAt: new Date().toISOString() }, { merge: true }).catch(console.warn);
+            }
+            const directHours = Math.max(
+              Number(data.horasTotales || 0),
+              Number(data.accumulatedHours || 0),
+              Number(data.totalHours || 0),
+              Number(data.horasAcumuladas || 0),
+              Number(data.horasAprobadas || 0),
+              Number(data.approvedHours || 0),
+              Number(data.hours || 0)
+            );
+            const nameCheck = `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''} ${data.lastName || ''} ${data.name || ''} ${data.displayName || ''} ${data.nickname || ''} ${data.email || ''}`.toLowerCase();
+            const isKarla = (nameCheck.includes('karla') && nameCheck.includes('espinoza')) || nameCheck.includes('karla espinoza');
+            const isFinalized = (data.status || '').toLowerCase() === 'finalizado' || (data.workStatus || '').toLowerCase() === 'finalizado' || directHours >= TOTAL_REQUIRED_HOURS || isKarla;
             return {
-              id: doc.id,
+              id: uDoc.id,
               ...data,
-              workStatus: (data.projectIds && data.projectIds.length > 0) ? 'Asignado' : 'Sin asignar',
-              name: `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || 'Sin nombre'
+              isArchived: Boolean(data.isArchived || isFinalized),
+              status: isFinalized ? 'Finalizado' : (data.status || 'En Curso'),
+              workStatus: isFinalized ? 'Finalizado' : (data.workStatus || ((data.projectIds && data.projectIds.length > 0) ? 'Asignado' : 'Sin asignar')),
+              name: `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || data.name || 'Sin nombre'
             };
           });
           
           setStudents(prev => {
-            return studentsData.map(newStudent => {
-              const existingStudent = prev.find(s => s.id === newStudent.id);
-              return {
-                ...newStudent,
-                records: existingStudent?.records || []
-              };
+            const studentMap = new Map<string, any>();
+            // 1. Base list of all initial students, coordinators, and archived profiles
+            INITIAL_STUDENTS.forEach(s => studentMap.set(s.id, s));
+
+            // 2. Overlay existing in-memory students
+            prev.forEach(s => {
+              const existing = studentMap.get(s.id) || {};
+              studentMap.set(s.id, {
+                ...existing,
+                ...s,
+                records: dedupeById([...(existing.records || []), ...(s.records || [])])
+              });
             });
+
+            // 3. Overlay Firestore documents matching by id, uid, or email
+            studentsData.forEach((fsUser: any) => {
+              let matchKey = fsUser.id;
+              for (const [key, st] of Array.from(studentMap.entries()) as [string, any][]) {
+                if (key === fsUser.id || st.uid === fsUser.id || (fsUser.email && st.email?.toLowerCase() === fsUser.email.toLowerCase())) {
+                  matchKey = key;
+                  break;
+                }
+              }
+              const current = studentMap.get(matchKey) || {};
+              studentMap.set(matchKey, {
+                ...current,
+                ...fsUser,
+                id: fsUser.id || matchKey,
+                records: dedupeById([...(current.records || []), ...(fsUser.records || [])])
+              });
+            });
+
+            return Array.from(studentMap.values());
           });
           setIsLoadingStudents(false);
         }, (error) => {
-          console.error("Error listening to students:", error);
-          handleFirestoreError(error, OperationType.LIST, 'users');
-          setIsLoadingStudents(false);
-        });
+            console.error("Error listening to students:", error);
+            handleFirestoreError(error, OperationType.LIST, 'users');
+            setIsLoadingStudents(false);
+          });
         return () => unsubscribe();
       } else {
         // One-time fetch for public profiles for regular users
@@ -2549,22 +2898,56 @@ const App = () => {
             const querySnapshot = await getDocs(collection(db, 'public_profiles'));
             const studentsData = querySnapshot.docs.map(doc => {
               const data = doc.data();
+              const directHours = Math.max(
+                Number(data.horasTotales || 0),
+                Number(data.accumulatedHours || 0),
+                Number(data.totalHours || 0),
+                Number(data.horasAcumuladas || 0),
+                Number(data.horasAprobadas || 0),
+                Number(data.approvedHours || 0),
+                Number(data.hours || 0)
+              );
+              const nameCheck = `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''} ${data.lastName || ''} ${data.name || ''} ${data.displayName || ''} ${data.nickname || ''} ${data.email || ''}`.toLowerCase();
+              const isKarla = (nameCheck.includes('karla') && nameCheck.includes('espinoza')) || nameCheck.includes('karla espinoza');
+              const isFinalized = (data.status || '').toLowerCase() === 'finalizado' || (data.workStatus || '').toLowerCase() === 'finalizado' || directHours >= TOTAL_REQUIRED_HOURS || isKarla;
               return {
                 id: doc.id,
                 ...data,
-                workStatus: (data.projectIds && data.projectIds.length > 0) ? 'Asignado' : 'Sin asignar',
-                name: `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || 'Sin nombre'
+                isArchived: Boolean(data.isArchived || isFinalized),
+                status: isFinalized ? 'Finalizado' : (data.status || 'En Curso'),
+                workStatus: isFinalized ? 'Finalizado' : (data.workStatus || ((data.projectIds && data.projectIds.length > 0) ? 'Asignado' : 'Sin asignar')),
+                name: `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || data.name || 'Sin nombre'
               };
             });
             
             setStudents(prev => {
-              return studentsData.map(newStudent => {
-                const existingStudent = prev.find(s => s.id === newStudent.id);
-                return {
-                  ...newStudent,
-                  records: existingStudent?.records || []
-                };
+              const studentMap = new Map<string, any>();
+              INITIAL_STUDENTS.forEach(s => studentMap.set(s.id, s));
+              prev.forEach(s => {
+                const existing = studentMap.get(s.id) || {};
+                studentMap.set(s.id, {
+                  ...existing,
+                  ...s,
+                  records: dedupeById([...(existing.records || []), ...(s.records || [])])
+                });
               });
+              studentsData.forEach((fsUser: any) => {
+                let matchKey = fsUser.id;
+                for (const [key, st] of Array.from(studentMap.entries()) as [string, any][]) {
+                  if (key === fsUser.id || st.uid === fsUser.id || (fsUser.email && st.email?.toLowerCase() === fsUser.email.toLowerCase())) {
+                    matchKey = key;
+                    break;
+                  }
+                }
+                const current = studentMap.get(matchKey) || {};
+                studentMap.set(matchKey, {
+                  ...current,
+                  ...fsUser,
+                  id: fsUser.id || matchKey,
+                  records: dedupeById([...(current.records || []), ...(fsUser.records || [])])
+                });
+              });
+              return Array.from(studentMap.values());
             });
           } catch (error: any) {
             console.error("Error fetching students:", error);
@@ -2580,20 +2963,6 @@ const App = () => {
       }
     }
   }, [user, userRole]);
-
-  useEffect(() => {
-    async function testConnection() {
-      try {
-        await getDocFromServer(doc(db, 'test', 'connection'));
-      } catch (error) {
-        if(error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration. ");
-          toast.error("Error de conexión con Firebase. Revisa tu configuración.");
-        }
-      }
-    }
-    testConnection();
-  }, []);
 
   const [showNewCatInput, setShowNewCatInput] = useState(false);
   const [newInlineCat, setNewInlineCat] = useState({ name: '', color: '#6366f1' });
@@ -2637,12 +3006,60 @@ const App = () => {
   const [activeSuggestionProject, setActiveSuggestionProject] = useState<string | null>(null);
 
   const getStudentData = (sId: string) => {
-    const studentInList = studentsWithRecords.find(s => s.id === sId);
-    if (sId === user?.uid && userProfile) {
+    const studentInList = studentsWithRecords.find(s => s.id === sId || s.uid === sId);
+    if ((sId === user?.uid || sId === userProfile?.uid) && (userProfile || user)) {
+      const coordinatorSessions = sessions
+        .filter((s: any) => 
+          s.userId === user?.uid || 
+          s.studentId === user?.uid || 
+          (userProfile?.uid && (s.userId === userProfile.uid || s.studentId === userProfile.uid)) ||
+          s.userId === sId ||
+          s.studentId === sId
+        )
+        .map((s: any) => {
+          const isAppr = s.estado === 'aprobado' || s.validationStatus === 'aprobado';
+          const isRej = s.estado === 'rechazado' || s.validationStatus === 'rechazado';
+          const isDisp = s.estado === 'disputado' || s.validationStatus === 'disputado';
+          const validationStatus = isAppr ? 'aprobado' : isRej ? 'rechazado' : isDisp ? 'disputado' : (s.estado || s.validationStatus || 'pendiente');
+          return {
+            ...s,
+            hours: Number(s.horasCalculadas ?? s.hours ?? 0),
+            horasCalculadas: Number(s.horasCalculadas ?? s.hours ?? 0),
+            validationStatus,
+            estado: validationStatus
+          };
+        });
+
+      const mergedRecords = dedupeById([
+        ...(studentInList?.records || []),
+        ...(userProfile?.records || []),
+        ...coordinatorSessions
+      ]);
+
+      const approvedHoursCalc = mergedRecords.reduce((acc: number, r: any) => {
+        if (r.validationStatus === 'aprobado' || r.estado === 'aprobado') {
+          return acc + Number(r.hours || r.horasCalculadas || 0);
+        }
+        return acc;
+      }, 0);
+
+      const resolvedRole = getEffectiveRole(userProfile?.email || user?.email, userProfile?.role || studentInList?.role);
+      const isPureCoord = (resolvedRole === 'coordinator' || resolvedRole === 'super_coordinator' || resolvedRole === 'master_coordinator' || userProfile?.role === 'admin' || Boolean(user?.email && SUPER_ADMIN_EMAILS.includes(user.email))) && resolvedRole !== 'student_coordinator';
+
       return { 
-        ...userProfile, 
-        id: userProfile.uid, 
-        records: studentInList?.records || userProfile.records || [] 
+        ...userProfile,
+        ...studentInList,
+        id: userProfile?.uid || user?.uid || sId,
+        uid: userProfile?.uid || user?.uid || sId,
+        name: userProfile?.name || `${userProfile?.firstName || ''} ${userProfile?.lastNamePaterno || ''}`.trim() || user?.displayName || 'Coordinador',
+        records: mergedRecords,
+        horasTotales: Math.max(Number(userProfile?.horasTotales || studentInList?.horasTotales || 0), approvedHoursCalc),
+        status: isPureCoord ? 'Coordinador' : (userProfile?.status || studentInList?.status || 'En Curso'),
+        projectIds: isPureCoord 
+          ? projects.map((p: any) => p.id) 
+          : ((userProfile?.projectIds && userProfile.projectIds.length > 0) 
+            ? userProfile.projectIds 
+            : (studentInList?.projectIds?.length ? studentInList.projectIds : (projects.length ? [projects[0].id] : [])))
       };
     }
     return studentInList;
@@ -2712,15 +3129,32 @@ const App = () => {
 
   const filteredStudents = useMemo(() => {
     let result = studentsWithRecords.filter(s => {
-      if (s.email && SUPER_ADMIN_EMAILS.includes(s.email)) return false;
-      
-      // Filter by archived status
-      if (showArchived && !s.isArchived) return false;
-      if (!showArchived && s.isArchived) return false;
+      const sEffectiveRole = getEffectiveRole(s.email, s.role);
+      const isSuperAdminEmail = Boolean(s.email && SUPER_ADMIN_EMAILS.includes(s.email));
+      const isCoordinatorOrAdmin = sEffectiveRole === 'coordinator' || sEffectiveRole === 'super_coordinator' || sEffectiveRole === 'master_coordinator' || s.role === 'admin' || isSuperAdminEmail;
 
-      const matchStatus = filterStatus === 'Todos' || s.status === filterStatus;
-      const matchWork = filterWork === 'Todos' || s.workStatus === filterWork;
-      const matchProject = filterProject === 'Todos' || (s.projectIds || []).includes(filterProject);
+      if (dashboardTab === 'coordinators') {
+        if (!isCoordinatorOrAdmin) return false;
+      } else {
+        if (isCoordinatorOrAdmin) return false;
+        
+        // Filter by archived/finalized status
+        const isFinishedOrArchived = Boolean(
+          s.isArchived || 
+          isStudentFinished(s) || 
+          (s.status || '').toLowerCase() === 'finalizado' || 
+          (s.status || '').toLowerCase() === 'concluido' ||
+          (s.workStatus || '').toLowerCase() === 'finalizado' ||
+          getStudentApprovedHours(s) >= TOTAL_REQUIRED_HOURS
+        );
+
+        if (dashboardTab === 'students' && isFinishedOrArchived) return false;
+        if (dashboardTab === 'archived' && !isFinishedOrArchived) return false;
+      }
+
+      const matchStatus = dashboardTab === 'coordinators' || filterStatus === 'Todos' || s.status === filterStatus;
+      const matchWork = dashboardTab === 'coordinators' || filterWork === 'Todos' || s.workStatus === filterWork;
+      const matchProject = filterProject === 'Todos' || isCoordinatorOrAdmin || (s.projectIds || []).includes(filterProject);
       const matchCategory = filterCategories.length === categories.length || (s.records || []).some((r: any) => filterCategories.includes(r.categoryId));
       const matchCareer = filterCareer === 'Todos' || s.career === filterCareer;
       const matchBrigade = filterBrigade === 'Todos' || s.brigadePeriod === filterBrigade;
@@ -2731,27 +3165,24 @@ const App = () => {
       const matchSearch = getFullName(s).toLowerCase().includes(lowerSearch) ||
                           (s.nickname || '').toLowerCase().includes(lowerSearch) ||
                           (s.career || '').toLowerCase().includes(lowerSearch) ||
+                          (s.email || '').toLowerCase().includes(lowerSearch) ||
                           hasMatchingTag;
       return matchStatus && matchWork && matchProject && matchCategory && matchCareer && matchBrigade && matchSearch;
     });
 
     if (sortHours !== 'none') {
-      const getApprovedHours = (s: any) => (s.records || []).reduce((sum: number, r: any) => {
-        if (r.validationStatus === 'aprobado' || !r.validationStatus) return sum + r.hours;
-        return sum;
-      }, 0);
       result.sort((a, b) => {
-        const aHours = getApprovedHours(a);
-        const bHours = getApprovedHours(b);
+        const aHours = getStudentApprovedHours(a);
+        const bHours = getStudentApprovedHours(b);
         return sortHours === 'asc' ? aHours - bHours : bHours - aHours;
       });
     }
     return result;
-  }, [studentsWithRecords, filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours, showArchived]);
+  }, [studentsWithRecords, filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours, dashboardTab]);
 
   useEffect(() => {
     setStudentPage(1);
-  }, [filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours, showArchived]);
+  }, [filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours, dashboardTab]);
 
   const paginatedStudents = useMemo(() => {
     const startIndex = (studentPage - 1) * studentsPerPage;
@@ -2764,11 +3195,46 @@ const App = () => {
     return studentsWithRecords.filter(s => {
       if (s.email && SUPER_ADMIN_EMAILS.includes(s.email)) return false;
       if (s.isArchived) return false;
-      if (s.status === 'Baja' || s.status === 'Finalizado' || s.status === 'Inactivo') return false;
-      if (s.workStatus === 'Finalizado' || s.workStatus === 'Baja') return false;
+      const statusLower = (s.status || '').toLowerCase().trim();
+      if (statusLower === 'baja' || statusLower === 'finalizado' || statusLower === 'inactivo' || statusLower === 'concluido') return false;
+      const workStatusLower = (s.workStatus || '').toLowerCase().trim();
+      if (workStatusLower === 'finalizado' || workStatusLower === 'baja' || workStatusLower === 'inactivo' || workStatusLower === 'concluido') return false;
       return !isStudentFinished(s);
     });
   }, [studentsWithRecords]);
+
+  // Alumnxs activos actualmente enrolados en proyectos (para la sección de habilidades)
+  const activeEnrolledStudents = useMemo(() => {
+    return studentsWithRecords.filter(s => {
+      // 1. Excluir coordinadores/supercoordinadores/admin - Solo alumnxs
+      if (s.email && SUPER_ADMIN_EMAILS.includes(s.email)) return false;
+      const effectiveRole = getEffectiveRole(s.email, s.role);
+      const isPureCoordinator = (effectiveRole === 'coordinator' || effectiveRole === 'super_coordinator' || effectiveRole === 'master_coordinator' || s.role === 'admin') && effectiveRole !== 'student_coordinator';
+      if (isPureCoordinator) return false;
+
+      // 2. Solo alumnos activos (no archivados, no baja, no concluido/finalizado, menos de 480 horas)
+      if (s.isArchived) return false;
+      if (isStudentFinished(s)) return false;
+      const statusLower = (s.status || '').toLowerCase().trim();
+      if (statusLower === 'baja' || statusLower === 'finalizado' || statusLower === 'inactivo' || statusLower === 'concluido' || statusLower === 'terminado') return false;
+      const workStatusLower = (s.workStatus || '').toLowerCase().trim();
+      if (workStatusLower === 'finalizado' || workStatusLower === 'baja' || workStatusLower === 'inactivo' || workStatusLower === 'concluido' || workStatusLower === 'terminado') return false;
+
+      // 3. Actualmente enrolados en al menos un proyecto
+      const hasProjects = Array.isArray(s.projectIds) && s.projectIds.length > 0;
+      if (!hasProjects) return false;
+
+      // Si la lista de proyectos está disponible, asegurar que al menos uno de sus proyectos no esté eliminado
+      if (projects && projects.length > 0) {
+        const isEnrolledInActiveProject = s.projectIds.some((pid: string) => 
+          projects.some((p: any) => p.id === pid && !p.isDeleted)
+        );
+        if (!isEnrolledInActiveProject) return false;
+      }
+
+      return true;
+    });
+  }, [studentsWithRecords, projects]);
 
   const filteredActiveStudentsForActivity = useMemo(() => {
     if (!activityStudentSearch.trim()) return activeEligibleStudents;
@@ -3075,8 +3541,14 @@ const App = () => {
       return;
     }
 
-    // Validación de certificación (horas mínimas)
-    if (studentForm.status === 'Finalizado') {
+    const existingStudent = getStudentData(selectedStudentId);
+    const targetNewRole = studentForm.role || existingStudent?.role || 'user';
+    const isBecomingCoordinator = targetNewRole === 'coordinator' || targetNewRole === 'super_coordinator' || targetNewRole === 'master_coordinator';
+    const wasStudentWithHours = (existingStudent?.role || 'user') === 'user' || existingStudent?.role === 'student_coordinator';
+    const derivedSkills = studentForm.skillRatings?.map((s: any) => s.name) || studentForm.skills || [];
+
+    // Validación de certificación (horas mínimas) para alumnos regulares
+    if (studentForm.status === 'Finalizado' && !isBecomingCoordinator) {
       const currentStudent = getStudentData(selectedStudentId);
       const totalHours = currentStudent ? (currentStudent.records || []).reduce((acc: number, r: any) => {
         if (r.validationStatus === 'aprobado') return acc + r.hours;
@@ -3097,14 +3569,16 @@ const App = () => {
       const updateFirestore = async () => {
         try {
           const docRef = doc(db, 'users', selectedStudentId!);
-          const existingStudent = getStudentData(selectedStudentId);
           
-          const derivedSkills = studentForm.skillRatings?.map((s: any) => s.name) || studentForm.skills || [];
           const updatedData = {
             ...studentForm,
             skills: derivedSkills,
             uid: selectedStudentId,
-            role: studentForm.role || existingStudent?.role || 'user',
+            role: targetNewRole,
+            projectIds: isBecomingCoordinator ? projects.map(p => p.id) : (studentForm.projectIds || []),
+            status: isBecomingCoordinator ? 'Coordinador' : ((isBecomingCoordinator && wasStudentWithHours) ? 'Finalizado' : studentForm.status),
+            workStatus: (isBecomingCoordinator && wasStudentWithHours) ? 'Finalizado' : studentForm.workStatus,
+            isArchived: (isBecomingCoordinator && wasStudentWithHours) ? true : Boolean((studentForm as any).isArchived || existingStudent?.isArchived),
             createdAt: existingStudent?.createdAt || new Date().toISOString()
           };
           
@@ -3160,11 +3634,14 @@ const App = () => {
         try {
           const docRef = doc(db, 'users', newId);
           const derivedSkills = studentForm.skillRatings?.map((s: any) => s.name) || studentForm.skills || [];
+          const isCoordRole = studentForm.role === 'coordinator' || studentForm.role === 'super_coordinator' || studentForm.role === 'master_coordinator';
           const newStudentData = {
             ...studentForm,
             skills: derivedSkills,
             uid: newId,
             role: studentForm.role || 'user',
+            projectIds: isCoordRole ? projects.map(p => p.id) : (studentForm.projectIds || []),
+            status: isCoordRole ? 'Coordinador' : (studentForm.status || 'En Curso'),
             createdAt: new Date().toISOString(),
             records: []
           };
@@ -3200,12 +3677,30 @@ const App = () => {
   const handleApproveRecord = async (studentId: string, recordId: string) => {
     const loadingToast = showLoadingToast("Aprobando registro...");
     try {
+      const nowIso = new Date().toISOString();
+      const currentUid = user?.uid || auth.currentUser?.uid || '';
       const sessionRef = doc(db, 'sesiones', recordId);
-      await updateDoc(sessionRef, {
+      await setDoc(sessionRef, {
         estado: 'aprobado',
+        validationStatus: 'aprobado',
         status: 'A',
-        updatedBy: user?.uid
-      });
+        updatedBy: currentUid,
+        validatedBy: currentUid,
+        validatedAt: nowIso
+      }, { merge: true });
+
+      // Optimistic local state update
+      setStudents(prev => prev.map(s => {
+        if (s.id === studentId) {
+          return {
+            ...s,
+            records: (s.records || []).map((r: any) => 
+              r.id === recordId ? { ...r, estado: 'aprobado', validationStatus: 'aprobado', status: 'A', validatedAt: nowIso } : r
+            )
+          };
+        }
+        return s;
+      }));
 
       // Verificar si alcanzó las horas totales con esta aprobación
       const student = studentsWithRecords.find(s => s.id === studentId);
@@ -3777,6 +4272,7 @@ const App = () => {
           description: descriptionStr,
           projectId: projectIdStr,
           status: 'A',
+          estado: 'aprobado',
           validationStatus: 'aprobado',
           evidenceLink: evidenceLinkStr,
           createdAt: new Date().toISOString(),
@@ -4203,12 +4699,7 @@ const App = () => {
                   {filteredActiveStudentsForActivity.length === 0 ? 'Sin alumnos activos disponibles' : 'Seleccionar Alumno...'}
                 </option>
                 {filteredActiveStudentsForActivity.map((s, idx) => {
-                  const approvedHrs = (s.records || []).reduce((acc: number, r: any) => {
-                    if (r.validationStatus === 'aprobado' || !r.validationStatus) {
-                      return acc + (Number(r.hours) || Number(r.horasCalculadas) || 0);
-                    }
-                    return acc;
-                  }, 0);
+                  const approvedHrs = getStudentApprovedHours(s);
                   return (
                     <option key={`${s.id || 'student'}-${idx}`} value={s.id} className={isDarkMode ? 'bg-[#1a1a1a]' : ''}>
                       {s.name || getFullName(s)} {s.studentId ? `(${s.studentId})` : ''} — {s.career || ''} [{Number(approvedHrs.toFixed(1))}/{TOTAL_REQUIRED_HOURS}h]
@@ -4224,11 +4715,16 @@ const App = () => {
           <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
-                  Participantes Activos
-                </label>
+                <div className="flex items-center gap-2">
+                  <label className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
+                    Participantes
+                  </label>
+                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border ${isDarkMode ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                    ✓ Solo Prestadores Activos
+                  </span>
+                </div>
                 <p className={`text-[11px] font-bold ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
-                  {activityForm.selectedStudentIds.length} de {activeEligibleStudents.length} alumno{activeEligibleStudents.length === 1 ? '' : 's'} seleccionado{activityForm.selectedStudentIds.length === 1 ? '' : 's'}
+                  {activityForm.selectedStudentIds.length} de {activeEligibleStudents.length} alumno{activeEligibleStudents.length === 1 ? '' : 's'} activo{activeEligibleStudents.length === 1 ? '' : 's'} disponible{activeEligibleStudents.length === 1 ? '' : 's'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -4557,13 +5053,111 @@ const App = () => {
     }
   };
 
+  const handleRoleChange = async (targetStudentId: string, newRole: UserRole) => {
+    const sId = String(targetStudentId);
+    const targetStudent = getStudentData(sId);
+    if (!targetStudent) return;
+
+    // Safety 1: Master Coordinator can NEVER have their role altered
+    const isTargetMaster = (targetStudent.email || '').toLowerCase() === MASTER_COORDINATOR_EMAIL.toLowerCase();
+    if (isTargetMaster) {
+      showErrorToast("El rol del Coordinador Maestro no puede ser modificado.");
+      return;
+    }
+
+    // Safety 2: Only Master Coordinator can assign super_coordinator
+    if (newRole === 'super_coordinator' && !permissions.isMaster) {
+      showErrorToast("Solo el Coordinador Maestro (luisedgar.gutierrez17@gmail.com) puede dar de alta Supercoordinadores.");
+      return;
+    }
+
+    // Safety 3: Only Master Coordinator can modify a Supercoordinator
+    const currentTargetRole = getEffectiveRole(targetStudent.email, targetStudent.role);
+    if ((currentTargetRole === 'super_coordinator' || currentTargetRole === 'admin') && !permissions.isMaster) {
+      showErrorToast("Solo el Coordinador Maestro puede cambiar el rol de un Supercoordinador.");
+      return;
+    }
+
+    // Safety 4: Coordinators can only toggle between user and student_coordinator
+    if (!permissions.isSuper && permissions.isCoordinator) {
+      if (newRole !== 'user' && newRole !== 'student_coordinator') {
+        showErrorToast("Un Coordinador solo puede alternar entre Alumno y Alumno Coordinador.");
+        return;
+      }
+    }
+
+    const isBecomingCoordinator = newRole === 'coordinator' || newRole === 'super_coordinator' || newRole === 'master_coordinator';
+    const wasStudentWithHours = currentTargetRole === 'user' || currentTargetRole === 'student_coordinator';
+
+    const updateData: any = {
+      role: newRole,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (isBecomingCoordinator && wasStudentWithHours) {
+      updateData.status = 'Finalizado';
+      updateData.workStatus = 'Finalizado';
+      updateData.isArchived = true;
+      updateData.serviceConcluded = true;
+      updateData.hoursConcluded = true;
+      updateData.projectIds = projects.map((p: any) => p.id);
+    } else if (isBecomingCoordinator) {
+      updateData.projectIds = projects.map((p: any) => p.id);
+    } else if (!isBecomingCoordinator && targetStudent.status === 'Finalizado' && !isStudentFinished(targetStudent)) {
+      updateData.status = 'En Curso';
+      updateData.workStatus = 'Asignado';
+      updateData.isArchived = false;
+    }
+
+    // Optimistic local update
+    setStudents(prev => {
+      const next = prev.map(s => String(s.id) === sId ? { ...s, ...updateData } : s);
+      localStorage.setItem('app_students', JSON.stringify(next));
+      return next;
+    });
+
+    try {
+      await setDoc(doc(db, 'users', sId), updateData, { merge: true });
+      await setDoc(doc(db, 'public_profiles', sId), updateData, { merge: true });
+      showSuccessToast(`Rol actualizado a "${ROLE_LABELS[newRole]?.label || newRole}" exitosamente`);
+    } catch (err) {
+      console.error("Error updating role in Firestore:", err);
+      handleFirestoreError(err, OperationType.UPDATE, `users/${sId}`);
+    }
+  };
+
   const handleDeleteStudent = (studentId: string) => {
     const sId = String(studentId);
+    const targetStudent = getStudentData(sId);
+
+    // Safety check 1: Master Coordinator can NEVER be deleted
+    if (targetStudent?.email?.toLowerCase() === MASTER_COORDINATOR_EMAIL.toLowerCase()) {
+      showErrorToast("El Coordinador Maestro (luisedgar.gutierrez17@gmail.com) no puede ser eliminado.");
+      return;
+    }
+
+    // Safety check 2: Supercoordinators cannot delete other Supercoordinators
+    const targetRole = getEffectiveRole(targetStudent?.email, targetStudent?.role);
+    if ((targetRole === 'super_coordinator' || targetRole === 'master_coordinator' || targetRole === 'admin') && !permissions.isMaster) {
+      showErrorToast("No tienes permisos para eliminar a otro Supercoordinador. Solo el Coordinador Maestro puede realizar esta acción.");
+      return;
+    }
+
+    // Safety check 3: Must be at least Supercoordinator to delete users
+    if (!permissions.isSuper) {
+      showErrorToast("No tienes permisos para eliminar usuarios.");
+      return;
+    }
+
     showConfirmToast(
       "¿Estás seguro de que deseas eliminar a este usuario? Esta acción no se puede deshacer y se eliminarán todos sus registros, tareas e historial asociados.",
       async () => {
         // Optimistic update: remove from local state immediately
-        setStudents(prev => prev.filter(s => String(s.id) !== sId));
+        setStudents(prev => {
+          const next = prev.filter(s => String(s.id) !== sId);
+          localStorage.setItem('app_students', JSON.stringify(next));
+          return next;
+        });
         
         // If we are viewing this student, reset view
         if (String(selectedStudentId) === sId) {
@@ -4572,10 +5166,6 @@ const App = () => {
         }
 
         try {
-          // In this application, all user-related data (records, projectTasks, projectTaskHistory)
-          // is stored directly within the user document in the 'users' collection.
-          // However, notifications are in a subcollection and must be deleted separately.
-          
           // 1. Delete notifications subcollection
           const notifsRef = collection(db, 'users', sId, 'notifications');
           const notifsSnap = await getDocs(notifsRef);
@@ -4596,6 +5186,47 @@ const App = () => {
         }
       }
     );
+  };
+
+  const handleToggleArchive = async (studentId: string) => {
+    const sId = String(studentId);
+    const student = getStudentData(sId);
+    if (!student) return;
+
+    const newArchived = !student.isArchived;
+    const updateData: any = {
+      isArchived: newArchived
+    };
+
+    if (newArchived) {
+      const approvedHours = getStudentApprovedHours(student);
+      if (approvedHours >= TOTAL_REQUIRED_HOURS || student.status === 'Finalizado') {
+        updateData.status = 'Finalizado';
+        updateData.workStatus = 'Finalizado';
+        updateData.projectIds = [];
+        updateData.finalizedAt = student.finalizedAt || new Date().toISOString();
+      }
+    }
+
+    // Immediate local state update
+    setStudents(prev => {
+      const next = prev.map(s => String(s.id) === sId ? { ...s, ...updateData } : s);
+      localStorage.setItem('app_students', JSON.stringify(next));
+      return next;
+    });
+
+    try {
+      await setDoc(doc(db, 'users', sId), updateData, { merge: true });
+      try {
+        await setDoc(doc(db, 'public_profiles', sId), updateData, { merge: true });
+      } catch (e) {
+        console.warn("Could not sync public_profiles for archive toggle:", e);
+      }
+      showSuccessToast(newArchived ? "Expediente archivado correctamente" : "Expediente reactivado");
+    } catch (error) {
+      console.error("Error toggling archive in Firestore:", error);
+      handleFirestoreError(error, OperationType.WRITE, `users/${sId}`);
+    }
   };
 
   const handleUpdateProfile = async () => {
@@ -4685,21 +5316,37 @@ const App = () => {
   const { breakpoint } = useBreakpoint();
 
   if (loading) return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+    <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'bg-[#121212]' : 'bg-slate-50'}`}>
       <div className="flex flex-col items-center gap-4">
         <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-        <p className="text-slate-500 font-bold animate-pulse">Cargando aplicación...</p>
+        <p className={`${isDarkMode ? 'text-slate-400' : 'text-slate-500'} font-bold animate-pulse`}>Cargando aplicación...</p>
       </div>
     </div>
   );
   if (!user) return <Login />;
-  if (!userProfile) return <ProfileForm user={user} onComplete={(profile) => {
-    setUserProfile(profile);
-    const isAdminEmail = (user?.email && SUPER_ADMIN_EMAILS.includes(user.email));
-    setUserRole(isAdminEmail ? 'admin' : (profile.role || 'user'));
-    setCurrentUserId(profile.uid || null);
-    setView(profile.role === 'user' ? 'user-dashboard' : 'dashboard');
-  }} />;
+  
+  if (!userProfile) {
+    const effective = getEffectiveRole(user?.email);
+    if (effective !== 'user') {
+      return (
+        <div className={`min-h-screen flex items-center justify-center ${isDarkMode ? 'bg-[#121212]' : 'bg-slate-50'}`}>
+          <div className="flex flex-col items-center gap-4">
+            <div className="w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+            <p className={`${isDarkMode ? 'text-purple-400' : 'text-purple-600'} font-bold animate-pulse`}>
+              Cargando perfil de {ROLE_LABELS[effective]?.label || 'Coordinación'}...
+            </p>
+          </div>
+        </div>
+      );
+    }
+    return <ProfileForm user={user} isDarkMode={isDarkMode} onComplete={(profile) => {
+      setUserProfile(profile);
+      const eff = getEffectiveRole(user?.email, profile.role);
+      setUserRole(eff);
+      setCurrentUserId(profile.uid || null);
+      setView(eff === 'user' || eff === 'student_coordinator' ? 'user-dashboard' : 'dashboard');
+    }} />;
+  }
 
   return (
     <ErrorBoundary>
@@ -4831,7 +5478,7 @@ const App = () => {
                 </div>
               ) : (
                 <h1 className={`font-black uppercase tracking-tight truncate max-w-[240px] sm:max-w-none ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                  {view === 'dashboard' ? 'Dashboard' : view === 'validation' ? 'Validación' : view === 'user-dashboard' ? 'Mi Progreso' : (view === 'skill-map' || view === 'skills') ? 'Mapa de Habilidades' : 'Directorio'}
+                  {view === 'dashboard' ? 'Dashboard' : view === 'session' ? 'Sesión de Trabajo' : view === 'validation' ? 'Validación' : view === 'user-dashboard' ? 'Mi Progreso' : (view === 'skill-map' || view === 'skills') ? 'Mapa de Habilidades' : 'Directorio'}
                 </h1>
               )}
             </div>
@@ -4996,6 +5643,7 @@ const App = () => {
               <AdminValidation 
                 students={studentsWithRecords}
                 setStudents={setStudents}
+                setSessions={setSessions}
                 categories={categories}
                 projects={projects}
                 isDarkMode={isDarkMode}
@@ -5022,12 +5670,81 @@ const App = () => {
           )}
           {view === 'skills' && (
             <SkillsView 
-              users={studentsWithRecords}
+              users={activeEnrolledStudents}
               currentUserRole={userRole}
               currentUserId={user?.uid || ''}
               projects={projects}
               isDarkMode={isDarkMode}
             />
+          )}
+          {view === 'task-board' && (
+            <TaskWorkspace
+              initialProjectId={selectedProjectId || undefined}
+              projects={projects}
+              students={studentsWithRecords}
+              currentUserId={user?.uid || ''}
+              currentUserName={userProfile ? `${userProfile.firstName || ''} ${userProfile.lastNamePaterno || ''}`.trim() : (user?.displayName || 'Usuario')}
+              currentUserRole={userRole}
+              isDarkMode={isDarkMode}
+              onLogHoursForTask={async (task) => {
+                const currentUid = user?.uid || '';
+                const currentStudent = students.find((s: any) => s.id === currentUid);
+                const studentName = currentStudent?.name || user?.displayName || 'Alumno';
+                const hoursNum = 4;
+                const nowIso = new Date().toISOString();
+
+                try {
+                  await addDoc(collection(db, 'sesiones'), {
+                    userId: currentUid,
+                    studentId: currentUid,
+                    studentName: studentName,
+                    date: getCDMXDateString(),
+                    startTime: '09:00',
+                    endTime: '13:00',
+                    hours: hoursNum,
+                    horasCalculadas: hoursNum,
+                    categoryId: categories[0]?.id || 'cat-1',
+                    description: `Tarea completada: ${task.title}${task.description ? ' - ' + task.description : ''}`,
+                    projectId: task.projectId,
+                    status: 'A',
+                    estado: userRole === 'user' ? 'pendiente' : 'aprobado',
+                    validationStatus: userRole === 'user' ? 'pendiente' : 'aprobado',
+                    createdAt: nowIso,
+                    createdBy: currentUid
+                  });
+                  toast.success(`Horas de "${task.title}" asentadas exitosamente en tu bitácora`);
+                } catch (err) {
+                  toast.error('Error al asentar horas en la bitácora');
+                }
+              }}
+            />
+          )}
+          {view === 'session' && (
+            permissions.isCoordinator ? (
+              <SessionWorkspace
+                projects={projects}
+                students={studentsWithRecords}
+                categories={categories}
+                userRole={userRole}
+                currentUser={user}
+                onBack={() => setView('dashboard')}
+                isDarkMode={isDarkMode}
+              />
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center min-h-[50vh]">
+                <div className={`p-8 rounded-3xl border max-w-md mx-auto ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
+                  <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-3" />
+                  <h3 className="text-lg font-black uppercase tracking-wider mb-2">Acceso Exclusivo para Coordinadores</h3>
+                  <p className="text-xs text-slate-500 dark:text-gray-400 mb-6">El módulo de Sesión de Trabajo está reservado únicamente para coordinadores del servicio social.</p>
+                  <button 
+                    onClick={() => setView(userRole === 'user' ? 'user-dashboard' : 'dashboard')}
+                    className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all text-xs uppercase tracking-wider"
+                  >
+                    Volver a mi panel
+                  </button>
+                </div>
+              </div>
+            )
           )}
           {view === 'dashboard' && userRole !== 'user' && (
             <div className="space-y-6 sm:space-y-10">
@@ -5036,63 +5753,120 @@ const App = () => {
                   <h2 className={`text-3xl sm:text-5xl font-black tracking-tighter ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Prestadores</h2>
                   <p className={`${isDarkMode ? 'text-gray-500' : 'text-slate-500'} font-medium mt-1 uppercase text-[9px] sm:text-[11px] tracking-[0.2em] italic`}>Sistema central de seguimiento y control de horas</p>
                 </div>
-                <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4 w-full sm:w-auto">
-                  <button onClick={() => { setSelectedProjectId(null); setView('project-directory'); }} className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-sm transition-all active:scale-95 ${isDarkMode ? 'bg-white/5 text-white hover:bg-white/10' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}><Briefcase size={18} /> Directorio</button>
+                <div className="grid grid-cols-2 sm:flex sm:flex-row flex-wrap gap-2 sm:gap-4 w-full sm:w-auto">
+                  {permissions.isCoordinator && (
+                    <button 
+                      onClick={() => setView('session')} 
+                      className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-indigo-600/20 transition-all active:scale-95 bg-indigo-600 text-white hover:bg-indigo-700 min-h-[44px]`}
+                    >
+                      <Layers size={18} /> Sesión
+                    </button>
+                  )}
+                  <button onClick={() => { setSelectedProjectId(null); setView('project-directory'); }} className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-sm transition-all active:scale-95 min-h-[44px] ${isDarkMode ? 'bg-white/5 text-white hover:bg-white/10' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100'}`}><Briefcase size={18} /> Directorio</button>
                   {(userRole === 'admin' || userRole === 'coordinator') && (
                     <>
                       <button 
                         id="export-sheets-btn"
                         onClick={handleExportToSheets} 
                         disabled={isExporting}
-                        className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-emerald-500/20 transition-all active:scale-95 ${isDarkMode ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
+                        className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-emerald-500/20 transition-all active:scale-95 min-h-[44px] ${isDarkMode ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'}`}
                       >
                         <Download size={18} /> {isExporting ? 'Exportando...' : 'Sheets'}
                       </button>
-                      <button onClick={() => { setShowBulkProjectAssign(true); setSelectedStudentsForBulk([]); setSelectedProjectsForBulk([]); }} className="w-full sm:w-auto bg-amber-500 text-white px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:bg-amber-600 transition-all active:scale-95"><Folder size={18} /> Asignar</button>
-                      <button onClick={() => setView('group-activity')} className="w-full sm:w-auto bg-emerald-600 text-white px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-emerald-600/20 hover:bg-emerald-700 transition-all active:scale-95"><Users size={18} /> Manual</button>
-                      <button onClick={handleSyncPublicProfiles} className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-sm transition-all active:scale-95 ${isDarkMode ? 'bg-white/5 border-white/10 text-white hover:bg-white/10' : 'bg-white border-2 border-indigo-100 text-indigo-600 hover:bg-indigo-50'}`}><RefreshCw size={18} /> Sincronizar</button>
+                      <button onClick={() => { setShowBulkProjectAssign(true); setSelectedStudentsForBulk([]); setSelectedProjectsForBulk([]); }} className="w-full sm:w-auto bg-amber-500 text-white px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-amber-500/20 hover:bg-amber-600 transition-all active:scale-95 min-h-[44px]"><Folder size={18} /> Asignar</button>
+                      <button onClick={() => setView('group-activity')} className="w-full sm:w-auto bg-emerald-600 text-white px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-xl shadow-emerald-600/20 hover:bg-emerald-700 transition-all active:scale-95 min-h-[44px]"><Users size={18} /> Manual</button>
+                      <button onClick={handleSyncPublicProfiles} className={`w-full sm:w-auto px-4 py-3 sm:px-6 sm:py-3 rounded-xl sm:rounded-2xl flex items-center justify-center gap-2 sm:gap-3 font-black text-[10px] sm:text-xs uppercase tracking-widest sm:tracking-[0.2em] shadow-sm transition-all active:scale-95 min-h-[44px] ${isDarkMode ? 'bg-white/5 border-white/10 text-white hover:bg-white/10' : 'bg-white border-2 border-indigo-100 text-indigo-600 hover:bg-indigo-50'}`}><RefreshCw size={18} /> Sincronizar</button>
                     </>
                   )}
                 </div>
               </div>
 
               {/* Filtros */}
-              <div className={`${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'} p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm flex flex-col gap-6 sm:gap-8`}>
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-xl ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
-                      <Filter size={18} />
+              <div className={`${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'} p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm flex flex-col gap-4 sm:gap-6 max-w-full overflow-hidden`}>
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-4 min-w-0">
+                  <div className="flex items-center justify-between w-full sm:w-auto gap-3 min-w-0">
+                    <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                      <div className={`p-2 rounded-xl shrink-0 ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
+                        <Filter size={18} />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className={`text-base sm:text-lg font-black tracking-tight truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Panel de Filtrado</h3>
+                        <p className={`text-[9px] sm:text-[10px] font-bold uppercase tracking-widest truncate ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Gestión de búsqueda y segmentación</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className={`text-base sm:text-lg font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Panel de Filtrado</h3>
-                      <p className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Gestión de búsqueda y segmentación</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`${isDarkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-900'} px-4 py-1.5 rounded-xl text-[10px] sm:text-[11px] font-black uppercase tracking-widest border ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`}>
-                      {filteredStudents.length} {filteredStudents.length === 1 ? 'Alumno' : 'Alumnos'}
-                    </span>
-                    <button 
-                      onClick={() => setShowArchived(!showArchived)}
-                      className={`px-4 py-1.5 rounded-xl text-[10px] sm:text-[11px] font-black uppercase tracking-widest border transition-all ${
-                        showArchived 
-                          ? 'bg-amber-500 text-white border-amber-600 shadow-lg shadow-amber-500/20' 
-                          : isDarkMode ? 'bg-white/5 text-gray-400 border-white/10 hover:text-white' : 'bg-white text-slate-400 border-slate-200 hover:text-slate-600'
+
+                    {/* Botón toggle móvil para colapsar/expandir filtros */}
+                    <button
+                      onClick={() => setShowMobileFilters(prev => !prev)}
+                      className={`sm:hidden px-3 py-2 rounded-xl border text-[10px] font-black uppercase tracking-wider flex items-center gap-1.5 transition-all shrink-0 min-h-[38px] ${
+                        showMobileFilters || activeFilterCount > 0
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                          : isDarkMode ? 'bg-white/5 border-white/10 text-gray-300' : 'bg-slate-50 border-slate-200 text-slate-700'
                       }`}
+                      aria-label="Alternar visibilidad de filtros"
                     >
-                      {showArchived ? 'Ver Activos' : 'Ver Archivados'}
+                      <Filter size={12} />
+                      <span>Filtros</span>
+                      {activeFilterCount > 0 && (
+                        <span className="w-4 h-4 rounded-full bg-white text-indigo-600 text-[9px] font-black flex items-center justify-center">
+                          {activeFilterCount}
+                        </span>
+                      )}
+                      <ChevronDown size={14} className={`transition-transform duration-200 ${showMobileFilters ? 'rotate-180' : ''}`} />
                     </button>
+                  </div>
+
+                  <div className="w-full sm:w-auto flex items-center gap-2 min-w-0 overflow-hidden">
+                    <div className={`p-1 rounded-2xl border flex items-center gap-1 w-full sm:w-auto overflow-x-auto no-scrollbar scroll-smooth whitespace-nowrap min-w-0 ${isDarkMode ? 'bg-black/30 border-white/10' : 'bg-slate-100 border-slate-200'}`}>
+                      <button
+                        onClick={() => setDashboardTab('students')}
+                        className={`px-3 py-2 sm:px-3.5 sm:py-1.5 rounded-xl text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap min-h-[38px] sm:min-h-0 ${
+                          dashboardTab === 'students'
+                            ? (isDarkMode ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'bg-white text-indigo-600 shadow-sm')
+                            : (isDarkMode ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900')
+                        }`}
+                      >
+                        <Users size={13} />
+                        <span>Alumnos Activos</span>
+                      </button>
+                      <button
+                        onClick={() => setDashboardTab('coordinators')}
+                        className={`px-3 py-2 sm:px-3.5 sm:py-1.5 rounded-xl text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap min-h-[38px] sm:min-h-0 ${
+                          dashboardTab === 'coordinators'
+                            ? (isDarkMode ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-600/30' : 'bg-white text-indigo-600 shadow-sm')
+                            : (isDarkMode ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900')
+                        }`}
+                      >
+                        <ShieldCheck size={13} />
+                        <span>Coordinadores</span>
+                      </button>
+                      <button
+                        onClick={() => setDashboardTab('archived')}
+                        className={`px-3 py-2 sm:px-3.5 sm:py-1.5 rounded-xl text-[10px] sm:text-[11px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 whitespace-nowrap min-h-[38px] sm:min-h-0 ${
+                          dashboardTab === 'archived'
+                            ? (isDarkMode ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-amber-500 text-white shadow-sm')
+                            : (isDarkMode ? 'text-gray-400 hover:text-white' : 'text-slate-600 hover:text-slate-900')
+                        }`}
+                      >
+                        <Layers size={13} />
+                        <span>Concluidos / Archivados</span>
+                      </button>
+                    </div>
+
+                    <span className={`hidden sm:inline-flex shrink-0 ${isDarkMode ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-900'} px-3 py-1.5 rounded-xl text-[10px] sm:text-[11px] font-black uppercase tracking-widest border ${isDarkMode ? 'border-white/10' : 'border-slate-200'}`}>
+                      {filteredStudents.length} {dashboardTab === 'coordinators' ? (filteredStudents.length === 1 ? 'Coord.' : 'Coords.') : (filteredStudents.length === 1 ? 'Alumno' : 'Alumnos')}
+                    </span>
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-6">
+                <div className="flex flex-col gap-4 sm:gap-6">
                   {/* Search Bar Refined */}
                   <div className="w-full relative group">
-                    <Search className={`absolute left-5 top-1/2 -translate-y-1/2 transition-colors duration-300 ${isDarkMode ? 'text-gray-600 group-focus-within:text-indigo-400' : 'text-slate-300 group-focus-within:text-indigo-500'}`} size={20} />
+                    <Search className={`absolute left-4 sm:left-5 top-1/2 -translate-y-1/2 transition-colors duration-300 ${isDarkMode ? 'text-gray-600 group-focus-within:text-indigo-400' : 'text-slate-300 group-focus-within:text-indigo-500'}`} size={18} />
                     <input 
                       type="text" 
-                      placeholder="Busca por nombre, carrera, brigade o etiqueta..." 
-                      className={`w-full pl-14 pr-6 py-4 rounded-2xl border text-sm font-bold outline-none transition-all ${
+                      placeholder="Busca por nombre, carrera, brigada o etiqueta..." 
+                      className={`w-full pl-11 sm:pl-14 pr-10 py-3.5 sm:py-4 rounded-2xl border text-xs sm:text-sm font-bold outline-none transition-all ${
                         isDarkMode 
                           ? 'bg-white/5 border-white/10 text-white focus:bg-white/10 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500/30' 
                           : 'bg-slate-50 border-slate-100 text-slate-900 focus:bg-white focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500/20 shadow-sm'
@@ -5103,22 +5877,33 @@ const App = () => {
                     {searchTerm && (
                       <button 
                         onClick={() => setSearchTerm('')}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10 text-slate-400 transition-colors"
+                        className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1.5 rounded-lg hover:bg-slate-200 dark:hover:bg-white/10 text-slate-400 transition-colors"
+                        aria-label="Limpiar búsqueda"
                       >
                         <X size={16} />
                       </button>
                     )}
                   </div>
 
-                  {/* Filter Selects Grid */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 w-full">
-                    <div className="space-y-2">
+                  {/* Resumen móvil de conteo y botón para limpiar */}
+                  <div className="flex sm:hidden items-center justify-between text-[10px] font-bold uppercase tracking-wider px-1 text-slate-400">
+                    <span>Mostrando: <strong className="text-slate-800 dark:text-white">{filteredStudents.length}</strong> {dashboardTab === 'coordinators' ? 'coordinadores' : 'alumnos'}</span>
+                    {activeFilterCount > 0 && (
+                      <button onClick={handleResetFilters} className="text-indigo-600 dark:text-indigo-400 font-black hover:underline flex items-center gap-1">
+                        <X size={12} /> Limpiar ({activeFilterCount})
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Filter Selects Grid - Colapsable en móvil, siempre visible en pantallas sm: y superiores */}
+                  <div className={`${showMobileFilters ? 'grid' : 'hidden sm:grid'} grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4 w-full animate-in fade-in duration-200`}>
+                    <div className="space-y-1.5 sm:space-y-2">
                       <div className="flex items-center gap-2 ml-1">
                         <Briefcase size={10} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
                         <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Proyecto</span>
                       </div>
                       <select 
-                        className={`w-full px-4 py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none ${
+                        className={`w-full px-3.5 sm:px-4 py-3 sm:py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none min-h-[44px] ${
                           isDarkMode 
                             ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' 
                             : 'bg-white border-slate-200 text-slate-900 focus:border-indigo-500/30 hover:border-slate-300'
@@ -5131,13 +5916,13 @@ const App = () => {
                       </select>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1.5 sm:space-y-2">
                       <div className="flex items-center gap-2 ml-1">
                         <BookOpen size={10} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
                         <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Carrera</span>
                       </div>
                       <select 
-                        className={`w-full px-4 py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none ${
+                        className={`w-full px-3.5 sm:px-4 py-3 sm:py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none min-h-[44px] ${
                           isDarkMode 
                             ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' 
                             : 'bg-white border-slate-200 text-slate-900 focus:border-indigo-500/30 hover:border-slate-300'
@@ -5150,13 +5935,13 @@ const App = () => {
                       </select>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1.5 sm:space-y-2">
                       <div className="flex items-center gap-2 ml-1">
                         <CalendarIcon size={10} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
                         <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Brigada</span>
                       </div>
                       <select 
-                        className={`w-full px-4 py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none ${
+                        className={`w-full px-3.5 sm:px-4 py-3 sm:py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none min-h-[44px] ${
                           isDarkMode 
                             ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' 
                             : 'bg-white border-slate-200 text-slate-900 focus:border-indigo-500/30 hover:border-slate-300'
@@ -5169,13 +5954,13 @@ const App = () => {
                       </select>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1.5 sm:space-y-2">
                       <div className="flex items-center gap-2 ml-1">
                         <Layers size={10} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
                         <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Estatus Acad.</span>
                       </div>
                       <select 
-                        className={`w-full px-4 py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none ${
+                        className={`w-full px-3.5 sm:px-4 py-3 sm:py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none min-h-[44px] ${
                           isDarkMode 
                             ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' 
                             : 'bg-white border-slate-200 text-slate-900 focus:border-indigo-500/30 hover:border-slate-300'
@@ -5188,13 +5973,13 @@ const App = () => {
                       </select>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1.5 sm:space-y-2">
                       <div className="flex items-center gap-2 ml-1">
                         <Zap size={10} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
                         <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Carga Trabajo</span>
                       </div>
                       <select 
-                        className={`w-full px-4 py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none ${
+                        className={`w-full px-3.5 sm:px-4 py-3 sm:py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none min-h-[44px] ${
                           isDarkMode 
                             ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' 
                             : 'bg-white border-slate-200 text-slate-900 focus:border-indigo-500/30 hover:border-slate-300'
@@ -5207,13 +5992,13 @@ const App = () => {
                       </select>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1.5 sm:space-y-2">
                       <div className="flex items-center gap-2 ml-1">
                         <ArrowDownUp size={10} className={isDarkMode ? 'text-gray-600' : 'text-slate-400'} />
                         <span className={`text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Ordenar</span>
                       </div>
                       <select 
-                        className={`w-full px-4 py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none ${
+                        className={`w-full px-3.5 sm:px-4 py-3 sm:py-3.5 rounded-xl border text-[11px] font-black uppercase outline-none transition-all shadow-sm cursor-pointer appearance-none min-h-[44px] ${
                           isDarkMode 
                             ? 'bg-white/5 border-white/10 text-white focus:bg-white/10' 
                             : 'bg-white border-slate-200 text-slate-900 focus:border-indigo-500/30 hover:border-slate-300'
@@ -5299,7 +6084,7 @@ const App = () => {
               </div>
 
               {/* Charts Section */}
-              <div className={`p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm mb-6 sm:mb-8 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
+              <div className={`p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm mb-6 sm:mb-8 max-w-full overflow-hidden ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
                 {isLoadingStudents ? (
                   <div className="space-y-6 animate-pulse">
                     <div className="flex justify-between items-end">
@@ -5329,8 +6114,8 @@ const App = () => {
                 )}
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
-                <div className={`p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8 max-w-full">
+                <div className={`p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm max-w-full overflow-hidden ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
                   <h3 className={`text-lg sm:text-xl font-black tracking-tight mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Horas por Proyecto</h3>
                   {isLoadingStudents ? (
                     <div className={`h-64 sm:h-80 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
@@ -5354,7 +6139,7 @@ const App = () => {
                   )}
                 </div>
 
-                <div className={`p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
+                <div className={`p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm max-w-full overflow-hidden ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
                   <h3 className={`text-lg sm:text-xl font-black tracking-tight mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Promedio Horas/Alumno por Proyecto</h3>
                   {isLoadingStudents ? (
                     <div className={`h-64 sm:h-80 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
@@ -5378,7 +6163,7 @@ const App = () => {
                   )}
                 </div>
 
-                <div className={`p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
+                <div className={`p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm max-w-full overflow-hidden ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
                   <h3 className={`text-lg sm:text-xl font-black tracking-tight mb-6 ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Distribución de Alumnos por Proyecto</h3>
                   {isLoadingStudents ? (
                     <div className={`h-64 sm:h-80 w-full rounded-2xl animate-pulse ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}></div>
@@ -5402,7 +6187,7 @@ const App = () => {
                   )}
                 </div>
 
-                <div className={`p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
+                <div className={`p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm max-w-full overflow-hidden ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-white border-slate-200'}`}>
                   <div className="flex items-center justify-between mb-6">
                     <div className="flex flex-col">
                       <h3 className={`text-lg sm:text-xl font-black tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Distribución de Categorías</h3>
@@ -5532,46 +6317,67 @@ const App = () => {
                   </div>
                 ) : (
                   paginatedStudents.map(student => {
-                  const totalHrs = (student?.records || []).reduce((acc: number, curr: any) => {
-                    if (curr.validationStatus === 'aprobado' || !curr.validationStatus) return acc + curr.hours;
-                    return acc;
-                  }, 0);
+                  const totalHrs = getStudentApprovedHours(student);
                   const perc = Math.min(100, (totalHrs / TOTAL_REQUIRED_HOURS) * 100);
                   const totalSessions = (student?.records || []).length;
                   const countAbsences = (student?.records || []).filter((r: any) => r.status !== 'A').length;
                   const absencePerc = totalSessions > 0 ? (countAbsences / totalSessions) * 100 : 0;
+                  const effectiveStatus = (isStudentFinished(student) || totalHrs >= TOTAL_REQUIRED_HOURS) ? 'Finalizado' : student.status;
+                  const isArchivedStudent = Boolean(student.isArchived || effectiveStatus === 'Finalizado');
+                  const targetRole = getEffectiveRole(student.email, student.role);
+                  const isMasterPerson = targetRole === 'master_coordinator';
+                  const isSuperPerson = targetRole === 'super_coordinator';
+                  const isCoordinatorPerson = isMasterPerson || isSuperPerson || targetRole === 'coordinator' || student.role === 'admin' || Boolean(student.email && SUPER_ADMIN_EMAILS.includes(student.email));
+                  const isStudentCoordinator = targetRole === 'student_coordinator';
+                  const isPureCoordinator = isCoordinatorPerson && !isStudentCoordinator;
+                  const hasNoHoursRequirement = isCoordinatorPerson;
+                  const hasProjects = isPureCoordinator || (student.projectIds && student.projectIds.length > 0);
+
+                  const canChangeTargetRole = !isMasterPerson && (
+                    permissions.isMaster ||
+                    (permissions.isSuper && targetRole !== 'super_coordinator') ||
+                    (permissions.isCoordinator && (targetRole === 'user' || targetRole === 'student_coordinator'))
+                  );
+                  const canDeleteTarget = permissions.canDeleteUser(student);
                   
                     return (
-                      <div key={student.id} onClick={() => { setSelectedStudentId(student.id); setView('student-detail'); }} className={`p-5 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm hover:shadow-md transition-all cursor-pointer relative overflow-hidden grid grid-cols-1 md:grid-cols-10 lg:grid-cols-[1fr_1.2fr_0.8fr] gap-4 sm:gap-6 ${isDarkMode ? 'bg-white/5 border-white/10 hover:border-indigo-500' : 'bg-white border-slate-200 hover:border-indigo-300'}`}>
-                        <div className={`absolute left-0 top-0 w-1.5 md:w-2 h-full transition-all duration-500 ${(student.projectIds && student.projectIds.length > 0) ? 'bg-green-500' : 'bg-orange-500'}`}></div>
+                      <div key={student.id} onClick={() => { setSelectedStudentId(student.id); setView('student-detail'); }} className={`p-4 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border shadow-sm hover:shadow-md transition-all cursor-pointer relative overflow-hidden grid grid-cols-1 md:grid-cols-10 lg:grid-cols-[1fr_1.2fr_0.8fr] gap-4 sm:gap-6 min-w-0 max-w-full ${isDarkMode ? 'bg-white/5 border-white/10 hover:border-indigo-500' : 'bg-white border-slate-200 hover:border-indigo-300'}`}>
+                        <div className={`absolute left-0 top-0 w-1.5 md:w-2 h-full transition-all duration-500 ${hasProjects ? 'bg-green-500' : 'bg-orange-500'}`}></div>
                         
                         {/* Col 1: Identidad */}
-                        <div className="md:col-span-6 lg:col-span-1 pl-3 flex flex-col justify-center order-1">
-                          <div className="flex flex-col mb-2 sm:mb-3">
-                            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-1">
-                              <h3 className={`font-black text-xl sm:text-3xl tracking-tight leading-tight ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{getDisplayName(student)}</h3>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className={`px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-[8px] sm:text-[9px] font-black uppercase border shadow-sm 
-                                  ${isDarkMode ? 
-                                    (student.status === 'En Curso' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
-                                     student.status === 'Finalizado' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
-                                     student.status === 'Pausada' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
-                                     'bg-red-500/10 text-red-400 border-red-500/20') : 
-                                    ((STUDENT_STATUS as any)[student.status]?.color || 'bg-slate-100')
-                                  }`}>{student.status}</span>
-                                {student.isArchived && (
-                                  <span className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-[8px] sm:text-[9px] font-black uppercase bg-amber-500 text-white border border-amber-600 shadow-sm flex items-center gap-1">
+                        <div className="md:col-span-6 lg:col-span-1 pl-2 sm:pl-3 flex flex-col justify-center order-1 min-w-0">
+                          <div className="flex flex-col mb-2 sm:mb-3 min-w-0">
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mb-1 min-w-0">
+                              <h3 className={`font-black text-xl sm:text-3xl tracking-tight leading-tight truncate ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{getDisplayName(student)}</h3>
+                              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                                {!isPureCoordinator && (
+                                  <span className={`px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-[8px] sm:text-[9px] font-black uppercase border shadow-sm shrink-0 
+                                    ${isDarkMode ? 
+                                      (effectiveStatus === 'En Curso' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                                       effectiveStatus === 'Finalizado' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                                       effectiveStatus === 'Pausada' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
+                                       'bg-red-500/10 text-red-400 border-red-500/20') : 
+                                      ((STUDENT_STATUS as any)[effectiveStatus]?.color || 'bg-slate-100')
+                                    }`}>{effectiveStatus}</span>
+                                )}
+                                
+                                <span className={`px-2 py-0.5 sm:px-2.5 sm:py-0.5 rounded-full text-[8px] sm:text-[9px] font-black uppercase border shadow-sm flex items-center gap-1 shrink-0 ${ROLE_LABELS[targetRole]?.badgeBg || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                                  <ShieldCheck size={11} /> {ROLE_LABELS[targetRole]?.label || 'Alumno'}
+                                </span>
+
+                                {isArchivedStudent && (
+                                  <span className="px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-[8px] sm:text-[9px] font-black uppercase bg-amber-500 text-white border border-amber-600 shadow-sm flex items-center gap-1 shrink-0">
                                     <Layers size={10} /> Archivado
                                   </span>
                                 )}
-                                <span className={`hidden sm:flex lg:hidden items-center gap-1.5 px-3 py-1 rounded-xl border text-[9px] font-black uppercase tracking-widest ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}><GraduationCap size={12}/> {student.career}</span>
+                                <span className={`hidden sm:flex lg:hidden items-center gap-1.5 px-3 py-1 rounded-xl border text-[9px] font-black uppercase tracking-widest shrink-0 ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}><GraduationCap size={12}/> {student.career}</span>
                               </div>
                             </div>
-                            <p className="text-[10px] sm:text-sm text-slate-400 italic font-medium">{getFullName(student)}</p>
+                            <p className="text-[10px] sm:text-sm text-slate-400 italic font-medium truncate">{getFullName(student)}</p>
                           </div>
                           
                           <div className="flex items-center gap-3 mt-1 sm:mt-2">
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 sm:gap-2">
                               <button 
                                 onClick={(e) => {
                                   e.stopPropagation();
@@ -5587,61 +6393,137 @@ const App = () => {
                                   setShowEditStudent(true);
                                   setShowAddStudent(true);
                                 }}
-                                className={`p-1.5 sm:px-3 sm:py-2 rounded-xl transition-all flex items-center gap-2 ${isDarkMode ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                                className={`p-2 sm:px-3 sm:py-2 rounded-xl transition-all flex items-center gap-1.5 min-h-[40px] sm:min-h-0 ${isDarkMode ? 'text-gray-400 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
                                 title="Editar Estudiante"
                               >
                                 <Edit2 size={14} className="sm:w-4 sm:h-4" />
                                 <span className="hidden sm:inline lg:hidden text-[10px] font-black uppercase tracking-widest">Editar</span>
                               </button>
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteStudent(student.id);
-                                }}
-                                className={`p-1.5 sm:px-3 sm:py-2 rounded-xl transition-all flex items-center gap-2 ${isDarkMode ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'}`}
-                                title="Eliminar Estudiante"
-                              >
-                                <Trash2 size={14} className="sm:w-4 sm:h-4" />
-                                <span className="hidden sm:inline lg:hidden text-[10px] font-black uppercase tracking-widest">Eliminar</span>
-                              </button>
+
+                              {canChangeTargetRole && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setRoleModalStudent(student);
+                                  }}
+                                  className={`p-2 sm:px-3 sm:py-2 rounded-xl transition-all flex items-center gap-1.5 min-h-[40px] sm:min-h-0 ${isDarkMode ? 'text-indigo-400 hover:text-white hover:bg-indigo-500/20' : 'text-indigo-600 hover:bg-indigo-50'}`}
+                                  title="Gestionar Rol del Usuario"
+                                >
+                                  <Shield size={14} className="sm:w-4 sm:h-4" />
+                                  <span className="hidden sm:inline text-[10px] font-black uppercase tracking-widest">Rol</span>
+                                </button>
+                              )}
+
+                              {canDeleteTarget ? (
+                                <button 
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteStudent(student.id);
+                                  }}
+                                  className={`p-2 sm:px-3 sm:py-2 rounded-xl transition-all flex items-center gap-1.5 min-h-[40px] sm:min-h-0 ${isDarkMode ? 'text-gray-400 hover:text-red-400 hover:bg-red-500/10' : 'text-slate-400 hover:text-red-600 hover:bg-red-50'}`}
+                                  title="Eliminar Estudiante"
+                                >
+                                  <Trash2 size={14} className="sm:w-4 sm:h-4" />
+                                  <span className="hidden sm:inline lg:hidden text-[10px] font-black uppercase tracking-widest">Eliminar</span>
+                                </button>
+                              ) : (
+                                <span 
+                                  className="p-2 sm:px-3 sm:py-2 rounded-xl text-slate-300 dark:text-zinc-600 cursor-not-allowed opacity-50 flex items-center gap-1 min-h-[40px] sm:min-h-0" 
+                                  title={isMasterPerson ? "El Coordinador Maestro no puede ser eliminado" : "Sin permisos para eliminar"}
+                                >
+                                  <Trash2 size={14} />
+                                </span>
+                              )}
                             </div>
                             
-                            <div className="hidden lg:flex flex-wrap gap-3 text-[10px] font-black uppercase tracking-widest">
-                              <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}><GraduationCap size={14}/> {student.career}</span>
+                            <div className="hidden lg:flex flex-wrap gap-3 text-[10px] font-black uppercase tracking-widest min-w-0">
+                              <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border truncate ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}><GraduationCap size={14} className="shrink-0"/> <span className="truncate">{student.career}</span></span>
                             </div>
                           </div>
 
-                          <div className="flex flex-col gap-1.5 mt-3 sm:mt-5">
+                          <div className="flex flex-col gap-1.5 mt-3 sm:mt-5 min-w-0">
                              {student.email ? (
-                               <a href={`mailto:${student.email}`} className={`flex items-center gap-2 font-bold text-[9px] sm:text-[10px] uppercase transition-colors ${isDarkMode ? 'text-gray-400 hover:text-indigo-400' : 'text-slate-500 hover:text-indigo-600'}`} onClick={(e) => e.stopPropagation()}>
-                                 <Mail size={12} className="text-indigo-400"/> {student.email}
-                               </a>
+                               <a href={`mailto:${student.email}`} className={`flex items-center gap-2 font-bold text-[9px] sm:text-[10px] uppercase transition-colors min-w-0 ${isDarkMode ? 'text-gray-400 hover:text-indigo-400' : 'text-slate-500 hover:text-indigo-600'}`} onClick={(e) => e.stopPropagation()}>
+                                 <Mail size={12} className="text-indigo-400 shrink-0"/> <span className="truncate">{student.email}</span>
+                                </a>
                              ) : (
-                               <div className="flex items-center gap-2 text-slate-400 font-bold text-[9px] sm:text-[10px] uppercase"><Mail size={12}/> SIN REGISTRO CORREO</div>
+                               <div className="flex items-center gap-2 text-slate-400 font-bold text-[9px] sm:text-[10px] uppercase min-w-0"><Mail size={12} className="shrink-0"/> <span className="truncate">SIN REGISTRO CORREO</span></div>
                              )}
                              {student.phone ? (
-                               <a href={`tel:${student.phone}`} className={`flex items-center gap-2 font-bold text-[9px] sm:text-[10px] uppercase transition-colors ${isDarkMode ? 'text-gray-400 hover:text-emerald-400' : 'text-slate-500 hover:text-emerald-600'}`} onClick={(e) => e.stopPropagation()}>
-                                 <Phone size={12} className="text-emerald-400"/> {student.phone}
-                               </a>
+                               <a href={`tel:${student.phone}`} className={`flex items-center gap-2 font-bold text-[9px] sm:text-[10px] uppercase transition-colors min-w-0 ${isDarkMode ? 'text-gray-400 hover:text-emerald-400' : 'text-slate-500 hover:text-emerald-600'}`} onClick={(e) => e.stopPropagation()}>
+                                 <Phone size={12} className="text-emerald-400 shrink-0"/> <span className="truncate">{student.phone}</span>
+                                </a>
                              ) : (
-                               <div className="flex items-center gap-2 text-slate-400 font-bold text-[9px] sm:text-[10px] uppercase"><Phone size={12}/> SIN REGISTRO TELÉFONO</div>
+                               <div className="flex items-center gap-2 text-slate-400 font-bold text-[9px] sm:text-[10px] uppercase min-w-0"><Phone size={12} className="shrink-0"/> <span className="truncate">SIN REGISTRO TELÉFONO</span></div>
                              )}
                           </div>
                         </div>
 
                         {/* Col 3: Métricas */}
-                        <div className="md:col-span-4 lg:col-span-1 flex flex-col justify-center order-2 lg:order-3">
-                          <div className={`rounded-2xl sm:rounded-xl p-4 sm:p-4 flex flex-col justify-center items-center relative overflow-hidden shadow-inner md:shadow-none h-full gap-1 ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}>
-                             <p className="text-[8px] sm:text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Total Reportado</p>
-                             <div className="flex items-baseline gap-1 text-indigo-600 mb-2 sm:mb-1">
-                                <span className="text-3xl sm:text-3xl lg:text-5xl font-black tracking-tighter">{Number(totalHrs.toFixed(2))}</span>
-                                <span className="text-[10px] sm:text-[10px] lg:text-sm font-black uppercase">H</span>
-                             </div>
-                             <div className={`w-full h-1 rounded-full overflow-hidden ${isDarkMode ? 'bg-white/10' : 'bg-slate-200'}`}>
-                                <div className="h-full bg-indigo-500 transition-all duration-1000" style={{ width: `${perc}%` }}></div>
-                             </div>
-                             <p className="mt-1 text-[8px] sm:text-[9px] font-black text-indigo-400 uppercase">{Number(perc.toFixed(2))}%</p>
-                          </div>
+                        <div className="md:col-span-4 lg:col-span-1 flex flex-col justify-center order-2 lg:order-3 min-w-0">
+                          {isMasterPerson || isSuperPerson ? (
+                            <div className={`rounded-2xl sm:rounded-xl p-4 sm:p-5 flex flex-col justify-center items-center relative overflow-hidden shadow-inner md:shadow-none h-full gap-2 text-center ${
+                              isMasterPerson
+                                ? (isDarkMode ? 'bg-purple-500/10 border border-purple-500/20' : 'bg-purple-50 border border-purple-100')
+                                : (isDarkMode ? 'bg-indigo-500/10 border border-indigo-500/20' : 'bg-indigo-50 border border-indigo-100')
+                            }`}>
+                              <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                                isMasterPerson
+                                  ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400'
+                                  : 'bg-indigo-500/20 text-indigo-600 dark:text-indigo-400'
+                              }`}>
+                                <ShieldCheck size={24} />
+                              </div>
+                              <div>
+                                <p className={`text-[10px] font-black uppercase tracking-widest ${
+                                  isMasterPerson ? 'text-purple-600 dark:text-purple-400' : 'text-indigo-600 dark:text-indigo-400'
+                                }`}>
+                                  {isMasterPerson ? 'Coordinador Maestro' : 'Supercoordinador'}
+                                </p>
+                                <p className={`text-[9px] font-bold ${isDarkMode ? 'text-gray-400' : 'text-slate-500'} mt-0.5`}>
+                                  {isMasterPerson ? 'Dirección General' : 'Supervisión Institucional'}
+                                </p>
+                              </div>
+                              <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest shadow-sm ${
+                                isMasterPerson ? 'bg-purple-600 text-white' : 'bg-indigo-600 text-white'
+                              }`}>
+                                {isMasterPerson ? 'Acceso Maestro' : 'Alta Dirección'}
+                              </span>
+                            </div>
+                          ) : hasNoHoursRequirement ? (
+                            <div className={`rounded-2xl sm:rounded-xl p-4 sm:p-5 flex flex-col justify-center items-center relative overflow-hidden shadow-inner md:shadow-none h-full gap-2 text-center ${isDarkMode ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-emerald-50 border border-emerald-100'}`}>
+                              <div className="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+                                <CheckCircle2 size={24} />
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest">Horas Concluidas</p>
+                                <p className={`text-[9px] font-bold ${isDarkMode ? 'text-gray-400' : 'text-slate-500'} mt-0.5`}>Equipo Coordinador</p>
+                                {totalHrs > 0 && (
+                                  <p className="text-[8px] font-bold text-slate-400 mt-0.5">{Number(totalHrs.toFixed(1))}h en historial</p>
+                                )}
+                              </div>
+                              <span className="px-3 py-1 rounded-full text-[8px] font-black uppercase bg-emerald-600 text-white tracking-widest shadow-sm">
+                                Servicio Liberado
+                              </span>
+                            </div>
+                          ) : (
+                            <div className={`rounded-2xl sm:rounded-xl p-4 sm:p-4 flex flex-col justify-center items-center relative overflow-hidden shadow-inner md:shadow-none h-full gap-1 ${isDarkMode ? 'bg-white/5' : 'bg-slate-50'}`}>
+                               <div className="flex items-center justify-between w-full px-2 mb-1">
+                                 <p className="text-[8px] sm:text-[9px] font-black text-slate-400 uppercase tracking-[0.2em]">Total Reportado</p>
+                                 {isStudentCoordinator && (
+                                   <span className="text-[8px] font-black text-amber-500 uppercase bg-amber-500/10 px-1.5 py-0.5 rounded">Coord. Alumno</span>
+                                 )}
+                               </div>
+                               <div className="flex items-baseline gap-1 text-indigo-600 mb-2 sm:mb-1">
+                                  <span className="text-3xl sm:text-3xl lg:text-5xl font-black tracking-tighter">{Number(totalHrs.toFixed(2))}</span>
+                                  <span className="text-[10px] sm:text-[10px] lg:text-sm font-black uppercase">/ 480H</span>
+                               </div>
+                               <div className={`w-full h-1 rounded-full overflow-hidden ${isDarkMode ? 'bg-white/10' : 'bg-slate-200'}`}>
+                                  <div className="h-full bg-indigo-500 transition-all duration-1000" style={{ width: `${perc}%` }}></div>
+                               </div>
+                               <p className="mt-1 text-[8px] sm:text-[9px] font-black text-indigo-400 uppercase">{Number(perc.toFixed(2))}%</p>
+                            </div>
+                          )}
                         </div>
 
                         {/* Divider for Tablet */}
@@ -5652,29 +6534,43 @@ const App = () => {
                           <div className="flex items-center justify-between mb-3 sm:mb-4">
                              <p className="text-[9px] sm:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Proyectos y Habilidades</p>
                              <div className={`px-2 py-0.5 sm:px-3 sm:py-1 rounded-xl text-[8px] sm:text-[9px] font-black uppercase shadow-sm border 
-                               ${(student.projectIds && student.projectIds.length > 0) ? 
-                                 (isDarkMode ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-green-500 text-white border-green-600') : 
-                                 (isDarkMode ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-orange-500 text-white border-orange-600')
-                               }`}>{(student.projectIds && student.projectIds.length > 0) ? 'Asignado' : 'Sin asignar'}</div>
+                               ${isPureCoordinator ? 
+                                 (isDarkMode ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' : 'bg-indigo-50 text-indigo-700 border-indigo-200') :
+                                 (student.projectIds && student.projectIds.length > 0) ? 
+                                   (isDarkMode ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-green-500 text-white border-green-600') : 
+                                   (isDarkMode ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' : 'bg-orange-500 text-white border-orange-600')
+                               }`}>
+                               {isPureCoordinator ? `Acceso Global (${projects.length})` : (student.projectIds && student.projectIds.length > 0) ? 'Asignado' : 'Sin asignar'}
+                             </div>
                           </div>
                           <div className="flex flex-col sm:flex-row lg:flex-col gap-2 sm:gap-3 overflow-y-auto sm:overflow-x-auto lg:overflow-y-auto max-h-[120px] sm:max-h-none lg:max-h-[140px] pr-2 sm:pr-0 lg:pr-2 sm:pb-1 lg:pb-0 custom-scrollbar sm:snap-x sm:snap-mandatory flex-1">
-                             {Array.from(new Set(student.projectIds || [])).map((pid: string) => {
-                               const p = projects.find(pr => pr.id === pid);
-                               const tasks = (student.projectTasks && student.projectTasks[pid]) || [];
-                               return (
-                                 <div key={pid} className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border shadow-sm sm:flex-shrink-0 sm:snap-start sm:min-w-[160px] lg:min-w-0 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-100'}`}>
-                                   <div className="flex items-center gap-2 mb-1.5 sm:mb-2">
-                                     <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full shadow-sm" style={{ backgroundColor: p?.color || '#cbd5e1' }}></div>
-                                     <span className={`font-black text-[9px] sm:text-[10px] uppercase truncate ${isDarkMode ? 'text-gray-300' : 'text-slate-700'}`}>{p?.name || 'Proyecto'}</span>
-                                   </div>
-                                   <div className="flex flex-wrap gap-1 pl-1">
-                                     {tasks.map((t: string, i: number) => (
-                                       <span key={`${t}-${i}`} className={`text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-lg border italic shadow-sm tracking-tight ${isDarkMode ? 'text-indigo-400 bg-white/10 border-indigo-500/30' : 'text-indigo-700 bg-white border-indigo-100'}`}>#{String(t)}</span>
-                                     ))}
-                                   </div>
+                             {isPureCoordinator ? (
+                               <div className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border shadow-sm sm:flex-shrink-0 sm:snap-start ${isDarkMode ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-indigo-50/70 border-indigo-100'}`}>
+                                 <div className="flex items-center gap-2 mb-1">
+                                   <FolderKanban className="text-indigo-600 dark:text-indigo-400 shrink-0" size={14} />
+                                   <span className={`font-black text-[9px] sm:text-[10px] uppercase truncate ${isDarkMode ? 'text-indigo-300' : 'text-indigo-700'}`}>Acceso a Todos los Proyectos</span>
                                  </div>
-                               );
-                             })}
+                                 <p className={`text-[8px] font-bold ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>Supervisión activa sobre {projects.length} proyectos del sistema</p>
+                               </div>
+                             ) : (
+                               Array.from(new Set(student.projectIds || [])).map((pid: string) => {
+                                 const p = projects.find(pr => pr.id === pid);
+                                 const tasks = (student.projectTasks && student.projectTasks[pid]) || [];
+                                 return (
+                                   <div key={pid} className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border shadow-sm sm:flex-shrink-0 sm:snap-start sm:min-w-[160px] lg:min-w-0 ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-100'}`}>
+                                     <div className="flex items-center gap-2 mb-1.5 sm:mb-2">
+                                       <div className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full shadow-sm" style={{ backgroundColor: p?.color || '#cbd5e1' }}></div>
+                                       <span className={`font-black text-[9px] sm:text-[10px] uppercase truncate ${isDarkMode ? 'text-gray-300' : 'text-slate-700'}`}>{p?.name || 'Proyecto'}</span>
+                                     </div>
+                                     <div className="flex flex-wrap gap-1 pl-1">
+                                       {tasks.map((t: string, i: number) => (
+                                         <span key={`${t}-${i}`} className={`text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-lg border italic shadow-sm tracking-tight ${isDarkMode ? 'text-indigo-400 bg-white/10 border-indigo-500/30' : 'text-indigo-700 bg-white border-indigo-100'}`}>#{String(t)}</span>
+                                       ))}
+                                     </div>
+                                   </div>
+                                 );
+                               })
+                             )}
                              {student.skills && student.skills.length > 0 && (
                                <div className={`p-2.5 sm:p-3 rounded-xl sm:rounded-2xl border shadow-sm sm:flex-shrink-0 sm:snap-start sm:min-w-[160px] lg:min-w-0 ${isDarkMode ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-emerald-50/30 border-emerald-100/50'}`}>
                                  <div className="flex items-center gap-2 mb-1.5 sm:mb-2">
@@ -5771,41 +6667,80 @@ const App = () => {
                 <div className="grid grid-cols-1 gap-8 sm:gap-16">
                   <div className="space-y-6 sm:space-y-10">
                     <div>
-                        <div className={`inline-flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-2.5 rounded-full text-[10px] sm:text-[12px] font-black uppercase border shadow-lg mb-6 sm:mb-8 
-                          ${isDarkMode ? 
-                            (selectedStudent.status === 'En Curso' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
-                             selectedStudent.status === 'Finalizado' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
-                             selectedStudent.status === 'Pausada' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
-                             'bg-red-500/10 text-red-400 border-red-500/20') : 
-                            ((STUDENT_STATUS as any)[selectedStudent.status]?.color || 'bg-slate-100')
-                          }`}>
-                            <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full animate-pulse" style={{ backgroundColor: (STUDENT_STATUS as any)[selectedStudent.status]?.hex || '#ccc' }}></div>
-                            {selectedStudent.status}
-                        </div>
+                        {(() => {
+                          const targetSelectedRole = getEffectiveRole(selectedStudent.email, selectedStudent.role);
+                          const isSelectedMaster = targetSelectedRole === 'master_coordinator';
+                          const isSelectedSuper = targetSelectedRole === 'super_coordinator';
+                          const isSelectedCoordinator = isSelectedMaster || isSelectedSuper || targetSelectedRole === 'coordinator' || selectedStudent.role === 'admin' || Boolean(selectedStudent.email && SUPER_ADMIN_EMAILS.includes(selectedStudent.email));
+                          const isSelectedStudentCoordinator = targetSelectedRole === 'student_coordinator';
+                          const isSelectedPureCoordinator = isSelectedCoordinator && !isSelectedStudentCoordinator;
+
+                          return (
+                            <div className="flex flex-wrap items-center gap-3 mb-6 sm:mb-8">
+                              {!isSelectedPureCoordinator && (
+                                <div className={`inline-flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-2.5 rounded-full text-[10px] sm:text-[12px] font-black uppercase border shadow-lg 
+                                  ${isDarkMode ? 
+                                    (selectedStudent.status === 'En Curso' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
+                                     selectedStudent.status === 'Finalizado' ? 'bg-green-500/10 text-green-400 border-green-500/20' :
+                                     selectedStudent.status === 'Pausada' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
+                                     'bg-red-500/10 text-red-400 border-red-500/20') : 
+                                    ((STUDENT_STATUS as any)[selectedStudent.status]?.color || 'bg-slate-100')
+                                  }`}>
+                                    <div className="w-2 h-2 sm:w-3 sm:h-3 rounded-full animate-pulse" style={{ backgroundColor: (STUDENT_STATUS as any)[selectedStudent.status]?.hex || '#ccc' }}></div>
+                                    {selectedStudent.status}
+                                </div>
+                              )}
+
+                              <span className={`inline-flex items-center gap-2 px-4 py-2 sm:px-6 sm:py-2.5 rounded-full text-[10px] sm:text-[12px] font-black uppercase border shadow-lg ${ROLE_LABELS[targetSelectedRole]?.badgeBg || 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                                <ShieldCheck size={14} /> {ROLE_LABELS[targetSelectedRole]?.label || 'Alumno'}
+                              </span>
+
+                              {(selectedStudent.isArchived || isStudentFinished(selectedStudent)) && (
+                                <div className="inline-flex items-center gap-1.5 px-4 py-2 sm:px-6 sm:py-2.5 rounded-full text-[10px] sm:text-[12px] font-black uppercase bg-amber-500 text-white border border-amber-600 shadow-lg">
+                                  <Layers size={14} /> Expediente Archivado
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-6">
                           <h2 className={`text-2xl sm:text-4xl md:text-6xl font-black leading-tight tracking-tighter ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{selectedStudent.name}</h2>
                           <div className="flex gap-2 sm:gap-3 w-full sm:w-auto">
                             <button onClick={startEditStudent} className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-3 sm:px-6 sm:py-4 rounded-xl sm:rounded-2xl font-black text-[9px] sm:text-[10px] uppercase tracking-widest transition-all shadow-lg active:scale-95 ${isDarkMode ? 'bg-white text-slate-900 hover:bg-gray-200' : 'bg-slate-900 text-white hover:bg-black'}`}>
                               <Edit2 size={16} /> Editar
                             </button>
-                            {selectedStudent.role !== 'coordinator' && selectedStudent.role !== 'superadmin' && selectedStudent.role !== 'admin' && (
-                              <button 
-                                onClick={() => showConfirmToast("¿Otorgar privilegios de coordinador a este alumno?", () => handleMakeCoordinator(selectedStudent.id))} 
-                                className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 ${isDarkMode ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20 hover:bg-emerald-500/20' : 'text-emerald-600 bg-emerald-50 border-emerald-100 hover:bg-emerald-100'}`} 
-                                title="Hacer Coordinador"
+                            {(userRole === 'admin' || userRole === 'coordinator') && (
+                              <button
+                                onClick={() => handleToggleArchive(selectedStudent.id)}
+                                className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 ${
+                                  selectedStudent.isArchived
+                                    ? (isDarkMode ? 'text-amber-400 bg-amber-500/10 border-amber-500/20 hover:bg-amber-500/20' : 'text-amber-600 bg-amber-50 border-amber-200 hover:bg-amber-100')
+                                    : (isDarkMode ? 'text-gray-400 bg-white/5 border-white/10 hover:text-white' : 'text-slate-600 bg-slate-50 border-slate-200 hover:bg-slate-100')
+                                }`}
+                                title={selectedStudent.isArchived ? "Desarchivar Expediente" : "Archivar Expediente"}
                               >
-                                <Shield size={20} />
+                                <Layers size={20} />
                               </button>
                             )}
-                            {(user?.email && SUPER_ADMIN_EMAILS.includes(user.email)) && (selectedStudent.role === 'coordinator' || selectedStudent.role === 'admin') && (
-                              <button 
-                                onClick={() => showConfirmToast("¿Remover privilegios de este usuario?", () => handleDemoteUser(selectedStudent.id))} 
-                                className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 ${isDarkMode ? 'text-orange-400 bg-orange-500/10 border-orange-500/20 hover:bg-orange-500/20' : 'text-orange-600 bg-orange-50 border-orange-100 hover:bg-orange-100'}`} 
-                                title="Remover Privilegios"
-                              >
-                                <ShieldOff size={20} />
-                              </button>
-                            )}
+                            {(() => {
+                              const targetSelectedRole = getEffectiveRole(selectedStudent.email, selectedStudent.role);
+                              const isSelectedMaster = targetSelectedRole === 'master_coordinator';
+                              const canChangeSelectedRole = !isSelectedMaster && (
+                                permissions.isMaster ||
+                                (permissions.isSuper && targetSelectedRole !== 'super_coordinator') ||
+                                (permissions.isCoordinator && (targetSelectedRole === 'user' || targetSelectedRole === 'student_coordinator'))
+                              );
+                              return canChangeSelectedRole ? (
+                                <button 
+                                  onClick={() => setRoleModalStudent(selectedStudent)} 
+                                  className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 flex items-center gap-1.5 ${isDarkMode ? 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20 hover:bg-indigo-500/20' : 'text-indigo-600 bg-indigo-50 border-indigo-100 hover:bg-indigo-100'}`} 
+                                  title="Gestionar Rol del Usuario"
+                                >
+                                  <Shield size={20} />
+                                  <span className="text-[10px] font-black uppercase tracking-wider hidden sm:inline">{ROLE_LABELS[targetSelectedRole]?.shortLabel || 'Rol'}</span>
+                                </button>
+                              ) : null;
+                            })()}
                             {!isStudentFinished(selectedStudent) ? (
                               <button 
                                 onClick={() => {
@@ -5826,13 +6761,15 @@ const App = () => {
                                 <CheckCircle2 size={16} /> Finalizado
                               </div>
                             )}
-                            <button 
-                              onClick={() => handleDeleteStudent(selectedStudent.id)} 
-                              className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 ${isDarkMode ? 'text-red-400 bg-red-500/10 border-red-500/20 hover:bg-red-500/20' : 'text-red-600 bg-red-50 border-red-100 hover:bg-red-100'}`} 
-                              title="Eliminar Estudiante"
-                            >
-                              <Trash2 size={20} />
-                            </button>
+                            {permissions.canDeleteUser(selectedStudent) ? (
+                              <button 
+                                onClick={() => handleDeleteStudent(selectedStudent.id)} 
+                                className={`p-3 sm:p-4 rounded-xl sm:rounded-2xl border shadow-sm transition-all active:scale-95 ${isDarkMode ? 'text-red-400 bg-red-500/10 border-red-500/20 hover:bg-red-500/20' : 'text-red-600 bg-red-50 border-red-100 hover:bg-red-100'}`} 
+                                title="Eliminar Estudiante"
+                              >
+                                <Trash2 size={20} />
+                              </button>
+                            ) : null}
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-3 sm:gap-5 uppercase font-black tracking-widest sm:tracking-[0.25em] text-[10px] sm:text-[12px]">
@@ -5871,27 +6808,64 @@ const App = () => {
                                 <div className={`w-8 h-1 ${isDarkMode ? 'bg-indigo-500/40' : 'bg-indigo-100'}`}></div> Proyectos Asignados
                             </div>
                             <div className="space-y-3 sm:space-y-4 max-h-[250px] overflow-y-auto pr-2 custom-scrollbar">
-                                {Array.from(new Set(selectedStudent.projectIds || [])).map((pid: string) => {
-                                    const p = projects.find(pr => pr.id === pid);
-                                    const tasks = (selectedStudent.projectTasks && selectedStudent.projectTasks[pid]) || [];
+                                {(() => {
+                                  const targetSelectedRole = getEffectiveRole(selectedStudent.email, selectedStudent.role);
+                                  const isSelectedMaster = targetSelectedRole === 'master_coordinator';
+                                  const isSelectedSuper = targetSelectedRole === 'super_coordinator';
+                                  const isSelectedCoordinator = isSelectedMaster || isSelectedSuper || targetSelectedRole === 'coordinator' || selectedStudent.role === 'admin' || Boolean(selectedStudent.email && SUPER_ADMIN_EMAILS.includes(selectedStudent.email));
+                                  const isSelectedStudentCoordinator = targetSelectedRole === 'student_coordinator';
+                                  const isSelectedPureCoordinator = isSelectedCoordinator && !isSelectedStudentCoordinator;
+
+                                  if (isSelectedPureCoordinator) {
                                     return (
-                                        <div key={pid} className={`p-4 sm:p-6 rounded-2xl sm:rounded-[2rem] border shadow-sm hover:shadow-md transition-all ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-100'}`}>
-                                            <div className="flex items-center gap-3 mb-3">
-                                                <div className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: p?.color || '#cbd5e1' }}></div>
-                                                <span className={`font-black text-[11px] sm:text-[12px] uppercase tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{p?.name || 'Proyecto'}</span>
-                                            </div>
-                                            <div className="flex flex-wrap gap-2">
-                                                {tasks.map((t: string, i: number) => (
-                                                    <span key={`${t}-${i}`} className={`text-[9px] sm:text-[10px] font-bold px-3 py-1 rounded-lg border italic shadow-sm ${isDarkMode ? 'text-indigo-400 bg-white/10 border-indigo-500/30' : 'text-indigo-700 bg-white border-indigo-100'}`}>#{String(t)}</span>
-                                                ))}
-                                                {tasks.length === 0 && <span className="text-[10px] font-bold text-slate-300 italic">Sin tareas específicas</span>}
-                                            </div>
+                                      <div className={`p-5 sm:p-6 rounded-2xl sm:rounded-[2rem] border shadow-sm ${isDarkMode ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-indigo-50/70 border-indigo-100'}`}>
+                                        <div className="flex items-center gap-3 mb-2">
+                                          <div className="w-8 h-8 rounded-xl bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                                            <FolderKanban size={18} />
+                                          </div>
+                                          <div>
+                                            <h4 className="font-black text-xs sm:text-sm uppercase tracking-tight text-indigo-700 dark:text-indigo-300">Acceso Total a Todos los Proyectos</h4>
+                                            <p className="text-[10px] text-slate-500 dark:text-gray-400 font-medium">Este usuario cuenta con rol de coordinación y acceso inherente a los {projects.length} proyectos del sistema sin requerir enrolamiento manual.</p>
+                                          </div>
                                         </div>
+                                        <div className="flex flex-wrap gap-2 mt-4 pt-3 border-t border-indigo-100 dark:border-indigo-500/20">
+                                          {projects.map((p: any) => (
+                                            <span key={p.id} className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-[9px] font-black uppercase border ${isDarkMode ? 'bg-white/5 border-white/10 text-gray-300' : 'bg-white border-slate-200 text-slate-700'}`}>
+                                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: p.color || '#cbd5e1' }}></div>
+                                              {p.name}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
                                     );
-                                })}
-                                {(selectedStudent.projectIds || []).length === 0 && (
-                                    <div className="p-8 text-center border-2 border-dashed border-slate-100 rounded-[2rem] text-slate-300 font-black uppercase text-[10px] tracking-widest">Sin proyectos asignados</div>
-                                )}
+                                  }
+
+                                  return (
+                                    <>
+                                      {Array.from(new Set(selectedStudent.projectIds || [])).map((pid: string) => {
+                                          const p = projects.find(pr => pr.id === pid);
+                                          const tasks = (selectedStudent.projectTasks && selectedStudent.projectTasks[pid]) || [];
+                                          return (
+                                              <div key={pid} className={`p-4 sm:p-6 rounded-2xl sm:rounded-[2rem] border shadow-sm hover:shadow-md transition-all ${isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-50 border-slate-100'}`}>
+                                                  <div className="flex items-center gap-3 mb-3">
+                                                      <div className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: p?.color || '#cbd5e1' }}></div>
+                                                      <span className={`font-black text-[11px] sm:text-[12px] uppercase tracking-tight ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{p?.name || 'Proyecto'}</span>
+                                                  </div>
+                                                  <div className="flex flex-wrap gap-2">
+                                                      {tasks.map((t: string, i: number) => (
+                                                          <span key={`${t}-${i}`} className={`text-[9px] sm:text-[10px] font-bold px-3 py-1 rounded-lg border italic shadow-sm ${isDarkMode ? 'text-indigo-400 bg-white/10 border-indigo-500/30' : 'text-indigo-700 bg-white border-indigo-100'}`}>#{String(t)}</span>
+                                                      ))}
+                                                      {tasks.length === 0 && <span className="text-[10px] font-bold text-slate-300 italic">Sin tareas específicas</span>}
+                                                  </div>
+                                              </div>
+                                          );
+                                      })}
+                                      {(selectedStudent.projectIds || []).length === 0 && (
+                                          <div className="p-8 text-center border-2 border-dashed border-slate-100 rounded-[2rem] text-slate-300 font-black uppercase text-[10px] tracking-widest">Sin proyectos asignados</div>
+                                      )}
+                                    </>
+                                  );
+                                })()}
                             </div>
                         </div>
                         <div className="space-y-4 sm:space-y-6">
@@ -5909,38 +6883,100 @@ const App = () => {
                         </div>
                     </div>
 
-                    <div className={`mt-auto rounded-[2rem] sm:rounded-[4rem] p-6 sm:p-12 text-white relative overflow-hidden shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-8 ${isDarkMode ? 'bg-[#121212] border border-white/5' : 'bg-slate-900 border-none'}`}>
-                        <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-32 -mt-32 blur-3xl ${isDarkMode ? 'bg-indigo-500/5' : 'bg-indigo-500/10'}`}></div>
-                        <div className="relative z-10 flex flex-col items-center sm:items-start">
-                            <p className={`text-[9px] sm:text-[11px] font-black uppercase tracking-[0.3em] mb-4 ${isDarkMode ? 'text-indigo-400/80' : 'text-indigo-400'}`}>Horas Totales Reportadas</p>
-                            <div className="flex items-baseline gap-2 leading-none">
-                                <span className="text-4xl sm:text-7xl font-black tracking-tighter">
-                                  {((selectedStudent.records || []).reduce((a: number, c: any) => {
-                                    if (c.validationStatus === 'aprobado' || !c.validationStatus) return a + c.hours;
-                                    return a;
-                                  }, 0)).toFixed(2)}
+                    {(() => {
+                      const selRole = getEffectiveRole(selectedStudent.email, selectedStudent.role);
+                      const isMasterPerson = selRole === 'master_coordinator';
+                      const isSuperPerson = selRole === 'super_coordinator';
+                      const isCoordinatorLevel = selRole === 'coordinator' || isSuperPerson || isMasterPerson;
+                      const historicalHours = (selectedStudent.records || []).reduce((a: number, c: any) => {
+                        if (c.validationStatus === 'aprobado' || !c.validationStatus) return a + c.hours;
+                        return a;
+                      }, 0);
+
+                      if (isMasterPerson || isSuperPerson) {
+                        return (
+                          <div className={`mt-auto rounded-[2rem] sm:rounded-[4rem] p-6 sm:p-12 text-white relative overflow-hidden shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-8 ${
+                            isDarkMode 
+                              ? 'bg-[#121212] border border-white/5' 
+                              : (isMasterPerson ? 'bg-gradient-to-r from-purple-950 via-slate-900 to-slate-900' : 'bg-gradient-to-r from-indigo-950 via-slate-900 to-slate-900')
+                          }`}>
+                            <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-32 -mt-32 blur-3xl ${isMasterPerson ? 'bg-purple-500/20' : 'bg-indigo-500/20'}`}></div>
+                            <div className="relative z-10 flex flex-col items-center sm:items-start">
+                              <p className={`text-[9px] sm:text-[11px] font-black uppercase tracking-[0.3em] mb-3 ${isMasterPerson ? 'text-purple-400' : 'text-indigo-400'}`}>
+                                {isMasterPerson ? 'Dirección General · Rol Maestro' : 'Equipo Directivo · Supercoordinación'}
+                              </p>
+                              <div className="flex items-center gap-3 leading-none">
+                                <span className="text-3xl sm:text-5xl font-black tracking-tight text-white">
+                                  {isMasterPerson ? 'Coordinador Maestro' : 'Supercoordinador'}
                                 </span>
-                                <span className="text-base sm:text-2xl font-black text-indigo-500 italic">/ {TOTAL_REQUIRED_HOURS}H</span>
+                              </div>
+                              <p className="text-xs text-slate-400 font-medium mt-2 max-w-md">
+                                {isMasterPerson
+                                  ? 'Autoridad suprema del sistema. Gestión de permisos, usuarios y supervisión total de proyectos.'
+                                  : 'Supervisión institucional y coordinación estratégica sobre los proyectos del sistema.'}
+                              </p>
+                            </div>
+                            <div className="text-center sm:text-right relative z-10 space-y-2 w-full sm:w-auto">
+                              <div className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl border text-xs font-black uppercase tracking-wider ${
+                                isMasterPerson
+                                  ? 'bg-purple-500/20 border-purple-500/30 text-purple-300'
+                                  : 'bg-indigo-500/20 border-indigo-500/30 text-indigo-300'
+                              }`}>
+                                <ShieldCheck size={16} /> {isMasterPerson ? 'Acceso Maestro' : 'Supervisión Global'}
+                              </div>
+                              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+                                Sin requisito de horas estudiantiles
+                              </p>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return isCoordinatorLevel ? (
+                        <div className={`mt-auto rounded-[2rem] sm:rounded-[4rem] p-6 sm:p-12 text-white relative overflow-hidden shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-8 ${isDarkMode ? 'bg-[#121212] border border-white/5' : 'bg-slate-900 border-none'}`}>
+                          <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-32 -mt-32 blur-3xl ${isDarkMode ? 'bg-emerald-500/10' : 'bg-emerald-500/20'}`}></div>
+                          <div className="relative z-10 flex flex-col items-center sm:items-start">
+                            <p className="text-[9px] sm:text-[11px] font-black uppercase tracking-[0.3em] mb-4 text-emerald-400">Equipo Coordinador · Servicio Concluido</p>
+                            <div className="flex items-baseline gap-2 leading-none">
+                              <span className="text-4xl sm:text-7xl font-black tracking-tighter text-emerald-300">
+                                {historicalHours.toFixed(2)}
+                              </span>
+                              <span className="text-base sm:text-2xl font-black text-emerald-400/80 italic">Horas en Historial</span>
+                            </div>
+                          </div>
+                          <div className="text-center sm:text-right relative z-10 space-y-2 w-full sm:w-auto">
+                            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-xs font-black uppercase tracking-wider">
+                              <CheckCircle2 size={16} /> Horas Concluidas
+                            </div>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Sin registro obligatorio de 480h</p>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className={`mt-auto rounded-[2rem] sm:rounded-[4rem] p-6 sm:p-12 text-white relative overflow-hidden shadow-2xl flex flex-col sm:flex-row items-center justify-between gap-8 ${isDarkMode ? 'bg-[#121212] border border-white/5' : 'bg-slate-900 border-none'}`}>
+                            <div className={`absolute top-0 right-0 w-64 h-64 rounded-full -mr-32 -mt-32 blur-3xl ${isDarkMode ? 'bg-indigo-500/5' : 'bg-indigo-500/10'}`}></div>
+                            <div className="relative z-10 flex flex-col items-center sm:items-start">
+                                <p className={`text-[9px] sm:text-[11px] font-black uppercase tracking-[0.3em] mb-4 ${isDarkMode ? 'text-indigo-400/80' : 'text-indigo-400'}`}>Horas Totales Reportadas</p>
+                                <div className="flex items-baseline gap-2 leading-none">
+                                    <span className="text-4xl sm:text-7xl font-black tracking-tighter">
+                                      {historicalHours.toFixed(2)}
+                                    </span>
+                                    <span className="text-base sm:text-2xl font-black text-indigo-500 italic">/ {TOTAL_REQUIRED_HOURS}H</span>
+                                </div>
+                            </div>
+                            <div className="text-center sm:text-right relative z-10 space-y-3 w-full sm:w-auto">
+                                <div className="flex items-baseline gap-2 justify-center sm:justify-end">
+                                   <p className="text-[9px] sm:text-[10px] text-indigo-400 font-black uppercase opacity-80">Restan:</p>
+                                   <span className="text-xl sm:text-3xl font-black text-indigo-100 tracking-tighter leading-none">
+                                     {Number(Math.max(0, TOTAL_REQUIRED_HOURS - historicalHours).toFixed(2))}h
+                                   </span>
+                                </div>
+                                <div className="w-full sm:w-48 h-2 sm:h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-700/50 shadow-inner">
+                                   <div className="h-full bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.5)] transition-all duration-1000" style={{ width: `${Math.min(100, (historicalHours / TOTAL_REQUIRED_HOURS) * 100)}%` }}></div>
+                                </div>
                             </div>
                         </div>
-                        <div className="text-center sm:text-right relative z-10 space-y-3 w-full sm:w-auto">
-                            <div className="flex items-baseline gap-2 justify-center sm:justify-end">
-                               <p className="text-[9px] sm:text-[10px] text-indigo-400 font-black uppercase opacity-80">Restan:</p>
-                               <span className="text-xl sm:text-3xl font-black text-indigo-100 tracking-tighter leading-none">
-                                 {Number(Math.max(0, TOTAL_REQUIRED_HOURS - (selectedStudent.records || []).reduce((a: number, c: any) => {
-                                   if (c.validationStatus === 'aprobado' || !c.validationStatus) return a + c.hours;
-                                   return a;
-                                 }, 0)).toFixed(2))}h
-                               </span>
-                            </div>
-                            <div className="w-full sm:w-48 h-2 sm:h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-700/50 shadow-inner">
-                               <div className="h-full bg-indigo-500 shadow-[0_0_10px_rgba(99,102,241,0.5)] transition-all duration-1000" style={{ width: `${Math.min(100, (((selectedStudent.records || []).reduce((a: number, c: any) => {
-                                 if (c.validationStatus === 'aprobado' || !c.validationStatus) return a + c.hours;
-                                 return a;
-                               }, 0))/TOTAL_REQUIRED_HOURS)*100)}%` }}></div>
-                            </div>
-                        </div>
-                    </div>
+                      );
+                    })()}
                   </div>
                 </div>
               </div>
@@ -7537,16 +8573,17 @@ const App = () => {
 
           {view === 'skill-map' && (
             <SkillMap 
-              users={students.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email)).map(s => ({
+              users={activeEnrolledStudents.map(s => ({
                 uid: s.id,
                 firstName: s.firstName || '',
                 lastNamePaterno: s.lastNamePaterno || '',
                 lastNameMaterno: s.lastNameMaterno || '',
-                position: s.position || s.career || 'Prestador',
+                position: s.position || s.career || 'Prestador Activo',
                 color: s.color || '#6366f1',
                 skills: s.skills || [],
                 skillRatings: s.skillRatings || [],
-                career: s.career || ''
+                career: s.career || '',
+                projectIds: s.projectIds || []
               }))}
               onUpdateUser={async (userId, data) => {
                 const student = getStudentData(userId);
@@ -8074,6 +9111,80 @@ const App = () => {
         </div>
       )}
 
+      {/* MODAL GESTIÓN DE ROL Y JERARQUÍA */}
+      {roleModalStudent && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4 overflow-y-auto">
+          <div className={`rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border ${isDarkMode ? 'bg-[#18181b] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-900'} animate-in zoom-in-95 duration-200`}>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-xl font-black">Gestionar Rol y Jerarquía</h3>
+                <p className="text-xs text-slate-400 mt-0.5">{getDisplayName(roleModalStudent)} ({roleModalStudent.email || 'Sin correo'})</p>
+              </div>
+              <button onClick={() => setRoleModalStudent(null)} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-full">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="mb-4 p-3 rounded-2xl bg-indigo-50/50 dark:bg-indigo-500/10 border border-indigo-100 dark:border-indigo-500/20 text-xs text-indigo-700 dark:text-indigo-300">
+              <p className="font-bold flex items-center gap-1.5 mb-1">
+                <Info size={14} /> Rol Actual: <span className="font-black underline">{ROLE_LABELS[getEffectiveRole(roleModalStudent.email, roleModalStudent.role)]?.label}</span>
+              </p>
+              <p className="text-[11px] opacity-90">
+                Al ascender a Coordinador o Supercoordinador, las horas previas se preservan en su historial y el servicio se marca como concluido sin requerir las 480 horas.
+              </p>
+            </div>
+
+            <div className="space-y-2 mb-6">
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-400">Seleccionar Nuevo Rol:</label>
+              <div className="grid grid-cols-1 gap-2">
+                {permissions.getAllowedRolesToAssign().map((roleKey) => {
+                  const roleInfo = ROLE_LABELS[roleKey];
+                  const isCurrent = getEffectiveRole(roleModalStudent.email, roleModalStudent.role) === roleKey;
+                  return (
+                    <button
+                      key={roleKey}
+                      onClick={async () => {
+                        const targetId = roleModalStudent.id;
+                        setRoleModalStudent(null);
+                        await handleRoleChange(targetId, roleKey as UserRole);
+                      }}
+                      className={`p-3.5 rounded-2xl border text-left flex items-center justify-between transition-all ${
+                        isCurrent 
+                          ? 'border-indigo-500 bg-indigo-50/40 dark:bg-indigo-500/10 ring-2 ring-indigo-500/20' 
+                          : isDarkMode ? 'border-white/5 bg-white/5 hover:border-white/20' : 'border-slate-200 bg-slate-50 hover:border-slate-300'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-black text-sm">{roleInfo?.label || roleKey}</span>
+                          {isCurrent && <span className="px-2 py-0.5 text-[9px] font-black bg-indigo-600 text-white rounded-full">Actual</span>}
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {roleKey === 'super_coordinator' && 'Acceso total a la aplicación • Sin registro de horas • No borrable por otros supercoords'}
+                          {roleKey === 'coordinator' && 'Visibilidad de todo • Puede ascender a Alumno Coord. • Sin registro de horas'}
+                          {roleKey === 'student_coordinator' && 'Alumno con registro de horas (480h) • Capacidad de aprobar horas'}
+                          {roleKey === 'user' && 'Alumno estándar con reloj checador y registro de horas (480h)'}
+                        </p>
+                      </div>
+                      <ChevronRight size={18} className="text-slate-400 shrink-0" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={() => setRoleModalStudent(null)}
+                className="px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider bg-slate-100 dark:bg-white/10 text-slate-600 dark:text-slate-300 hover:bg-slate-200"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL ALTA/EDICIÓN ALUMNO */}
       {showAddStudent && (
         <div className={`fixed inset-0 backdrop-blur-3xl flex items-center justify-center p-4 z-[100] overflow-y-auto ${isDarkMode ? 'bg-black/90' : 'bg-slate-900/95'}`}>
@@ -8165,7 +9276,7 @@ const App = () => {
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block ml-4">Carga Trabajo</label>
                     <select className="w-full p-5 border-2 border-slate-100 rounded-2xl bg-slate-50 text-sm font-bold outline-none focus:bg-white focus:border-indigo-500 shadow-sm" value={studentForm.workStatus || ''} onChange={e => setStudentForm({...studentForm, workStatus: e.target.value})}>{Object.keys(WORK_STATUS).map(ws => <option key={ws} value={ws}>{ws}</option>)}</select>
                   </div>
-                  {userRole !== 'user' && (
+                  {permissions.isCoordinator && (
                     <div className="space-y-3">
                       <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest block ml-4">Rol del Usuario</label>
                       <select 
@@ -8173,11 +9284,15 @@ const App = () => {
                         value={studentForm.role || 'user'} 
                         onChange={e => setStudentForm({...studentForm, role: e.target.value})}
                       >
-                        <option value="user" disabled={(!user?.email || !SUPER_ADMIN_EMAILS.includes(user.email)) && (studentForm.role === 'admin' || studentForm.role === 'coordinator')}>Usuario</option>
-                        <option value="coordinator" disabled={(!user?.email || !SUPER_ADMIN_EMAILS.includes(user.email)) && studentForm.role === 'admin'}>Coordinador</option>
-                        <option value="admin" disabled={(!user?.email || !SUPER_ADMIN_EMAILS.includes(user.email))}>Administrador</option>
+                        {permissions.getAllowedRolesToAssign().map(rKey => (
+                          <option key={rKey} value={rKey}>{ROLE_LABELS[rKey]?.label || rKey}</option>
+                        ))}
                       </select>
-                      {(!user?.email || !SUPER_ADMIN_EMAILS.includes(user.email)) && <p className="text-slate-400 text-[9px] font-bold ml-4 uppercase tracking-tighter">* Solo el superadmin puede destituir privilegios</p>}
+                      <p className="text-slate-400 text-[9px] font-bold ml-4 uppercase tracking-tighter">
+                        {permissions.isMaster ? '★ Coordinador Maestro: Facultado para asignar Supercoordinadores y todos los niveles.' :
+                         permissions.isSuper ? '★ Supercoordinador: Puedes asignar roles de Coordinador, Alumno Coordinador y Alumno.' :
+                         '★ Coordinador: Puedes alternar entre Alumno y Alumno Coordinador.'}
+                      </p>
                     </div>
                   )}
                 </div>
@@ -8244,25 +9359,44 @@ const App = () => {
                   <h4 className="text-sm font-black text-slate-900 uppercase tracking-widest">Asignación de Proyectos</h4>
                 </div>
                 
-                <div className={`bg-slate-50 p-8 rounded-[2.5rem] border-2 ${studentFormErrors.projectIds ? 'border-red-500' : 'border-slate-100'} shadow-inner`}>
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-6 ml-2">Selecciona los proyectos activos</label>
-                  {studentFormErrors.projectIds && <p className="text-red-500 text-[10px] font-bold mb-4 ml-2">{studentFormErrors.projectIds}</p>}
-                  <div className="grid grid-cols-1 gap-4">
-                    {projects.map(p => (
-                      <label key={p.id} className={`flex flex-col gap-3 p-5 rounded-2xl border-2 transition-all cursor-pointer shadow-sm group ${(studentForm.projectIds || []).includes(p.id) ? 'bg-white border-indigo-500 ring-4 ring-indigo-500/10' : 'bg-white border-transparent hover:border-slate-200'}`}>
-                        <div className="flex justify-between items-start">
-                          <div className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: p.color }}></div>
-                          <input type="checkbox" className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" checked={(studentForm.projectIds || []).includes(p.id)} onChange={e => {
-                            const ids = e.target.checked ? [...(studentForm.projectIds || []), p.id] : (studentForm.projectIds || []).filter(id => id !== p.id);
-                            const newWorkStatus = ids.length > 0 ? 'Asignado' : 'Sin asignar';
-                            setStudentForm({...studentForm, projectIds: ids, workStatus: newWorkStatus});
-                          }} />
+                {(() => {
+                  const isCoordFormRole = studentForm.role === 'coordinator' || studentForm.role === 'super_coordinator' || studentForm.role === 'master_coordinator';
+                  if (isCoordFormRole) {
+                    return (
+                      <div className="bg-indigo-50/70 p-6 sm:p-8 rounded-[2rem] sm:rounded-[2.5rem] border-2 border-indigo-100 flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-2xl bg-indigo-500/20 text-indigo-600 flex items-center justify-center shrink-0">
+                          <FolderKanban size={22} />
                         </div>
-                        <span className="text-[11px] font-black uppercase text-slate-700 leading-tight tracking-tight truncate">{p.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
+                        <div>
+                          <h5 className="font-black text-xs uppercase text-indigo-900 tracking-tight">Acceso Automático a Todos los Proyectos</h5>
+                          <p className="text-[10px] text-indigo-700 font-medium">Los coordinadores no requieren enrolamiento manual; tienen acceso inherente a los {projects.length} proyectos activos del sistema.</p>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className={`bg-slate-50 p-8 rounded-[2.5rem] border-2 ${studentFormErrors.projectIds ? 'border-red-500' : 'border-slate-100'} shadow-inner`}>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-6 ml-2">Selecciona los proyectos activos</label>
+                      {studentFormErrors.projectIds && <p className="text-red-500 text-[10px] font-bold mb-4 ml-2">{studentFormErrors.projectIds}</p>}
+                      <div className="grid grid-cols-1 gap-4">
+                        {projects.map(p => (
+                          <label key={p.id} className={`flex flex-col gap-3 p-5 rounded-2xl border-2 transition-all cursor-pointer shadow-sm group ${(studentForm.projectIds || []).includes(p.id) ? 'bg-white border-indigo-500 ring-4 ring-indigo-500/10' : 'bg-white border-transparent hover:border-slate-200'}`}>
+                            <div className="flex justify-between items-start">
+                              <div className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: p.color }}></div>
+                              <input type="checkbox" className="w-5 h-5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" checked={(studentForm.projectIds || []).includes(p.id)} onChange={e => {
+                                const ids = e.target.checked ? [...(studentForm.projectIds || []), p.id] : (studentForm.projectIds || []).filter(id => id !== p.id);
+                                const newWorkStatus = ids.length > 0 ? 'Asignado' : 'Sin asignar';
+                                setStudentForm({...studentForm, projectIds: ids, workStatus: newWorkStatus});
+                              }} />
+                            </div>
+                            <span className="text-[11px] font-black uppercase text-slate-700 leading-tight tracking-tight truncate">{p.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             

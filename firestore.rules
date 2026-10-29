@@ -57,32 +57,48 @@ service cloud.firestore {
     }
     
     function isAdmin() {
+      return isSuperCoordinator();
+    }
+    
+    function isMasterCoordinator() {
       return isAuthenticated() &&
-        (request.auth.token.email == "luisedgar.gutierrez17@gmail.com" || 
-         request.auth.token.email == "luisedgar.gutierrez1@gmail.com" || 
-         request.auth.token.email == "mortovki@gmail.com" ||
-         request.auth.token.email == "legc.1794@gmail.com" ||
-         request.auth.token.email == "apoyo.comunitario.ss@fa.unam.mx" ||
+        (request.auth.token.email != null &&
+         request.auth.token.email.lower() == "luisedgar.gutierrez17@gmail.com");
+    }
+
+    function isSuperCoordinator() {
+      return isAuthenticated() &&
+        (isMasterCoordinator() || 
+         (request.auth.token.email != null &&
+          request.auth.token.email.lower() in [
+            "luisedgar.gutierrez17@gmail.com", 
+            "luisedgar.gutierrez1@gmail.com", 
+            "mortovki@gmail.com", 
+            "apoyo.comunitario.ss@fa.unam.mx"
+          ]) ||
          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'super_coordinator', 'master_coordinator']));
     }
 
     function isCoordinator() {
       return isAuthenticated() &&
+        (isSuperCoordinator() ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['coordinator', 'super_coordinator', 'master_coordinator', 'admin']));
+    }
+
+    function isStudentCoordinator() {
+      return isAuthenticated() &&
         exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'coordinator';
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'student_coordinator';
     }
 
     function isAtLeastCoordinator() {
-      return isAuthenticated() && (
-        request.auth.token.email == "luisedgar.gutierrez17@gmail.com" || 
-        request.auth.token.email == "luisedgar.gutierrez1@gmail.com" || 
-        request.auth.token.email == "mortovki@gmail.com" ||
-        request.auth.token.email == "legc.1794@gmail.com" ||
-        request.auth.token.email == "apoyo.comunitario.ss@fa.unam.mx" ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'coordinator'])
-      );
+      return isCoordinator();
+    }
+
+    function canValidateHours() {
+      return isCoordinator() || isStudentCoordinator();
     }
 
     function isValidEmail(email) {
@@ -103,64 +119,88 @@ service cloud.firestore {
         return data.uid is string &&
                data.email is string && isValidEmail(data.email) &&
                data.firstName is string && data.firstName.size() > 0 && data.firstName.size() < 100 &&
-               data.role in ['admin', 'user', 'coordinator'] &&
+               data.role in ['admin', 'user', 'coordinator', 'student_coordinator', 'super_coordinator', 'master_coordinator'] &&
                data.status is string;
       }
 
-      allow get: if isOwner(uid) || isAtLeastCoordinator();
-      allow list: if isAtLeastCoordinator();
+      allow get: if isOwner(uid) || canValidateHours();
+      allow list: if canValidateHours();
       
       allow create: if isAuthenticated() && 
-                      (isAdmin() || (isValidUser(request.resource.data) && isOwner(uid) && request.resource.data.role == 'user'));
+                      (isSuperCoordinator() || (isValidUser(request.resource.data) && isOwner(uid) && request.resource.data.role == 'user'));
                       
-      allow update: if isAuthenticated() && 
-                      (isAtLeastCoordinator() || (
+      allow update: if isAuthenticated() && (
+                      // Coordinators and higher can update user roles per hierarchy
+                      (isMasterCoordinator()) ||
+                      (isSuperCoordinator() && request.resource.data.role != 'super_coordinator' && request.resource.data.role != 'master_coordinator') ||
+                      (isCoordinator() && (request.resource.data.role in ['user', 'student_coordinator'])) ||
+                      (
                         isOwner(uid) && 
                         isValidUser(request.resource.data) && 
                         request.resource.data.role == resource.data.role &&
                         // REQUERIMIENTO: Nadie puede actualizar horasTotales desde el cliente
                         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['horasTotales'])
-                      ));
-      allow delete: if isAdmin();
+                      )
+                    );
+      // Master coordinator cannot be deleted. Supercoordinators cannot delete other supercoordinators.
+      allow delete: if (isMasterCoordinator() && resource.data.email != "luisedgar.gutierrez17@gmail.com") ||
+                       (isSuperCoordinator() && 
+                        resource.data.email != "luisedgar.gutierrez17@gmail.com" &&
+                        !(resource.data.role in ['super_coordinator', 'master_coordinator', 'admin']));
     }
 
     // Sesiones Collection (REQUERIMIENTO 3)
     match /sesiones/{sesionId} {
-      function isValidSession(data) {
-        return data.userId is string &&
-               data.projectId is string &&
-               data.horasCalculadas is number &&
-               data.estado in ['pendiente', 'aprobado', 'rechazado', 'disputado'];
+      function getSessionStatus(data) {
+        return ('estado' in data && data.estado is string) ? data.estado : 
+               (('validationStatus' in data && data.validationStatus is string) ? data.validationStatus : 'pendiente');
       }
 
-      allow read: if isAuthenticated() && (request.auth.uid == resource.data.userId || isAtLeastCoordinator());
+      function isValidSession(data) {
+        return (('userId' in data && data.userId is string) || ('studentId' in data && data.studentId is string));
+      }
+
+      allow read: if isAuthenticated() && (
+        request.auth.uid == resource.data.userId || 
+        ('studentId' in resource.data && request.auth.uid == resource.data.studentId) ||
+        canValidateHours()
+      );
       
-      allow create: if isAuthenticated() && 
+      allow create: if isAuthenticated() && (
+                      // Coordinadores y administradores pueden crear y asentar sesiones grupales o individuales
+                      canValidateHours() ||
+                      // Alumnos registrando su propia sesión
                       (
-                        (request.resource.data.userId == request.auth.uid && request.resource.data.estado == 'pendiente') ||
-                        (isAtLeastCoordinator() && request.resource.data.estado in ['aprobado', 'pendiente'])
-                      ) &&
-                      isValidSession(request.resource.data);
+                        (request.resource.data.userId == request.auth.uid || 
+                         ('studentId' in request.resource.data && request.resource.data.studentId == request.auth.uid)) &&
+                        getSessionStatus(request.resource.data) in ['pendiente', 'aprobado']
+                      )
+                    ) && isValidSession(request.resource.data);
                       
       allow update: if isAuthenticated() && (
+                      // Coordinadores y administradores pueden actualizar cualquier sesión
+                      canValidateHours() ||
                       // El usuario puede editar sus propias sesiones
-                      (request.auth.uid == resource.data.userId && 
-                       request.resource.data.userId == resource.data.userId && (
-                        // Caso A: Regresar a pendiente para corregir (permite editar campos)
-                        (request.resource.data.estado == 'pendiente' && isValidSession(request.resource.data)) ||
-                        // Caso B: Solo marcar como leída la notificación de rechazo (sin cambiar estado)
-                        (resource.data.estado == 'rechazado' && 
-                         request.resource.data.estado == 'rechazado' &&
-                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acknowledgedRejection'])) ||
-                        // Caso C: Disputar una sesión rechazada
-                        (resource.data.estado == 'rechazado' &&
-                         request.resource.data.estado == 'disputado' &&
-                         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['estado', 'disputeReason', 'disputeDate']))
-                      )) ||
-                      // Solo admin/coordinador puede cambiar el estado (aprobado/rechazado)
-                      (isAtLeastCoordinator() && isValidSession(request.resource.data))
+                      (
+                        (request.auth.uid == resource.data.userId || 
+                         ('studentId' in resource.data && request.auth.uid == resource.data.studentId)) && (
+                          // Caso A: Regresar a pendiente para corregir (permite editar campos)
+                          (getSessionStatus(resource.data) == 'pendiente' && isValidSession(request.resource.data)) ||
+                          // Caso B: Solo marcar como leída la notificación de rechazo (sin cambiar estado)
+                          (getSessionStatus(resource.data) == 'rechazado' && 
+                           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acknowledgedRejection'])) ||
+                          // Caso C: Disputar una sesión rechazada
+                          (getSessionStatus(resource.data) == 'rechazado' &&
+                           request.resource.data.diff(resource.data).affectedKeys().hasAny(['estado', 'validationStatus', 'disputeReason', 'disputeDate']))
+                        )
+                      )
                     );
-      allow delete: if isAtLeastCoordinator() || (isAuthenticated() && request.auth.uid == resource.data.userId);
+      allow delete: if canValidateHours() || (
+        isAuthenticated() && (
+          request.auth.uid == resource.data.userId || 
+          ('studentId' in resource.data && request.auth.uid == resource.data.studentId)
+        )
+      );
     }
 
     // Logs Auditoría (REQUERIMIENTO 3)
@@ -169,12 +209,30 @@ service cloud.firestore {
       allow write: if false; // Solo backend/Admin SDK
     }
 
+    // Active Clock-ins Collection (Reloj Checador)
+    match /active_clock_ins/{uid} {
+      allow read: if isAuthenticated() && (request.auth.uid == uid || isAtLeastCoordinator());
+      allow create, update, delete: if isAuthenticated() && (request.auth.uid == uid || isAtLeastCoordinator());
+    }
+
     // Public Profiles Collection
     match /public_profiles/{uid} {
       allow read: if isAuthenticated();
       allow create: if isOwner(uid) || isAtLeastCoordinator();
       allow update: if isOwner(uid) || isAtLeastCoordinator();
       allow delete: if isAdmin();
+    }
+
+    // Global Tasks Collection
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAtLeastCoordinator();
+
+      match /comments/{commentId} {
+        allow read, write: if isAuthenticated();
+      }
     }
 
     // Projects Collection

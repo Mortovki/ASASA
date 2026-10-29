@@ -1,10 +1,12 @@
 import * as React from 'react';
 import { Check, X, Clock, CheckCircle2, XCircle, Send, MessageSquare, ShieldAlert, CheckSquare, Square, Filter, User, Search, Calendar, MapPin, Activity, FileText, ExternalLink, Save, ChevronDown, Edit2, ChevronLeft, ChevronRight, LayoutList, CalendarDays, ChevronUp } from 'lucide-react';
-import { doc, updateDoc, writeBatch, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, writeBatch, getDoc, setDoc } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { handleFirestoreError, OperationType } from '../firebase';
 import { showSuccessToast, showErrorToast, showLoadingToast } from '../utils/toastUtils';
 import toast from 'react-hot-toast';
+
+import { SUPER_ADMIN_EMAILS } from '../hooks/usePermissions';
 
 const VALIDATION_STATUS = {
   'pendiente': { label: 'Pendiente', color: 'bg-amber-100 text-amber-700 border-amber-200', icon: Clock },
@@ -12,8 +14,6 @@ const VALIDATION_STATUS = {
   'rechazado': { label: 'Rechazado', color: 'bg-rose-100 text-rose-700 border-rose-200', icon: XCircle },
   'disputado': { label: 'Disputado', color: 'bg-indigo-100 text-indigo-700 border-indigo-200', icon: MessageSquare },
 };
-
-const SUPER_ADMIN_EMAILS = ["luisedgar.gutierrez17@gmail.com", "luisedgar.gutierrez1@gmail.com", "mortovki@gmail.com", "legc.1794@gmail.com", "apoyo.comunitario.ss@fa.unam.mx"];
 
 const toMins = (t: string) => {
   if (!t) return 0;
@@ -132,12 +132,13 @@ const CalendarView = ({ records, categories, projects, isDarkMode, onSelectRecor
   );
 };
 
-export const AdminValidation = ({ students, setStudents, categories, projects, isDarkMode }: any) => {
-  const [activeTab, setActiveTab] = React.useState<'pending' | 'disputed'>('pending');
+export const AdminValidation = ({ students, setStudents, setSessions, categories, projects, isDarkMode }: any) => {
+  const [activeTab, setActiveTab] = React.useState<'pending' | 'clock-in-out' | 'disputed'>('pending');
   const [viewMode, setViewMode] = React.useState<'list' | 'calendar'>('list');
   const [selectedIds, setSelectedIds] = React.useState<string[]>([]);
   const [rejectingRecords, setRejectingRecords] = React.useState<any[]>([]);
   const [rejectReason, setRejectReason] = React.useState('');
+  const [processedIds, setProcessedIds] = React.useState<Record<string, 'aprobado' | 'rechazado'>>({});
   const [filterStudentId, setFilterStudentId] = React.useState<string>('all');
   const [filterDate, setFilterDate] = React.useState<string>('');
   const [filterCategoryId, setFilterCategoryId] = React.useState<string>('all');
@@ -182,21 +183,102 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
   };
 
   const handleApproveRecords = async (recordsToApprove: { studentId: string, recordId: string }[]) => {
+    if (recordsToApprove.length === 0) return;
     const loadingToast = showLoadingToast(recordsToApprove.length === 1 ? "Aprobando registro..." : `Aprobando ${recordsToApprove.length} registros...`);
-    try {
-      const batch = writeBatch(db);
-      recordsToApprove.forEach(r => {
-        const sessionRef = doc(db, 'sesiones', r.recordId);
-        batch.update(sessionRef, {
-          estado: 'aprobado',
-          status: 'A',
-          updatedBy: auth.currentUser?.uid
+    
+    // Optimistic tracking so records instantly disappear from pending list
+    const approvedMap: Record<string, 'aprobado'> = {};
+    recordsToApprove.forEach(r => {
+      approvedMap[r.recordId] = 'aprobado';
+    });
+    setProcessedIds(prev => ({ ...prev, ...approvedMap }));
+
+    // 1. Optimistic local state update in students
+    if (setStudents) {
+      setStudents((prev: any[]) => {
+        const next = prev.map(s => {
+          const studentApprovals = recordsToApprove.filter(r => r.studentId === s.id);
+          if (studentApprovals.length === 0) return s;
+          const approvedIds = new Set(recordsToApprove.map(r => r.recordId));
+          return {
+            ...s,
+            records: (s.records || []).map((rec: any) => {
+              if (approvedIds.has(rec.id) || (rec.recordId && approvedIds.has(rec.recordId))) {
+                return {
+                  ...rec,
+                  estado: 'aprobado',
+                  validationStatus: 'aprobado',
+                  status: 'A'
+                };
+              }
+              return rec;
+            })
+          };
         });
+        try {
+          localStorage.setItem('app_students', JSON.stringify(next));
+        } catch (e) {}
+        return next;
       });
+    }
+
+    // 2. Optimistic local state update in sessions
+    if (setSessions) {
+      const approvedIds = new Set(recordsToApprove.map(r => r.recordId));
+      setSessions((prev: any[]) => prev.map(s => {
+        if (approvedIds.has(s.id) || (s.recordId && approvedIds.has(s.recordId))) {
+          return {
+            ...s,
+            estado: 'aprobado',
+            validationStatus: 'aprobado',
+            status: 'A'
+          };
+        }
+        return s;
+      }));
+    }
+
+    try {
+      const nowIso = new Date().toISOString();
+      const currentUid = auth.currentUser?.uid || '';
+
+      // 3. Persist to Firestore sesiones collection
+      for (const r of recordsToApprove) {
+        const fullRecord = pendingRecords.find(p => p.id === r.recordId) || {};
+        const sessionRef = doc(db, 'sesiones', r.recordId);
+        await setDoc(sessionRef, {
+          ...fullRecord,
+          estado: 'aprobado',
+          validationStatus: 'aprobado',
+          status: 'A',
+          horasCalculadas: Number(fullRecord.horasCalculadas ?? fullRecord.hours ?? 0),
+          userId: fullRecord.userId || fullRecord.studentId || r.studentId,
+          projectId: fullRecord.projectId || 'General',
+          updatedBy: currentUid,
+          validatedBy: currentUid,
+          validatedAt: nowIso
+        }, { merge: true });
+
+        // Also update users collection if records array exists on user document
+        try {
+          const userRef = doc(db, 'users', r.studentId);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            if (Array.isArray(userData.records) && userData.records.some((rec: any) => rec.id === r.recordId)) {
+              const updatedRecords = userData.records.map((rec: any) => 
+                rec.id === r.recordId ? { ...rec, estado: 'aprobado', validationStatus: 'aprobado', status: 'A', validatedAt: nowIso } : rec
+              );
+              await updateDoc(userRef, { records: updatedRecords });
+            }
+          }
+        } catch (uErr) {
+          console.warn("User records sync warning:", uErr);
+        }
+      }
       
-      await batch.commit();
       toast.dismiss(loadingToast);
-      showSuccessToast(recordsToApprove.length === 1 ? "Registro aprobado" : `${recordsToApprove.length} registros aprobados`);
+      showSuccessToast(recordsToApprove.length === 1 ? "Registro aprobado exitosamente" : `${recordsToApprove.length} registros aprobados exitosamente`);
       setSelectedIds([]);
     } catch (error) {
       toast.dismiss(loadingToast);
@@ -206,42 +288,103 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
   };
 
   const handleRejectRecords = async () => {
-    if (rejectingRecords.length === 0 || !rejectReason.trim()) return;
+    if (rejectingRecords.length === 0) return;
+    const finalReason = rejectReason.trim() || "No cumple con los requisitos o comprobante inválido";
 
     const loadingToast = showLoadingToast(rejectingRecords.length === 1 ? "Rechazando registro..." : `Rechazando ${rejectingRecords.length} registros...`);
-    try {
-      const batch = writeBatch(db);
-      rejectingRecords.forEach(r => {
-        const sessionRef = doc(db, 'sesiones', r.id);
-        batch.update(sessionRef, {
-          estado: 'rechazado',
-          rejectReason: rejectReason,
-          acknowledgedRejection: false,
-          updatedBy: auth.currentUser?.uid
+    
+    // Optimistic tracking so records instantly disappear from pending list
+    const rejectedMap: Record<string, 'rechazado'> = {};
+    rejectingRecords.forEach(r => {
+      rejectedMap[r.id] = 'rechazado';
+      if (r.recordId) rejectedMap[r.recordId] = 'rechazado';
+    });
+    setProcessedIds(prev => ({ ...prev, ...rejectedMap }));
+
+    // 1. Optimistic local state update in students
+    if (setStudents) {
+      setStudents((prev: any[]) => {
+        const next = prev.map(s => {
+          const studentRejections = rejectingRecords.filter(r => r.studentId === s.id);
+          if (studentRejections.length === 0) return s;
+          const rejectedIds = new Set(rejectingRecords.map(r => r.id));
+          return {
+            ...s,
+            records: (s.records || []).map((rec: any) => {
+              if (rejectedIds.has(rec.id) || (rec.recordId && rejectedIds.has(rec.recordId))) {
+                return {
+                  ...rec,
+                  estado: 'rechazado',
+                  validationStatus: 'rechazado',
+                  rejectReason: finalReason,
+                  acknowledgedRejection: false
+                };
+              }
+              return rec;
+            })
+          };
         });
+        try {
+          localStorage.setItem('app_students', JSON.stringify(next));
+        } catch (e) {}
+        return next;
       });
+    }
 
-      await batch.commit();
-
-      // Group notifications by student
-      const studentsToNotify: any[] = [];
-      rejectingRecords.forEach(r => {
-        let student = studentsToNotify.find(s => s.id === r.studentId);
-        if (!student) {
-          student = { id: r.studentId, email: r.studentEmail, name: r.studentName, records: [] };
-          studentsToNotify.push(student);
+    // 2. Optimistic local state update in sessions
+    if (setSessions) {
+      const rejectedIds = new Set(rejectingRecords.map(r => r.id));
+      setSessions((prev: any[]) => prev.map(s => {
+        if (rejectedIds.has(s.id) || (s.recordId && rejectedIds.has(s.recordId))) {
+          return {
+            ...s,
+            estado: 'rechazado',
+            validationStatus: 'rechazado',
+            status: 'R',
+            rejectReason: finalReason,
+            acknowledgedRejection: false
+          };
         }
-        student.records.push(r);
-      });
+        return s;
+      }));
+    }
 
-      studentsToNotify.forEach(student => {
-        if (student.email) {
-          const subject = encodeURIComponent("Registro de horas rechazado");
-          const recordsList = student.records.map((r: any) => `- ${r.date}: ${r.hours}h ("${r.description}")`).join('\n');
-          const body = encodeURIComponent(`Hola ${student.name},\n\nLos siguientes registros de horas han sido rechazados por el siguiente motivo:\n\n${rejectReason}\n\nRegistros afectados:\n${recordsList}\n\nPor favor revisa tu panel para más detalles.`);
-          window.open(`mailto:${student.email}?subject=${subject}&body=${body}`, '_blank');
+    try {
+      const nowIso = new Date().toISOString();
+      const currentUid = auth.currentUser?.uid || '';
+
+      for (const r of rejectingRecords) {
+        const sessionRef = doc(db, 'sesiones', r.id);
+        await setDoc(sessionRef, {
+          ...r,
+          estado: 'rechazado',
+          validationStatus: 'rechazado',
+          rejectReason: finalReason,
+          acknowledgedRejection: false,
+          horasCalculadas: Number(r.horasCalculadas ?? r.hours ?? 0),
+          userId: r.userId || r.studentId,
+          projectId: r.projectId || 'General',
+          updatedBy: currentUid,
+          rejectedBy: currentUid,
+          rejectedAt: nowIso
+        }, { merge: true });
+
+        try {
+          const userRef = doc(db, 'users', r.studentId);
+          const userSnap = await getDoc(userRef);
+          if (userSnap.exists()) {
+            const userData = userSnap.data();
+            if (Array.isArray(userData.records) && userData.records.some((rec: any) => rec.id === r.id)) {
+              const updatedRecords = userData.records.map((rec: any) => 
+                rec.id === r.id ? { ...rec, estado: 'rechazado', validationStatus: 'rechazado', rejectReason: finalReason, acknowledgedRejection: false } : rec
+              );
+              await updateDoc(userRef, { records: updatedRecords });
+            }
+          }
+        } catch (uErr) {
+          console.warn("User records sync warning on reject:", uErr);
         }
-      });
+      }
 
       toast.dismiss(loadingToast);
       showSuccessToast(rejectingRecords.length === 1 ? "Registro rechazado" : `${rejectingRecords.length} registros rechazados`);
@@ -260,20 +403,26 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
     students.forEach((s: any) => {
       if (s.email && SUPER_ADMIN_EMAILS.includes(s.email)) return;
       (s.records || []).forEach((r: any) => {
-        if (r.validationStatus === 'pendiente') {
+        if (processedIds[r.id] || (r.recordId && processedIds[r.recordId])) return;
+        const isApproved = r.validationStatus === 'aprobado' || r.estado === 'aprobado';
+        const isRejected = r.validationStatus === 'rechazado' || r.estado === 'rechazado';
+        const isPending = (r.validationStatus === 'pendiente' || r.estado === 'pendiente' || (!r.validationStatus && !r.estado)) && !isApproved && !isRejected;
+        if (isPending) {
           records.push({ ...r, studentId: s.id, studentName: s.name, studentEmail: s.email });
         }
       });
     });
     return records.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [students]);
+  }, [students, processedIds]);
 
   const disputedRecords = React.useMemo(() => {
     const records: any[] = [];
     students.forEach((s: any) => {
       if (s.email && SUPER_ADMIN_EMAILS.includes(s.email)) return;
       (s.records || []).forEach((r: any) => {
-        if (r.validationStatus === 'disputado') {
+        const isApproved = r.validationStatus === 'aprobado' || r.estado === 'aprobado';
+        const isDisputed = (r.validationStatus === 'disputado' || r.estado === 'disputado') && !isApproved;
+        if (isDisputed) {
           records.push({ ...r, studentId: s.id, studentName: s.name, studentEmail: s.email });
         }
       });
@@ -281,7 +430,15 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
     return records.sort((a, b) => new Date(b.disputeDate || b.date).getTime() - new Date(a.disputeDate || a.date).getTime());
   }, [students]);
 
-  const currentRecords = activeTab === 'pending' ? pendingRecords : disputedRecords;
+  const pendingClockInOutRecords = React.useMemo(() => {
+    return pendingRecords.filter(r => r.isClockInOut || r.sessionType === 'clock_in_out' || r.requiresCoordinatorApproval);
+  }, [pendingRecords]);
+
+  const currentRecords = activeTab === 'pending' 
+    ? pendingRecords 
+    : activeTab === 'clock-in-out'
+      ? pendingClockInOutRecords
+      : disputedRecords;
 
   const filteredRecords = React.useMemo(() => {
     return currentRecords.filter(r => {
@@ -365,16 +522,22 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
           <p className={`text-sm font-medium ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>Gestiona y aprueba las horas registradas por los alumnos.</p>
         </div>
         
-        <div className={`shrink-0 flex p-1 rounded-2xl ${isDarkMode ? 'bg-white/5' : 'bg-slate-100 shadow-inner'}`}>
+        <div className={`shrink-0 flex p-1 rounded-2xl flex-wrap gap-1 ${isDarkMode ? 'bg-white/5' : 'bg-slate-100 shadow-inner'}`}>
           <button 
             onClick={() => { setActiveTab('pending'); setSelectedIds([]); }}
-            className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'pending' ? (isDarkMode ? 'bg-white/10 text-white shadow-xl' : 'bg-white text-slate-900 shadow-md') : 'text-slate-500 hover:text-slate-700'}`}
+            className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'pending' ? (isDarkMode ? 'bg-white/10 text-white shadow-xl' : 'bg-white text-slate-900 shadow-md') : 'text-slate-500 hover:text-slate-700'}`}
           >
             Pendientes ({pendingRecords.length})
           </button>
           <button 
+            onClick={() => { setActiveTab('clock-in-out'); setSelectedIds([]); }}
+            className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${activeTab === 'clock-in-out' ? (isDarkMode ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-md' : 'bg-amber-500 text-white shadow-md shadow-amber-500/20') : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            <Clock size={14} /> Clock In/Out ({pendingClockInOutRecords.length})
+          </button>
+          <button 
             onClick={() => { setActiveTab('disputed'); setSelectedIds([]); }}
-            className={`px-6 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'disputed' ? (isDarkMode ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30') : 'text-slate-500 hover:text-slate-700'}`}
+            className={`px-5 py-2.5 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${activeTab === 'disputed' ? (isDarkMode ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30') : 'text-slate-500 hover:text-slate-700'}`}
           >
             Disputas ({disputedRecords.length})
           </button>
@@ -640,16 +803,28 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
                       {r.studentName.charAt(0)}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <p className={`font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>{r.studentName}</p>
                         {r.studentEmail && (
                           <span className={`text-[9px] font-bold ${isDarkMode ? 'text-slate-500' : 'text-slate-400'}`}>({r.studentEmail})</span>
+                        )}
+                        {(r.isClockInOut || r.sessionType === 'clock_in_out' || r.requiresCoordinatorApproval) && (
+                          <span className="px-2.5 py-0.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 text-[9px] font-black uppercase rounded-lg flex items-center gap-1">
+                            <Clock size={11} className="text-amber-500" /> Reloj Checador · Val. Coordinador
+                          </span>
                         )}
                         {r.validationStatus === 'disputado' && (
                           <span className="px-2 py-0.5 bg-indigo-100 text-indigo-600 text-[8px] font-black uppercase rounded-full">Disputa</span>
                         )}
                       </div>
-                      <p className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>{r.date} • {Number(r.hours.toFixed(2))}h • {cat?.name || 'Otra'} • {proj?.name || 'General'}</p>
+                      <p className={`text-xs ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
+                        {r.date} • {Number(r.hours.toFixed(2))}h • {cat?.name || 'Otra'} • {proj?.name || 'General'}
+                        {r.startTime && r.endTime && (
+                          <span className={`ml-2 px-2 py-0.5 rounded text-[10px] font-bold ${isDarkMode ? 'bg-white/5 text-indigo-300' : 'bg-indigo-50 text-indigo-600'}`}>
+                            {r.startTime} → {r.endTime}
+                          </span>
+                        )}
+                      </p>
                       <p className={`text-sm mt-1 break-words line-clamp-2 ${isDarkMode ? 'text-gray-400' : 'text-slate-600'}`}>"{r.description}"</p>
                       {r.validationStatus === 'disputado' && r.disputeReason && (
                         <div className={`mt-3 p-3 rounded-xl border text-xs italic ${isDarkMode ? 'bg-indigo-500/5 border-indigo-500/20 text-indigo-300' : 'bg-indigo-50 border-indigo-100 text-indigo-700'}`}>
@@ -1061,8 +1236,7 @@ export const AdminValidation = ({ students, setStudents, categories, projects, i
                 </button>
                 <button 
                   onClick={handleRejectRecords}
-                  disabled={!rejectReason.trim()}
-                  className="flex-1 py-4 rounded-2xl font-black uppercase text-xs bg-rose-600 text-white hover:bg-rose-700 transition-all shadow-lg shadow-rose-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="flex-1 py-4 rounded-2xl font-black uppercase text-xs bg-rose-600 text-white hover:bg-rose-700 transition-all shadow-lg shadow-rose-200 flex items-center justify-center gap-2 active:scale-95"
                 >
                   <Send size={16} /> Enviar y Rechazar
                 </button>

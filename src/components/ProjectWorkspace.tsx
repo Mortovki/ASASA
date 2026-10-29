@@ -22,7 +22,8 @@ import {
   Share2,
   Search,
   User,
-  Zap
+  Zap,
+  Layers
 } from 'lucide-react';
 import { db } from '../firebase';
 import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
@@ -43,6 +44,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useBreakpoint } from '../hooks/useBreakpoint';
 import { BottomSheet } from './ui/BottomSheet';
 import { SprintConfigModal } from './sprints/SprintConfigModal';
+import { TaskWorkspace } from './TaskWorkspace/TaskWorkspace';
 
 interface Tab {
   id: string;
@@ -186,7 +188,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
   };
 
   const handleSetStage = async (index: number) => {
-    if (userRole !== 'admin' && userRole !== 'coordinator') return;
+    if (!permissions.isCoordinator) return;
     try {
       const projectRef = doc(db, 'projects', projectId);
       await updateDoc(projectRef, { currentStageIndex: index });
@@ -201,6 +203,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
 
   const ALL_TABS: Tab[] = [
     { id: 'dashboard', label: 'Dashboard', shortLabel: 'Panel', icon: LayoutDashboard },
+    { id: 'task-workspace', label: 'Tablero Monday', shortLabel: 'Tareas', icon: Layers },
     { id: 'kanban', label: 'Tablero', shortLabel: 'Tablero', icon: Columns2 },
     { id: 'gantt', label: 'Gantt', shortLabel: 'Gantt', icon: GanttChartSquare },
     { id: 'sprints', label: 'Sprints', shortLabel: 'Sprints', icon: Table2 },
@@ -210,7 +213,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
     { id: 'trash', label: 'Papelera', shortLabel: 'Papelera', icon: Trash2, coordinatorOnly: true },
   ];
 
-  const filteredAllTabs = ALL_TABS.filter(t => !t.coordinatorOnly || userRole === 'admin' || userRole === 'coordinator');
+  const filteredAllTabs = ALL_TABS.filter(t => !t.coordinatorOnly || permissions.isCoordinator);
   const visibleTabs = filteredAllTabs.filter(t => t.id !== 'cpm' && t.id !== 'trash' && t.id !== 'stages');
   const overflowTabs = filteredAllTabs.filter(t => t.id === 'cpm' || t.id === 'trash' || t.id === 'stages');
 
@@ -344,7 +347,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                   )}
                 </button>
 
-                {isMobile && (userRole === 'admin' || userRole === 'coordinator') && (
+                {isMobile && permissions.isCoordinator && (
                   <button 
                     onClick={() => setActiveTab('stages')}
                     className={`p-1.5 transition-colors ${isDarkMode ? 'text-gray-500 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
@@ -438,7 +441,7 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                 )}
               </button>
 
-              {(userRole === 'admin' || userRole === 'coordinator') && (
+              {permissions.isCoordinator && (
                 <button 
                   onClick={() => setActiveTab('stages')}
                   className={`p-1.5 sm:p-2 transition-colors ${isDarkMode ? 'text-gray-500 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
@@ -492,6 +495,17 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
                 students={students} 
                 isDarkMode={isDarkMode}
                 userRole={userRole}
+              />
+            )}
+            {activeTab === 'task-workspace' && (
+              <TaskWorkspace
+                initialProjectId={projectId}
+                projects={currentProject ? [currentProject] : []}
+                students={students}
+                currentUserId={currentUser?.uid || ''}
+                currentUserName={currentUser?.displayName || 'Usuario'}
+                currentUserRole={userRole}
+                isDarkMode={isDarkMode}
               />
             )}
             {activeTab === 'kanban' && (

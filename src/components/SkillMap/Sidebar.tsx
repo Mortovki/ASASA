@@ -62,68 +62,96 @@ export function Sidebar({
       </div>
 
       <div className={`flex-1 overflow-y-auto p-4 space-y-8 ${isOpen ? 'block' : 'hidden lg:block'}`}>
-        {/* Prestadores Section */}
+        {/* Alumnxs Activos Enrolados Section */}
         <section className="space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Prestadores</h3>
-            <button 
-              onClick={selectAll}
-              className="text-[10px] text-indigo-500 hover:text-indigo-600 font-black uppercase tracking-widest transition-colors"
-            >
-              Seleccionar todos
-            </button>
+            <div className="flex items-center gap-2">
+              <h3 className={`text-[10px] font-black uppercase tracking-widest ${isDarkMode ? 'text-gray-400' : 'text-slate-500'}`}>
+                Alumnxs Activos Enrolados
+              </h3>
+              <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
+                isDarkMode ? 'bg-white/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'
+              }`}>
+                {users.length}
+              </span>
+            </div>
+            {users.length > 0 && (
+              <button 
+                onClick={selectAll}
+                className="text-[10px] text-indigo-500 hover:text-indigo-600 font-black uppercase tracking-widest transition-colors"
+              >
+                Seleccionar todos
+              </button>
+            )}
           </div>
-          <div className="space-y-1">
-            {users.map(user => {
-              const isSelected = selectedUserIds.includes(user.uid);
-              return (
-                <div
-                  key={user.uid}
-                  onClick={() => toggleUser(user.uid)}
-                  className={`group flex items-center gap-3 p-2 rounded-xl cursor-pointer transition-all ${
-                    isSelected 
-                      ? (isDarkMode ? 'bg-white/10' : 'bg-indigo-50 border border-indigo-100') 
-                      : (isDarkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50 border border-transparent')
-                  }`}
-                >
-                  <div 
-                    className="w-10 h-10 rounded-full flex items-center justify-center text-[10px] font-black text-white relative shadow-sm"
-                    style={{ backgroundColor: user.color }}
+          {users.length === 0 ? (
+            <div className={`p-4 rounded-xl border text-center text-xs ${
+              isDarkMode ? 'bg-white/5 border-white/5 text-gray-400' : 'bg-slate-50 border-slate-200 text-slate-500'
+            }`}>
+              No hay alumnxs activos actualmente enrolados en proyectos.
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {users.map(user => {
+                const isSelected = selectedUserIds.includes(user.uid);
+                return (
+                  <div
+                    key={user.uid}
+                    onClick={() => toggleUser(user.uid)}
+                    className={`group flex items-center gap-3 p-2 rounded-xl cursor-pointer transition-all ${
+                      isSelected 
+                        ? (isDarkMode ? 'bg-white/10' : 'bg-indigo-50 border border-indigo-100') 
+                        : (isDarkMode ? 'hover:bg-white/5' : 'hover:bg-slate-50 border border-transparent')
+                    }`}
                   >
-                    {user.firstName[0]}{user.lastNamePaterno[0]}
-                    {isSelected && (
-                      <div className={`absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full flex items-center justify-center border-2 ${isDarkMode ? 'border-[#121212]' : 'border-white shadow-sm'}`}>
-                        <Check size={10} className="text-white" />
+                    <div 
+                      className="w-10 h-10 rounded-full flex items-center justify-center text-[10px] font-black text-white relative shadow-sm"
+                      style={{ backgroundColor: user.color }}
+                    >
+                      {user.firstName[0]}{user.lastNamePaterno[0]}
+                      {isSelected && (
+                        <div className={`absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full flex items-center justify-center border-2 ${isDarkMode ? 'border-[#121212]' : 'border-white shadow-sm'}`}>
+                          <Check size={10} className="text-white" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className={`text-[11px] font-black uppercase tracking-tight truncate ${
+                          isSelected 
+                            ? (isDarkMode ? 'text-white' : 'text-indigo-600') 
+                            : (isDarkMode ? 'text-gray-400 group-hover:text-gray-200' : 'text-slate-600 group-hover:text-slate-900')
+                        }`}>
+                          {user.firstName} {user.lastNamePaterno}
+                        </p>
+                        <span className={`shrink-0 inline-flex items-center px-1.5 py-0.2 text-[8px] font-bold rounded-full ${
+                          isDarkMode 
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                            : 'bg-emerald-50 text-emerald-600 border border-emerald-200'
+                        }`}>
+                          Enroladx
+                        </span>
                       </div>
+                      <p className={`text-[9px] font-bold truncate ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>{user.position}</p>
+                    </div>
+                    {(isAdmin || user.uid === currentUserId) && (
+                      <button 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditUser(user);
+                        }}
+                        className={`opacity-0 group-hover:opacity-100 p-1 rounded transition-all ${
+                          isDarkMode ? 'hover:bg-white/10 text-gray-500 hover:text-white' : 'hover:bg-indigo-100 text-slate-400 hover:text-indigo-600'
+                        }`}
+                      >
+                        <Settings size={12} />
+                      </button>
                     )}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-[11px] font-black uppercase tracking-tight truncate ${
-                      isSelected 
-                        ? (isDarkMode ? 'text-white' : 'text-indigo-600') 
-                        : (isDarkMode ? 'text-gray-400 group-hover:text-gray-200' : 'text-slate-600 group-hover:text-slate-900')
-                    }`}>
-                      {user.firstName} {user.lastNamePaterno}
-                    </p>
-                    <p className={`text-[9px] font-bold truncate ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>{user.position}</p>
-                  </div>
-                  {(isAdmin || user.uid === currentUserId) && (
-                    <button 
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onEditUser(user);
-                      }}
-                      className={`opacity-0 group-hover:opacity-100 p-1 rounded transition-all ${
-                        isDarkMode ? 'hover:bg-white/10 text-gray-500 hover:text-white' : 'hover:bg-indigo-100 text-slate-400 hover:text-indigo-600'
-                      }`}
-                    >
-                      <Settings size={12} />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </section>
 
         {/* Categorías Section */}

@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore, setLogLevel } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -9,9 +9,15 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-// Use the specific database ID for this project to avoid initialization errors
+// Avoid noisy logs on transient connection re-negotiations
+setLogLevel('error');
+
+// Use initializeFirestore with experimentalForceLongPolling to ensure rock-solid
+// connectivity in iframe and Cloud Run environments where streaming WebChannels may be interrupted
 const firestoreDatabaseId = (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-b67305f5-5703-4b56-b34e-a97c8b8e5544';
-export const db = getFirestore(app, firestoreDatabaseId);
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+}, firestoreDatabaseId);
 
 export const storage = getStorage(app);
 
@@ -50,6 +56,12 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   // Ignore permission-denied errors if the user is logged out (e.g., during sign out)
   if ((errorCode === 'permission-denied' || errorMessage.includes('Missing or insufficient permissions')) && !auth.currentUser) {
     console.warn(`Ignored permission-denied error during ${operationType} on ${path} because user is logged out.`);
+    return;
+  }
+
+  // Gracefully handle offline or transient network unavailable errors without crashing
+  if (errorCode === 'unavailable' || errorMessage.includes('the client is offline') || errorMessage.includes('Could not reach Cloud Firestore')) {
+    console.warn(`Firestore operating in offline mode for ${operationType} on ${path}.`);
     return;
   }
 

@@ -12,6 +12,7 @@ import { SkillEditor } from './SkillEditor';
 import { ProfileSkillMap } from './ProfileSkillMap';
 import { SkillRating } from '../types/skills';
 import { LogOut, Save } from 'lucide-react';
+import { getEffectiveRole } from '../hooks/usePermissions';
 
 const profileSchema = z.object({
   firstName: z.string().min(1, "El nombre es obligatorio"),
@@ -63,9 +64,7 @@ const ProfileForm = ({ user, onComplete, isDarkMode }: ProfileFormProps) => {
     setLoading(true);
     const loadingToast = showLoadingToast("Guardando perfil...");
     try {
-      // Hardcoded admin emails
-      const adminEmails = ['luisedgar.gutierrez17@gmail.com', 'luisedgar.gutierrez1@gmail.com'];
-      const isAdmin = user.email && adminEmails.includes(user.email);
+      const effectiveRole = getEffectiveRole(user.email);
       
       // Derive skills array from skillRatings for backward compatibility
       const derivedSkills = data.skillRatings.map((s: SkillRating) => s.name);
@@ -73,8 +72,9 @@ const ProfileForm = ({ user, onComplete, isDarkMode }: ProfileFormProps) => {
       const profileData = {
         ...data,
         skills: derivedSkills,
-        role: isAdmin ? 'admin' : 'user',
-        status: 'En Curso', // Default status for all new users
+        role: effectiveRole,
+        status: effectiveRole === 'user' ? 'En Curso' : 'Coordinador',
+        workStatus: effectiveRole === 'master_coordinator' ? 'Coordinador Maestro' : (effectiveRole === 'super_coordinator' ? 'Supercoordinador' : (data.workStatus || 'Asignado')),
         email: user.email,
         uid: user.uid,
         createdAt: new Date().toISOString(),

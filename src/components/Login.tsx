@@ -9,7 +9,9 @@ const Login = () => {
   const handleGoogleLogin = async () => {
     setLoading(true);
     try {
-      await signInWithPopup(auth, googleProvider);
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      await signInWithPopup(auth, provider);
       showSuccessToast('Sesión iniciada correctamente');
     } catch (error: any) {
       if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
@@ -21,6 +23,9 @@ const Login = () => {
       } else if (error.code === 'auth/unauthorized-domain') {
         console.error("Error signing in with Google: unauthorized domain", error);
         showErrorToast('Este dominio no está autorizado para el inicio de sesión con Google. Revisa la configuración en la consola de Firebase.');
+      } else if (error.code === 'auth/network-request-failed') {
+        console.warn("Network request failed during Google sign-in.", error);
+        showErrorToast('Error de red al conectar con Google. Por favor, verifica tu conexión e inténtalo de nuevo.');
       } else {
         console.error("Error signing in with Google", error);
         showErrorToast(`Error al iniciar sesión: ${error.message || 'Inténtalo de nuevo'}`);

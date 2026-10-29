@@ -22,6 +22,7 @@ export interface SkillMapUser {
   skills: string[];
   skillRatings: SkillRating[];
   career: string;
+  projectIds?: string[];
 }
 
 export type SkillRating = {

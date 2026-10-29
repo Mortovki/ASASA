@@ -88,8 +88,8 @@ export function SkillMap({ users, onAddUser, onUpdateUser, isAdmin, currentUserI
           <div className="flex items-center justify-between sm:justify-start gap-4">
             <div className="flex items-center gap-4">
               <h1 className={`text-sm font-black uppercase tracking-widest ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>Vista de Análisis</h1>
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-tighter ${isDarkMode ? 'bg-white/10 text-gray-400' : 'bg-slate-100 text-slate-500'}`}>
-                {selectedUsers.length} prestadores
+              <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${isDarkMode ? 'bg-white/10 text-gray-300' : 'bg-slate-100 text-slate-600'}`}>
+                {selectedUsers.length} seleccionadxs de {users.length} activxs enroladxs
               </span>
             </div>
             
