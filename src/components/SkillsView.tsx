@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 import { handleFirestoreError, OperationType } from '../firebase';
+import { usePermissions } from '../hooks/usePermissions';
 
 interface UserProfile {
   id: string;
@@ -35,7 +36,7 @@ const SkillsView = ({ users, currentUserRole, currentUserId, projects, isDarkMod
   const [editingSkills, setEditingSkills] = useState<string[]>([]);
   const [skillInput, setSkillInput] = useState('');
 
-  const isAdmin = currentUserRole === 'admin' || currentUserRole === 'coordinator';
+  const { isCoordinator: isAdmin } = usePermissions(currentUserRole);
 
   const careers = useMemo(() => {
     const uniqueCareers = Array.from(new Set(users.map(u => u.career)));

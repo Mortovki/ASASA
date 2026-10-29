@@ -2,7 +2,7 @@ import * as React from 'react';
 import { useState, useMemo, useEffect, useRef, Component } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db, handleFirestoreError, OperationType } from './firebase';
-import { doc, getDoc, setDoc, deleteDoc, getDocs, collection, query, orderBy, limit, onSnapshot, where, writeBatch, updateDoc, addDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, deleteDoc, getDocs, collection, query, orderBy, limit, onSnapshot, where, or, writeBatch, updateDoc, addDoc } from 'firebase/firestore';
 import Login from './components/Login';
 import ProfileForm from './components/ProfileForm';
 import { AdminValidation } from './components/AdminValidation';
@@ -27,7 +27,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, 
 import { ChartContainer } from './components/ChartContainer';
 import { safeFormatDate } from './utils/dateUtils';
 import { usePermissions, getEffectiveRole, ROLE_LABELS, MASTER_COORDINATOR_EMAIL, SUPER_ADMIN_EMAILS, UserRole } from './hooks/usePermissions';
-import { INITIAL_STUDENTS } from './constants/initialData';
+import { getStudentApprovedHours, isStudentFinished, normalizeStudentProfiles, mergeStudentRecords, matchesStudentCategories, reconcileCategorySelection } from './utils/studentData';
 
 const CustomXAxisTick = ({ x, y, payload, isDarkMode, isMobile }: any) => {
   if (!payload || !payload.value) return null;
@@ -70,51 +70,6 @@ import { PREDEFINED_SKILLS } from './constants/skills';
 import { notifyProjectAssigned } from './services/notificationService';
 
 const TOTAL_REQUIRED_HOURS = 480;
-
-export const getStudentApprovedHours = (student: any): number => {
-  if (!student) return 0;
-  const records = student.records || [];
-  const hoursFromRecords = records.reduce((sum: number, r: any) => {
-    const valStatus = (r.validationStatus || r.estado || r.validation_status || '').toLowerCase().trim();
-    const isApproved = valStatus === 'aprobado' || valStatus === 'aprobada' || valStatus === 'validado' || valStatus === 'validada' || !valStatus || r.status === 'A';
-    if (isApproved && valStatus !== 'rechazado' && valStatus !== 'rechazada' && valStatus !== 'disputado') {
-      const h = Number(r.hours ?? r.horasCalculadas ?? r.horas ?? r.horas_calculadas ?? r.duration ?? 0);
-      return sum + (isNaN(h) ? 0 : h);
-    }
-    return sum;
-  }, 0);
-  
-  const directHours = Math.max(
-    Number(student.horasTotales || 0),
-    Number(student.accumulatedHours || 0),
-    Number(student.totalHours || 0),
-    Number(student.horasAcumuladas || 0),
-    Number(student.horasAprobadas || 0),
-    Number(student.approvedHours || 0),
-    Number(student.completedHours || 0),
-    Number(student.horas || 0),
-    Number(student.hours || 0)
-  );
-
-  const calculated = Math.max(hoursFromRecords, isNaN(directHours) ? 0 : directHours);
-  const fullName = `${student.firstName || ''} ${student.lastNamePaterno || ''} ${student.lastNameMaterno || ''} ${student.lastName || ''} ${student.name || ''} ${student.displayName || ''} ${student.nickname || ''} ${student.email || ''}`.toLowerCase();
-  if ((fullName.includes('karla') && fullName.includes('espinoza')) || fullName.includes('karla espinoza')) {
-    return Math.max(calculated, TOTAL_REQUIRED_HOURS);
-  }
-  return calculated;
-};
-
-export const isStudentFinished = (student: any): boolean => {
-  if (!student) return false;
-  const st = (student.status || '').toLowerCase().trim();
-  if (st === 'finalizado' || st === 'concluido' || st === 'terminado') return true;
-  const wst = (student.workStatus || '').toLowerCase().trim();
-  if (wst === 'finalizado' || wst === 'concluido' || wst === 'terminado') return true;
-  if (student.isArchived) return true;
-  const fullName = `${student.firstName || ''} ${student.lastNamePaterno || ''} ${student.lastNameMaterno || ''} ${student.lastName || ''} ${student.name || ''} ${student.displayName || ''} ${student.nickname || ''} ${student.email || ''}`.toLowerCase();
-  if ((fullName.includes('karla') && fullName.includes('espinoza')) || fullName.includes('karla espinoza')) return true;
-  return getStudentApprovedHours(student) >= TOTAL_REQUIRED_HOURS;
-};
 
 class ErrorBoundary extends React.Component<any, any> {
   state: { hasError: boolean, error: any };
@@ -265,46 +220,6 @@ const WORK_STATUS = {
   'Asignado': { color: 'bg-green-500 text-white', icon: Check },
   'Sin asignar': { color: 'bg-orange-500 text-white', icon: AlertCircle },
 };
-
-const DEFAULT_CATEGORIES = [
-  { id: 'cat-1', name: 'Minuta', color: '#3b82f6' },
-  { id: 'cat-2', name: 'Visita de campo', color: '#10b981' },
-  { id: 'cat-3', name: 'Lecturas', color: '#8b5cf6' },
-  { id: 'cat-4', name: 'Reunión Virtual', color: '#ec4899' },
-  { id: 'cat-5', name: 'Reunión Presencial', color: '#f59e0b' },
-  { id: 'cat-otra', name: 'Otra Brigada', color: '#64748b' },
-  { id: 'cat-nd', name: 'ND en Sistema', color: '#94a3b8' },
-];
-
-const DEFAULT_PROJECTS = [
-  { 
-    id: 'p-1', 
-    name: 'Polvorín/Columpio', 
-    color: '#22c55e',
-    description: 'Proyecto de intervención en Polvorín/Columpio.',
-    sections: [
-      { id: 'sec-1', name: 'Archivos de Proyecto', links: [] }
-    ]
-  },
-  { 
-    id: 'p-2', 
-    name: 'Invi', 
-    color: '#eab308',
-    description: 'Proyecto Invi.',
-    sections: [
-      { id: 'sec-2', name: 'Archivos de Proyecto', links: [] }
-    ]
-  },
-  { 
-    id: 'p-general', 
-    name: 'General', 
-    color: '#94a3b8',
-    description: 'Proyecto General.',
-    sections: [
-      { id: 'sec-3', name: 'Archivos de Proyecto', links: [] }
-    ]
-  },
-];
 
 const CAREER_OPTIONS = ['Arquitectura', 'Arquitectura del Paisaje', 'Urbanismo', 'Otro'];
 
@@ -1921,137 +1836,33 @@ const App = () => {
   const [isLoadingStudents, setIsLoadingStudents] = useState(false);
   const [isLoadingConfig, setIsLoadingConfig] = useState(false);
 
-  const [students, setStudents] = useState<any[]>(() => {
-    const saved = localStorage.getItem('app_students');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length >= 8) {
-          const studentMap = new Map<string, any>();
-          INITIAL_STUDENTS.forEach(s => studentMap.set(s.id, s));
-          parsed.forEach((s: any) => {
-            if (s.email?.toLowerCase() === 'legc.1794@gmail.com') s.role = 'user';
-            const existing = studentMap.get(s.id) || {};
-            studentMap.set(s.id, {
-              ...existing,
-              ...s,
-              records: dedupeById([...(existing.records || []), ...(s.records || [])])
-            });
-          });
-          return Array.from(studentMap.values());
-        }
-      } catch (e) {
-        console.warn("Could not parse saved students:", e);
-      }
-    }
-    return INITIAL_STUDENTS;
-  });
+  // Operational data comes only from the current Firestore subscription. Old
+  // app_* localStorage entries may contain demo data and must not seed the UI.
+  const [students, setStudents] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
+  const [removedSessionIds, setRemovedSessionIds] = useState<string[]>([]);
+  const [dataErrors, setDataErrors] = useState<Record<string, string>>({});
+  const [categories, setCategories] = useState<any[]>([]);
+  const [projects, setProjects] = useState<any[]>([]);
 
   const studentsWithRecords = useMemo(() => {
-    let allStudents = [...students];
-    if (userProfile && !allStudents.some(s => s.id === userProfile.uid || s.uid === userProfile.uid || (userProfile.email && s.email === userProfile.email))) {
-      allStudents.push({
-        id: userProfile.uid,
-        uid: userProfile.uid,
-        ...userProfile,
-        role: userProfile.role || (userRole === 'admin' ? 'admin' : 'coordinator'),
-        name: userProfile.name || `${userProfile.firstName || ''} ${userProfile.lastNamePaterno || ''}`.trim() || user?.displayName || 'Coordinador',
-        records: userProfile.records || []
-      });
+    const allStudents = [...students];
+    if (userProfile && !allStudents.some(s => s.id === userProfile.uid || s.uid === userProfile.uid ||
+        (userProfile.email && s.email?.toLowerCase() === userProfile.email.toLowerCase()))) {
+      allStudents.push({ ...userProfile, id: userProfile.uid, uid: userProfile.uid });
     }
-
     return allStudents.map(student => {
-      const studentSessions = sessions
-        .filter((s: any) => 
-          s.userId === student.id || 
-          s.studentId === student.id || 
-          (student.uid && (s.userId === student.uid || s.studentId === student.uid)) ||
-          (student.studentId && (s.studentId === student.studentId || s.matricula === student.studentId))
-        )
-        .map((s: any) => {
-          const isAppr = s.estado === 'aprobado' || s.validationStatus === 'aprobado';
-          const isRej = s.estado === 'rechazado' || s.validationStatus === 'rechazado';
-          const isDisp = s.estado === 'disputado' || s.validationStatus === 'disputado';
-          const validationStatus = isAppr ? 'aprobado' : isRej ? 'rechazado' : isDisp ? 'disputado' : (s.estado || s.validationStatus || 'pendiente');
-          return {
-            ...s,
-            hours: Number(s.horasCalculadas ?? s.hours ?? 0),
-            horasCalculadas: Number(s.horasCalculadas ?? s.hours ?? 0),
-            validationStatus,
-            estado: validationStatus
-          };
-        });
-
-      // Merge records with priority to resolved statuses (aprobado/rechazado)
-      const mergedMap = new Map<string, any>();
-      [...(student.records || []), ...studentSessions].forEach((r: any) => {
-        const existing = mergedMap.get(r.id);
-        if (!existing) {
-          mergedMap.set(r.id, r);
-        } else {
-          const isExistingPending = existing.validationStatus === 'pendiente' || existing.estado === 'pendiente';
-          const isNewDetermined = r.validationStatus === 'aprobado' || r.validationStatus === 'rechazado' || r.estado === 'aprobado' || r.estado === 'rechazado';
-          if (isExistingPending && isNewDetermined) {
-            mergedMap.set(r.id, r);
-          } else if (!isExistingPending && isNewDetermined) {
-            mergedMap.set(r.id, { ...existing, ...r });
-          }
-        }
-      });
-      const combinedRecords = Array.from(mergedMap.values());
-      const approvedHours = getStudentApprovedHours({ ...student, records: combinedRecords });
-      const hasCompleted480 = approvedHours >= TOTAL_REQUIRED_HOURS;
-      
-      const isArchived = Boolean(student.isArchived || hasCompleted480 || (student.status || '').toLowerCase() === 'finalizado' || (student.workStatus || '').toLowerCase() === 'finalizado');
-      const status = (hasCompleted480 || (student.status || '').toLowerCase() === 'finalizado') ? 'Finalizado' : (student.status || 'En Curso');
-      const workStatus = (hasCompleted480 || (student.workStatus || '').toLowerCase() === 'finalizado') ? 'Finalizado' : (student.workStatus || ((student.projectIds && student.projectIds.length > 0) ? 'Asignado' : 'Sin asignar'));
-
-      return { 
-        ...student, 
-        records: combinedRecords,
-        isArchived,
-        status,
-        workStatus
+      const records = mergeStudentRecords(student, sessions, removedSessionIds);
+      const finished = isStudentFinished({ ...student, records });
+      return {
+        ...student,
+        records,
+        isArchived: Boolean(student.isArchived || finished),
+        status: finished ? 'Finalizado' : (student.status || 'En Curso'),
+        workStatus: finished ? 'Finalizado' : (student.workStatus || (student.projectIds?.length ? 'Asignado' : 'Sin asignar')),
       };
     });
-  }, [students, sessions, userProfile, userRole, user]);
-
-  const [categories, setCategories] = useState(() => {
-    const saved = localStorage.getItem('app_categories');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length >= 5) {
-          const map = new Map<string, any>();
-          DEFAULT_CATEGORIES.forEach(c => map.set(c.id, c));
-          parsed.forEach((c: any) => map.set(c.id, { ...(map.get(c.id) || {}), ...c }));
-          return Array.from(map.values());
-        }
-      } catch (e) {
-        console.warn("Could not parse saved categories:", e);
-      }
-    }
-    return DEFAULT_CATEGORIES;
-  });
-
-  const [projects, setProjects] = useState<any[]>(() => {
-    const saved = localStorage.getItem('app_projects');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved).filter((p: any) => !p.isDeleted);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const map = new Map<string, any>();
-          DEFAULT_PROJECTS.forEach(p => map.set(p.id, p));
-          parsed.forEach((p: any) => map.set(p.id, { ...(map.get(p.id) || {}), ...p }));
-          return Array.from(map.values());
-        }
-      } catch (e) {
-        console.warn("Could not parse saved projects:", e);
-      }
-    }
-    return DEFAULT_PROJECTS;
-  });
+  }, [students, sessions, userProfile, removedSessionIds]);
 
   const [isDarkMode, setIsDarkMode] = useState(() => {
     const saved = localStorage.getItem('app_theme');
@@ -2301,13 +2112,12 @@ const App = () => {
   const [filterWork, setFilterWork] = useState('Todos');
   const [filterProject, setFilterProject] = useState('Todos');
   const [filterCategories, setFilterCategories] = useState<string[]>([]);
-  const categoriesLoadedRef = useRef(false);
-  
+  const previousCategoryIds = useRef<string[]>([]);
   useEffect(() => {
-    if (categories.length > 0 && !categoriesLoadedRef.current) {
-      setFilterCategories(categories.map(c => c.id));
-      categoriesLoadedRef.current = true;
-    }
+    const current = categories.map(category => category.id);
+    const previous = previousCategoryIds.current;
+    setFilterCategories(selected => reconcileCategorySelection(selected, previous, current));
+    previousCategoryIds.current = current;
   }, [categories]);
   const [filterCareer, setFilterCareer] = useState('Todos');
   const [filterBrigade, setFilterBrigade] = useState('Todos');
@@ -2362,9 +2172,23 @@ const App = () => {
   useEffect(() => {
     let unsubscribeProfile: (() => void) | null = null;
     let isCancelled = false;
+    let profileUid: string | null = null;
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (currentUser) => {
+      if (unsubscribeProfile) unsubscribeProfile();
+      profileUid = currentUser?.uid || null;
       setUser(currentUser);
+      setUserProfile(null);
+      setUserRole(getEffectiveRole(currentUser?.email));
+      setStudents([]);
+      setSessions([]);
+      setRemovedSessionIds([]);
+      setProjects([]);
+      setCategories([]);
+      setDataErrors({});
+      setSelectedStudentId(null);
+      setStudentPage(1);
+      setSessionPage(1);
       
       if (!currentUser) {
         setUserProfile(null);
@@ -2381,56 +2205,25 @@ const App = () => {
       const effectiveRole = getEffectiveRole(currentUser.email);
       const isCoordinatorOrAdmin = effectiveRole !== 'user';
 
-      // 1. Optimistic recovery from localStorage
-      const cachedProfileRaw = localStorage.getItem(`profile_${currentUser.uid}`) || 
-                               (currentUser.email ? localStorage.getItem(`profile_${currentUser.email.toLowerCase()}`) : null);
-      if (cachedProfileRaw) {
-        try {
-          const cachedProfile = JSON.parse(cachedProfileRaw);
-          if (cachedProfile && (cachedProfile.uid === currentUser.uid || cachedProfile.email?.toLowerCase() === currentUser.email?.toLowerCase())) {
-            setUserProfile(cachedProfile);
-          }
-        } catch (e) {
-          console.warn("Could not parse cached profile:", e);
-        }
-      }
-
       // 2. Set up real-time listener for doc(db, 'users', currentUser.uid)
       const docRef = doc(db, 'users', currentUser.uid);
       unsubscribeProfile = onSnapshot(docRef, async (docSnap) => {
-        if (isCancelled) return;
+        if (isCancelled || profileUid !== currentUser.uid) return;
 
         if (docSnap.exists()) {
           const data = docSnap.data();
-          if (currentUser.email?.toLowerCase() === 'legc.1794@gmail.com' && data.role !== 'user') {
-            data.role = 'user';
-            setDoc(docRef, { role: 'user', updatedAt: new Date().toISOString() }, { merge: true }).catch(console.warn);
-            setDoc(doc(db, 'public_profiles', currentUser.uid), { role: 'user', updatedAt: new Date().toISOString() }, { merge: true }).catch(console.warn);
-          }
-          if (currentUser.email?.toLowerCase() === MASTER_COORDINATOR_EMAIL.toLowerCase() && data.role !== 'master_coordinator') {
-            data.role = 'master_coordinator';
-            setDoc(docRef, { role: 'master_coordinator', updatedAt: new Date().toISOString() }, { merge: true }).catch(console.warn);
-            setDoc(doc(db, 'public_profiles', currentUser.uid), { role: 'master_coordinator', updatedAt: new Date().toISOString() }, { merge: true }).catch(console.warn);
-          }
           if (data.records) {
             data.records = dedupeById(data.records);
           }
           const profileData = { ...data, id: currentUser.uid, uid: currentUser.uid };
+          setDataErrors(prev => ({ ...prev, profile: '' }));
+          setUserRole(getEffectiveRole(currentUser.email, data.role));
           setUserProfile(profileData);
           localStorage.setItem(`profile_${currentUser.uid}`, JSON.stringify(profileData));
           if (currentUser.email) {
             localStorage.setItem(`profile_${currentUser.email.toLowerCase()}`, JSON.stringify(profileData));
           }
           
-          // Sync current user profile into students list
-          setStudents(prev => {
-            const exists = prev.find(s => s.id === currentUser.uid);
-            const name = `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || 'Sin nombre';
-            if (exists) {
-              return prev.map(s => s.id === currentUser.uid ? { ...s, ...profileData, name } : s);
-            }
-            return [...prev, { ...profileData, name }];
-          });
           setLoading(false);
         } else {
           // Document does not exist at users/{currentUser.uid}
@@ -2444,11 +2237,11 @@ const App = () => {
                 const qUsers = query(collection(db, 'users'), where('email', '==', userEmail));
                 const snapUsers = await getDocs(qUsers);
                 if (!snapUsers.empty) {
-                  recoveredData = snapUsers.docs[0].data();
+                  recoveredData = { ...snapUsers.docs[0].data(), id: snapUsers.docs[0].id };
                 } else if (currentUser.email && currentUser.email !== userEmail) {
                   const qExact = query(collection(db, 'users'), where('email', '==', currentUser.email));
                   const snapExact = await getDocs(qExact);
-                  if (!snapExact.empty) recoveredData = snapExact.docs[0].data();
+                  if (!snapExact.empty) recoveredData = { ...snapExact.docs[0].data(), id: snapExact.docs[0].id };
                 }
               } catch (errUsers) {
                 console.warn("Could not query 'users' by email:", errUsers);
@@ -2460,15 +2253,15 @@ const App = () => {
               try {
                 const pubSnap = await getDoc(doc(db, 'public_profiles', currentUser.uid));
                 if (pubSnap.exists()) {
-                  recoveredData = pubSnap.data();
+                  recoveredData = { ...pubSnap.data(), id: pubSnap.id };
                 } else if (userEmail) {
                   const pubSnapEmail = await getDoc(doc(db, 'public_profiles', userEmail));
                   if (pubSnapEmail.exists()) {
-                    recoveredData = pubSnapEmail.data();
+                    recoveredData = { ...pubSnapEmail.data(), id: pubSnapEmail.id };
                   } else {
                     const qPub = query(collection(db, 'public_profiles'), where('email', '==', userEmail));
                     const snapPub = await getDocs(qPub);
-                    if (!snapPub.empty) recoveredData = snapPub.docs[0].data();
+                    if (!snapPub.empty) recoveredData = { ...snapPub.docs[0].data(), id: snapPub.docs[0].id };
                   }
                 }
               } catch (errPub) {
@@ -2476,17 +2269,10 @@ const App = () => {
               }
             }
 
-            // Search 2c: Search initial / cached students array
-            if (!recoveredData && userEmail) {
-              const matchedStudent = students.find(s => (s.email || '').toLowerCase().trim() === userEmail);
-              if (matchedStudent) {
-                recoveredData = matchedStudent;
-              }
-            }
-
             if (recoveredData) {
               const consolidatedProfile = {
                 ...recoveredData,
+                identityIds: Array.from(new Set([recoveredData.id, recoveredData.uid, ...(recoveredData.identityIds || []), currentUser.uid].filter(Boolean))),
                 id: currentUser.uid,
                 uid: currentUser.uid,
                 email: currentUser.email || recoveredData.email,
@@ -2495,6 +2281,8 @@ const App = () => {
               };
               await setDoc(doc(db, 'users', currentUser.uid), consolidatedProfile, { merge: true });
               await setDoc(doc(db, 'public_profiles', currentUser.uid), consolidatedProfile, { merge: true });
+              if (isCancelled || profileUid !== currentUser.uid) return;
+              setUserRole(getEffectiveRole(currentUser.email, consolidatedProfile.role));
               setUserProfile(consolidatedProfile);
               localStorage.setItem(`profile_${currentUser.uid}`, JSON.stringify(consolidatedProfile));
               if (currentUser.email) {
@@ -2508,9 +2296,9 @@ const App = () => {
             if (isCoordinatorOrAdmin) {
               const isMaster = currentUser.email?.toLowerCase() === MASTER_COORDINATOR_EMAIL.toLowerCase();
               const nameParts = (currentUser.displayName || '').trim().split(' ').filter(Boolean);
-              const firstName = nameParts[0] || (isMaster ? 'Luis Edgar' : 'Coordinador');
-              const lastNamePaterno = nameParts[1] || (isMaster ? 'Gutiérrez' : '');
-              const lastNameMaterno = nameParts.slice(2).join(' ') || (isMaster ? 'Cornejo' : '');
+              const firstName = nameParts[0] || 'Coordinador';
+              const lastNamePaterno = nameParts[1] || '';
+              const lastNameMaterno = nameParts.slice(2).join(' ');
               
               const coordinatorProfile = {
                 uid: currentUser.uid,
@@ -2520,15 +2308,15 @@ const App = () => {
                 lastNamePaterno,
                 lastNameMaterno,
                 name: currentUser.displayName || `${firstName} ${lastNamePaterno} ${lastNameMaterno}`.trim(),
-                phone: '5555555555',
-                studentId: isMaster ? 'COORD-MAESTRO' : 'COORD-ADMIN',
-                career: 'Arquitectura',
-                brigadePeriod: 'General',
-                brigade: 'Coordinación General',
+                phone: '',
+                studentId: '',
+                career: '',
+                brigadePeriod: '',
+                brigade: '',
                 role: isMaster ? 'master_coordinator' : (effectiveRole || 'super_coordinator'),
                 status: 'Coordinador',
                 workStatus: isMaster ? 'Coordinador Maestro' : 'Supercoordinador',
-                skills: ['Gestión', 'Coordinación', 'Supervisión'],
+                skills: [],
                 skillRatings: [],
                 projectIds: [],
                 records: [],
@@ -2538,6 +2326,8 @@ const App = () => {
               
               await setDoc(doc(db, 'users', currentUser.uid), coordinatorProfile, { merge: true });
               await setDoc(doc(db, 'public_profiles', currentUser.uid), coordinatorProfile, { merge: true });
+              if (isCancelled || profileUid !== currentUser.uid) return;
+              setUserRole(getEffectiveRole(currentUser.email, coordinatorProfile.role));
               setUserProfile(coordinatorProfile);
               localStorage.setItem(`profile_${currentUser.uid}`, JSON.stringify(coordinatorProfile));
               if (currentUser.email) {
@@ -2556,25 +2346,15 @@ const App = () => {
             setLoading(false);
           } catch (recoveryErr) {
             console.error("Error during profile recovery:", recoveryErr);
+            setDataErrors(prev => ({ ...prev, profile: 'No se pudo cargar tu perfil. Verifica la conexión y tus permisos, y vuelve a cargar la página.' }));
             setLoading(false);
           }
         }
       }, (error) => {
+        if (isCancelled || profileUid !== currentUser.uid) return;
         console.error("Error listening to user profile:", error);
-        // Fallback to local storage on error
-        const localProfile = localStorage.getItem(`profile_${currentUser.uid}`) || 
-                             (currentUser.email ? localStorage.getItem(`profile_${currentUser.email.toLowerCase()}`) : null);
-        if (localProfile) {
-          try {
-            const data = JSON.parse(localProfile);
-            if (data.records) {
-              data.records = dedupeById(data.records);
-            }
-            setUserProfile(data);
-          } catch (e) {
-            console.error("Could not parse fallback profile:", e);
-          }
-        }
+        setUserProfile(null);
+        setDataErrors(prev => ({ ...prev, profile: 'No se pudo cargar tu perfil. Verifica la conexión y tus permisos, y vuelve a cargar la página.' }));
         setLoading(false);
       });
     });
@@ -2585,18 +2365,6 @@ const App = () => {
       if (unsubscribeProfile) unsubscribeProfile();
     };
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('app_students', JSON.stringify(students));
-  }, [students]);
-
-  useEffect(() => {
-    localStorage.setItem('app_categories', JSON.stringify(categories));
-  }, [categories]);
-
-  useEffect(() => {
-    localStorage.setItem('app_projects', JSON.stringify(projects));
-  }, [projects]);
 
   useEffect(() => {
     if (userProfile) {
@@ -2613,33 +2381,6 @@ const App = () => {
         setRejectedNotifications([]);
       }
 
-      if (userProfile.role === 'user') {
-        // Asegurar que el estudiante existe en la lista local
-        setStudents(prev => {
-          if (!prev.find(s => s.id === userProfile.uid)) {
-            return [...prev, {
-              id: userProfile.uid,
-              firstName: userProfile.firstName,
-              lastNamePaterno: userProfile.lastNamePaterno,
-              lastNameMaterno: userProfile.lastNameMaterno,
-              studentId: userProfile.studentId,
-              name: `${userProfile.firstName} ${userProfile.lastNamePaterno} ${userProfile.lastNameMaterno}`,
-              email: userProfile.email,
-              phone: userProfile.phone,
-              career: userProfile.career,
-              brigadePeriod: userProfile.brigadePeriod || '2024-1',
-              brigade: userProfile.brigade || '',
-              skills: userProfile.skills || [],
-              skillRatings: userProfile.skillRatings || [],
-              status: 'En Curso',
-              workStatus: 'Sin asignar',
-              projectIds: userProfile.projectIds || [],
-              records: userProfile.records || []
-            }];
-          }
-          return prev;
-        });
-      }
     }
   }, [userProfile]);
   // Automatización: Finalizar y Archivar al llegar a 480 horas
@@ -2715,254 +2456,79 @@ const App = () => {
   }, [studentsWithRecords, userRole]);
 
   useEffect(() => {
-    if (!user || !userRole) return;
-
-    const sessionsQuery = userRole === 'user' 
-      ? query(collection(db, 'sesiones'), where('userId', '==', user.uid))
+    if (loading || !user) return;
+    let active = true;
+    let previousSessionIds = new Set<string>();
+    setRemovedSessionIds([]);
+    const sessionsQuery = userRole === 'user'
+      ? query(collection(db, 'sesiones'), or(where('userId', '==', user.uid), where('studentId', '==', user.uid)))
       : collection(db, 'sesiones');
-
-    const unsubscribe = onSnapshot(sessionsQuery, (snapshot) => {
-      const sessionsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
-      setSessions(sessionsData);
-      
-      // Update userProfile if it's the current user's sessions
-      if (user) {
-        const mySessions = sessionsData
-          .filter((s: any) => s.userId === user.uid)
-          .map((s: any) => ({
-            ...s,
-            hours: s.horasCalculadas,
-            validationStatus: s.estado
-          }));
-        setUserProfile(prev => prev ? { ...prev, records: dedupeById(mySessions) } : null);
-      }
-    }, (error) => {
-      console.error("Error listening to sessions:", error);
-      handleFirestoreError(error, OperationType.LIST, 'sesiones');
+    const unsubscribe = onSnapshot(sessionsQuery, snapshot => {
+      if (!active) return;
+      const currentIds = new Set(snapshot.docs.map(session => session.id));
+      const removed = [...previousSessionIds].filter(id => !currentIds.has(id));
+      setRemovedSessionIds(previous => [...new Set([...previous, ...removed])].filter(id => !currentIds.has(id)));
+      previousSessionIds = currentIds;
+      setSessions(snapshot.docs.map(session => ({ ...session.data(), id: session.id })));
+      setDataErrors(prev => ({ ...prev, sessions: '' }));
+    }, error => {
+      if (!active) return;
+      console.error('Error listening to sessions:', error);
+      setSessions([]);
+      setDataErrors(prev => ({ ...prev, sessions: 'No se pudieron cargar los registros de asistencia.' }));
     });
-
-    return () => unsubscribe();
-  }, [user, userRole]);
+    return () => { active = false; unsubscribe(); };
+  }, [user?.uid, userRole, loading]);
 
   useEffect(() => {
     if (loading || !user) return;
-    
+    let active = true;
     setIsLoadingConfig(true);
-    
-    // Listen to Projects
-    const unsubProjects = onSnapshot(collection(db, 'projects'), async (snapshot) => {
-      if (!snapshot.empty) {
-        const projectsData = snapshot.docs
-          .map(doc => {
-            const data = doc.data();
-            return {
-              id: doc.id,
-              ...data,
-              isDeleted: data.isDeleted === true ? true : false,
-            };
-          })
-          .filter((p: any) => p.isDeleted !== true);
-        
-        // Merge with DEFAULT_PROJECTS to ensure default projects are always available
-        const mergedProjectsMap = new Map<string, any>();
-        DEFAULT_PROJECTS.forEach(p => mergedProjectsMap.set(p.id, p));
-        projectsData.forEach(p => mergedProjectsMap.set(p.id, { ...(mergedProjectsMap.get(p.id) || {}), ...p }));
-        setProjects(Array.from(mergedProjectsMap.values()));
-      } else {
-        setProjects(DEFAULT_PROJECTS);
-        if (userRole !== 'user') {
-          for (const p of DEFAULT_PROJECTS) {
-            setDoc(doc(db, 'projects', p.id), p, { merge: true }).catch(console.warn);
-          }
-        }
-      }
+    const unsubProjects = onSnapshot(collection(db, 'projects'), snapshot => {
+      if (!active) return;
+      setProjects(snapshot.docs.map(project => ({ ...project.data(), id: project.id }))
+        .filter((project: any) => !project.isDeleted));
+      setDataErrors(prev => ({ ...prev, projects: '' }));
       setIsLoadingConfig(false);
-    }, (error) => {
-      console.error("Error listening to projects:", error);
-      setProjects(prev => prev.length > 0 ? prev : DEFAULT_PROJECTS);
+    }, error => {
+      if (!active) return;
+      console.error('Error listening to projects:', error);
+      setProjects([]);
+      setDataErrors(prev => ({ ...prev, projects: 'No se pudieron cargar los proyectos.' }));
       setIsLoadingConfig(false);
     });
-
-    // Listen to Categories
-    const unsubCategories = onSnapshot(collection(db, 'categories'), async (snapshot) => {
-      if (!snapshot.empty) {
-        const categoriesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const mergedCatMap = new Map<string, any>();
-        DEFAULT_CATEGORIES.forEach(c => mergedCatMap.set(c.id, c));
-        categoriesData.forEach(c => mergedCatMap.set(c.id, { ...(mergedCatMap.get(c.id) || {}), ...c }));
-        setCategories(Array.from(mergedCatMap.values()));
-      } else {
-        setCategories(DEFAULT_CATEGORIES);
-        if (userRole !== 'user') {
-          for (const c of DEFAULT_CATEGORIES) {
-            setDoc(doc(db, 'categories', c.id), c, { merge: true }).catch(console.warn);
-          }
-        }
-      }
-    }, (error) => {
-      console.error("Error listening to categories:", error);
-      setCategories(prev => prev.length > 0 ? prev : DEFAULT_CATEGORIES);
+    const unsubCategories = onSnapshot(collection(db, 'categories'), snapshot => {
+      if (!active) return;
+      setCategories(snapshot.docs.map(category => ({ ...category.data(), id: category.id })));
+      setDataErrors(prev => ({ ...prev, categories: '' }));
+    }, error => {
+      if (!active) return;
+      console.error('Error listening to categories:', error);
+      setCategories([]);
+      setDataErrors(prev => ({ ...prev, categories: 'No se pudieron cargar las categorías.' }));
     });
-
-    return () => {
-      unsubProjects();
-      unsubCategories();
-    };
-  }, [user, userRole, loading]);
+    return () => { active = false; unsubProjects(); unsubCategories(); };
+  }, [user?.uid, loading]);
 
   useEffect(() => {
-    if (user && userRole) {
-      if (userRole !== 'user') {
-        // Real-time sync for admins/coordinators
-        const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
-          const studentsData = snapshot.docs.map(uDoc => {
-            const data = uDoc.data();
-            if (data.email?.toLowerCase() === 'legc.1794@gmail.com' && data.role !== 'user') {
-              data.role = 'user';
-              setDoc(doc(db, 'users', uDoc.id), { role: 'user', updatedAt: new Date().toISOString() }, { merge: true }).catch(console.warn);
-              setDoc(doc(db, 'public_profiles', uDoc.id), { role: 'user', updatedAt: new Date().toISOString() }, { merge: true }).catch(console.warn);
-            }
-            const directHours = Math.max(
-              Number(data.horasTotales || 0),
-              Number(data.accumulatedHours || 0),
-              Number(data.totalHours || 0),
-              Number(data.horasAcumuladas || 0),
-              Number(data.horasAprobadas || 0),
-              Number(data.approvedHours || 0),
-              Number(data.hours || 0)
-            );
-            const nameCheck = `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''} ${data.lastName || ''} ${data.name || ''} ${data.displayName || ''} ${data.nickname || ''} ${data.email || ''}`.toLowerCase();
-            const isKarla = (nameCheck.includes('karla') && nameCheck.includes('espinoza')) || nameCheck.includes('karla espinoza');
-            const isFinalized = (data.status || '').toLowerCase() === 'finalizado' || (data.workStatus || '').toLowerCase() === 'finalizado' || directHours >= TOTAL_REQUIRED_HOURS || isKarla;
-            return {
-              id: uDoc.id,
-              ...data,
-              isArchived: Boolean(data.isArchived || isFinalized),
-              status: isFinalized ? 'Finalizado' : (data.status || 'En Curso'),
-              workStatus: isFinalized ? 'Finalizado' : (data.workStatus || ((data.projectIds && data.projectIds.length > 0) ? 'Asignado' : 'Sin asignar')),
-              name: `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || data.name || 'Sin nombre'
-            };
-          });
-          
-          setStudents(prev => {
-            const studentMap = new Map<string, any>();
-            // 1. Base list of all initial students, coordinators, and archived profiles
-            INITIAL_STUDENTS.forEach(s => studentMap.set(s.id, s));
-
-            // 2. Overlay existing in-memory students
-            prev.forEach(s => {
-              const existing = studentMap.get(s.id) || {};
-              studentMap.set(s.id, {
-                ...existing,
-                ...s,
-                records: dedupeById([...(existing.records || []), ...(s.records || [])])
-              });
-            });
-
-            // 3. Overlay Firestore documents matching by id, uid, or email
-            studentsData.forEach((fsUser: any) => {
-              let matchKey = fsUser.id;
-              for (const [key, st] of Array.from(studentMap.entries()) as [string, any][]) {
-                if (key === fsUser.id || st.uid === fsUser.id || (fsUser.email && st.email?.toLowerCase() === fsUser.email.toLowerCase())) {
-                  matchKey = key;
-                  break;
-                }
-              }
-              const current = studentMap.get(matchKey) || {};
-              studentMap.set(matchKey, {
-                ...current,
-                ...fsUser,
-                id: fsUser.id || matchKey,
-                records: dedupeById([...(current.records || []), ...(fsUser.records || [])])
-              });
-            });
-
-            return Array.from(studentMap.values());
-          });
-          setIsLoadingStudents(false);
-        }, (error) => {
-            console.error("Error listening to students:", error);
-            handleFirestoreError(error, OperationType.LIST, 'users');
-            setIsLoadingStudents(false);
-          });
-        return () => unsubscribe();
-      } else {
-        // One-time fetch for public profiles for regular users
-        const fetchStudents = async () => {
-          setIsLoadingStudents(true);
-          try {
-            const querySnapshot = await getDocs(collection(db, 'public_profiles'));
-            const studentsData = querySnapshot.docs.map(doc => {
-              const data = doc.data();
-              const directHours = Math.max(
-                Number(data.horasTotales || 0),
-                Number(data.accumulatedHours || 0),
-                Number(data.totalHours || 0),
-                Number(data.horasAcumuladas || 0),
-                Number(data.horasAprobadas || 0),
-                Number(data.approvedHours || 0),
-                Number(data.hours || 0)
-              );
-              const nameCheck = `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''} ${data.lastName || ''} ${data.name || ''} ${data.displayName || ''} ${data.nickname || ''} ${data.email || ''}`.toLowerCase();
-              const isKarla = (nameCheck.includes('karla') && nameCheck.includes('espinoza')) || nameCheck.includes('karla espinoza');
-              const isFinalized = (data.status || '').toLowerCase() === 'finalizado' || (data.workStatus || '').toLowerCase() === 'finalizado' || directHours >= TOTAL_REQUIRED_HOURS || isKarla;
-              return {
-                id: doc.id,
-                ...data,
-                isArchived: Boolean(data.isArchived || isFinalized),
-                status: isFinalized ? 'Finalizado' : (data.status || 'En Curso'),
-                workStatus: isFinalized ? 'Finalizado' : (data.workStatus || ((data.projectIds && data.projectIds.length > 0) ? 'Asignado' : 'Sin asignar')),
-                name: `${data.firstName || ''} ${data.lastNamePaterno || ''} ${data.lastNameMaterno || ''}`.trim() || data.name || 'Sin nombre'
-              };
-            });
-            
-            setStudents(prev => {
-              const studentMap = new Map<string, any>();
-              INITIAL_STUDENTS.forEach(s => studentMap.set(s.id, s));
-              prev.forEach(s => {
-                const existing = studentMap.get(s.id) || {};
-                studentMap.set(s.id, {
-                  ...existing,
-                  ...s,
-                  records: dedupeById([...(existing.records || []), ...(s.records || [])])
-                });
-              });
-              studentsData.forEach((fsUser: any) => {
-                let matchKey = fsUser.id;
-                for (const [key, st] of Array.from(studentMap.entries()) as [string, any][]) {
-                  if (key === fsUser.id || st.uid === fsUser.id || (fsUser.email && st.email?.toLowerCase() === fsUser.email.toLowerCase())) {
-                    matchKey = key;
-                    break;
-                  }
-                }
-                const current = studentMap.get(matchKey) || {};
-                studentMap.set(matchKey, {
-                  ...current,
-                  ...fsUser,
-                  id: fsUser.id || matchKey,
-                  records: dedupeById([...(current.records || []), ...(fsUser.records || [])])
-                });
-              });
-              return Array.from(studentMap.values());
-            });
-          } catch (error: any) {
-            console.error("Error fetching students:", error);
-            const isPermissionError = error?.code === 'permission-denied' || (error instanceof Error && error.message.includes('Missing or insufficient permissions'));
-            if (!isPermissionError) {
-              handleFirestoreError(error, OperationType.LIST, 'public_profiles');
-            }
-          } finally {
-            setIsLoadingStudents(false);
-          }
-        };
-        fetchStudents();
-      }
-    }
-  }, [user, userRole]);
+    if (loading || !user) return;
+    let active = true;
+    setIsLoadingStudents(true);
+    const directory = userRole === 'user' ? 'public_profiles' : 'users';
+    const unsubscribe = onSnapshot(collection(db, directory), snapshot => {
+      if (!active) return;
+      setStudents(normalizeStudentProfiles(snapshot.docs.map(profile => ({ id: profile.id, data: profile.data() }))));
+      setDataErrors(prev => ({ ...prev, students: '' }));
+      setIsLoadingStudents(false);
+    }, error => {
+      if (!active) return;
+      console.error('Error listening to students:', error);
+      setStudents([]);
+      setDataErrors(prev => ({ ...prev, students: 'No se pudo cargar el directorio de alumnos.' }));
+      setIsLoadingStudents(false);
+    });
+    return () => { active = false; unsubscribe(); };
+  }, [user?.uid, userRole, loading]);
 
   const [showNewCatInput, setShowNewCatInput] = useState(false);
   const [newInlineCat, setNewInlineCat] = useState({ name: '', color: '#6366f1' });
@@ -3006,61 +2572,11 @@ const App = () => {
   const [activeSuggestionProject, setActiveSuggestionProject] = useState<string | null>(null);
 
   const getStudentData = (sId: string) => {
-    const studentInList = studentsWithRecords.find(s => s.id === sId || s.uid === sId);
-    if ((sId === user?.uid || sId === userProfile?.uid) && (userProfile || user)) {
-      const coordinatorSessions = sessions
-        .filter((s: any) => 
-          s.userId === user?.uid || 
-          s.studentId === user?.uid || 
-          (userProfile?.uid && (s.userId === userProfile.uid || s.studentId === userProfile.uid)) ||
-          s.userId === sId ||
-          s.studentId === sId
-        )
-        .map((s: any) => {
-          const isAppr = s.estado === 'aprobado' || s.validationStatus === 'aprobado';
-          const isRej = s.estado === 'rechazado' || s.validationStatus === 'rechazado';
-          const isDisp = s.estado === 'disputado' || s.validationStatus === 'disputado';
-          const validationStatus = isAppr ? 'aprobado' : isRej ? 'rechazado' : isDisp ? 'disputado' : (s.estado || s.validationStatus || 'pendiente');
-          return {
-            ...s,
-            hours: Number(s.horasCalculadas ?? s.hours ?? 0),
-            horasCalculadas: Number(s.horasCalculadas ?? s.hours ?? 0),
-            validationStatus,
-            estado: validationStatus
-          };
-        });
-
-      const mergedRecords = dedupeById([
-        ...(studentInList?.records || []),
-        ...(userProfile?.records || []),
-        ...coordinatorSessions
-      ]);
-
-      const approvedHoursCalc = mergedRecords.reduce((acc: number, r: any) => {
-        if (r.validationStatus === 'aprobado' || r.estado === 'aprobado') {
-          return acc + Number(r.hours || r.horasCalculadas || 0);
-        }
-        return acc;
-      }, 0);
-
-      const resolvedRole = getEffectiveRole(userProfile?.email || user?.email, userProfile?.role || studentInList?.role);
-      const isPureCoord = (resolvedRole === 'coordinator' || resolvedRole === 'super_coordinator' || resolvedRole === 'master_coordinator' || userProfile?.role === 'admin' || Boolean(user?.email && SUPER_ADMIN_EMAILS.includes(user.email))) && resolvedRole !== 'student_coordinator';
-
-      return { 
-        ...userProfile,
-        ...studentInList,
-        id: userProfile?.uid || user?.uid || sId,
-        uid: userProfile?.uid || user?.uid || sId,
-        name: userProfile?.name || `${userProfile?.firstName || ''} ${userProfile?.lastNamePaterno || ''}`.trim() || user?.displayName || 'Coordinador',
-        records: mergedRecords,
-        horasTotales: Math.max(Number(userProfile?.horasTotales || studentInList?.horasTotales || 0), approvedHoursCalc),
-        status: isPureCoord ? 'Coordinador' : (userProfile?.status || studentInList?.status || 'En Curso'),
-        projectIds: isPureCoord 
-          ? projects.map((p: any) => p.id) 
-          : ((userProfile?.projectIds && userProfile.projectIds.length > 0) 
-            ? userProfile.projectIds 
-            : (studentInList?.projectIds?.length ? studentInList.projectIds : (projects.length ? [projects[0].id] : [])))
-      };
+    if (!sId) return undefined;
+    const studentInList = studentsWithRecords.find(s => s.id === sId || s.uid === sId || s.identityIds?.includes(sId));
+    if ((sId === user?.uid || sId === userProfile?.uid) && userProfile) {
+      const profile = { ...userProfile, ...studentInList, id: studentInList?.id || userProfile.uid };
+      return { ...profile, records: mergeStudentRecords(profile, sessions, removedSessionIds) };
     }
     return studentInList;
   };
@@ -3155,7 +2671,7 @@ const App = () => {
       const matchStatus = dashboardTab === 'coordinators' || filterStatus === 'Todos' || s.status === filterStatus;
       const matchWork = dashboardTab === 'coordinators' || filterWork === 'Todos' || s.workStatus === filterWork;
       const matchProject = filterProject === 'Todos' || isCoordinatorOrAdmin || (s.projectIds || []).includes(filterProject);
-      const matchCategory = filterCategories.length === categories.length || (s.records || []).some((r: any) => filterCategories.includes(r.categoryId));
+      const matchCategory = matchesStudentCategories(s, filterCategories, categories);
       const matchCareer = filterCareer === 'Todos' || s.career === filterCareer;
       const matchBrigade = filterBrigade === 'Todos' || s.brigadePeriod === filterBrigade;
       const lowerSearch = searchTerm.toLowerCase();
@@ -3178,21 +2694,26 @@ const App = () => {
       });
     }
     return result;
-  }, [studentsWithRecords, filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours, dashboardTab]);
+  }, [studentsWithRecords, filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours, dashboardTab, filterCategories, categories]);
 
   useEffect(() => {
     setStudentPage(1);
-  }, [filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours, dashboardTab]);
+  }, [studentsPerPage, filterStatus, filterWork, filterProject, filterCareer, filterBrigade, searchTerm, sortHours, dashboardTab, filterCategories, categories]);
 
   const paginatedStudents = useMemo(() => {
     const startIndex = (studentPage - 1) * studentsPerPage;
     return filteredStudents.slice(startIndex, startIndex + studentsPerPage);
-  }, [filteredStudents, studentPage]);
+  }, [filteredStudents, studentPage, studentsPerPage]);
 
   const totalStudentPages = Math.ceil(filteredStudents.length / studentsPerPage);
+  useEffect(() => {
+    setStudentPage(page => Math.max(1, Math.min(page, totalStudentPages || 1)));
+  }, [totalStudentPages]);
 
   const activeEligibleStudents = useMemo(() => {
     return studentsWithRecords.filter(s => {
+      const role = getEffectiveRole(s.email, s.role);
+      if (role !== 'user' && role !== 'student_coordinator') return false;
       if (s.email && SUPER_ADMIN_EMAILS.includes(s.email)) return false;
       if (s.isArchived) return false;
       const statusLower = (s.status || '').toLowerCase().trim();
@@ -3224,13 +2745,10 @@ const App = () => {
       const hasProjects = Array.isArray(s.projectIds) && s.projectIds.length > 0;
       if (!hasProjects) return false;
 
-      // Si la lista de proyectos está disponible, asegurar que al menos uno de sus proyectos no esté eliminado
-      if (projects && projects.length > 0) {
-        const isEnrolledInActiveProject = s.projectIds.some((pid: string) => 
-          projects.some((p: any) => p.id === pid && !p.isDeleted)
-        );
-        if (!isEnrolledInActiveProject) return false;
-      }
+      const isEnrolledInActiveProject = s.projectIds.some((pid: string) =>
+        projects.some((p: any) => p.id === pid && !p.isDeleted)
+      );
+      if (!isEnrolledInActiveProject) return false;
 
       return true;
     });
@@ -3328,6 +2846,10 @@ const App = () => {
   }, [selectedStudent, sessionPage, sessionSortOrder]);
 
   const totalSessionPages = selectedStudent ? Math.ceil((selectedStudent.records || []).length / sessionsPerPage) : 0;
+  useEffect(() => { setSessionPage(1); }, [selectedStudentId]);
+  useEffect(() => {
+    setSessionPage(page => Math.max(1, Math.min(page, totalSessionPages || 1)));
+  }, [totalSessionPages]);
 
   const chartData = useMemo(() => {
     const hoursByProject: Record<string, { hours: number, color: string, studentCount: number }> = {};
@@ -3339,7 +2861,7 @@ const App = () => {
     });
     hoursByProject['General'] = { hours: 0, color: '#94a3b8', studentCount: 0 };
 
-    const validStudents = studentsWithRecords.filter(s => !s.email || !SUPER_ADMIN_EMAILS.includes(s.email));
+    const validStudents = activeEnrolledStudents;
 
     validStudents.forEach(s => {
       if (s.projectIds && s.projectIds.length > 0) {
@@ -3402,7 +2924,7 @@ const App = () => {
     const avgHoursPerStudent = validStudents.length > 0 ? totalCompletedHours / validStudents.length : 0;
 
     return { projectChartData, categoryChartData, progressPerc, totalCompletedHours, totalRequired, avgHoursPerStudent, totalEnrolled: validStudents.length };
-  }, [studentsWithRecords, projects, categories, filterCategories]);
+  }, [activeEnrolledStudents, projects, categories, filterCategories]);
 
   const [rejectingRecord, setRejectingRecord] = useState<any>(null);
   const [rejectReason, setRejectReason] = useState('');
@@ -4974,7 +4496,7 @@ const App = () => {
           const matchStatus = filterStatus === 'Todos' || s.status === filterStatus;
           const matchWork = filterWork === 'Todos' || s.workStatus === filterWork;
           const matchProject = filterProject === 'Todos' || (s.projectIds || []).includes(filterProject);
-          const matchCategory = filterCategories.length === categories.length || (s.records || []).some((r: any) => filterCategories.includes(r.categoryId));
+          const matchCategory = matchesStudentCategories(s, filterCategories, categories);
           const matchCareer = filterCareer === 'Todos' || s.career === filterCareer;
           const matchBrigade = filterBrigade === 'Todos' || s.brigadePeriod === filterBrigade;
           const lowerSearch = searchTerm.toLowerCase();
@@ -5325,6 +4847,12 @@ const App = () => {
   );
   if (!user) return <Login />;
   
+  if (dataErrors.profile) return (
+    <div role="alert" className="min-h-screen flex flex-col items-center justify-center gap-4 p-6 text-center">
+      <p>{dataErrors.profile}</p>
+      <button onClick={() => window.location.reload()} className="px-4 py-2 rounded-xl bg-indigo-600 text-white">Volver a cargar</button>
+    </div>
+  );
   if (!userProfile) {
     const effective = getEffectiveRole(user?.email);
     if (effective !== 'user') {
@@ -5574,6 +5102,11 @@ const App = () => {
           </header>
 
           <main className={`flex-1 w-full animate-in fade-in duration-700 overflow-x-hidden ${view === 'skill-map' ? 'h-full' : (breakpoint === 'mobile' ? 'p-4' : 'p-4 sm:p-6 lg:p-12 max-w-7xl mx-auto')}`}>
+          {Object.values(dataErrors).some(Boolean) && (
+            <div role="alert" className="mb-6 p-4 rounded-xl border border-amber-300 bg-amber-50 text-amber-900">
+              {Object.values(dataErrors).filter(Boolean).join(' ')} Verifica la conexión y tus permisos, y vuelve a cargar la página.
+            </div>
+          )}
             {view === 'user-dashboard' && currentUserId && (
             isLoadingStudents ? (
               <div className="space-y-8 animate-pulse">

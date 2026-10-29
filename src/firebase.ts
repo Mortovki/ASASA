@@ -14,7 +14,7 @@ setLogLevel('error');
 
 // Use initializeFirestore with experimentalForceLongPolling to ensure rock-solid
 // connectivity in iframe and Cloud Run environments where streaming WebChannels may be interrupted
-const firestoreDatabaseId = (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-b67305f5-5703-4b56-b34e-a97c8b8e5544';
+const firestoreDatabaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-b67305f5-5703-4b56-b34e-a97c8b8e5544';
 export const db = initializeFirestore(app, {
   experimentalForceLongPolling: true,
 }, firestoreDatabaseId);
