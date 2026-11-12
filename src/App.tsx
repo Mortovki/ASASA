@@ -12,7 +12,7 @@ import SkillsView from './components/SkillsView';
 import SessionWorkspace from './components/SessionWorkspace';
 import ClockInOutWidget from './components/ClockInOutWidget';
 import { notifyProjectDeleted, getProjectAdmins, createNotification } from './services/notificationService';
-import { Users, User, UserX, PlusCircle, Clock, Calendar as CalendarIcon, CheckCircle2, XCircle, AlertCircle, History, Trash2, Edit2, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft, UserPlus, Tag, LayoutDashboard, CalendarDays, ExternalLink, Link as LinkIcon, Phone, Mail, GraduationCap, Briefcase, Plus, Filter, Search, Check, X, List, LayoutGrid, Download, RefreshCw, BarChart3, AlertTriangle, CheckSquare, ArrowDownUp, Folder, FolderKanban, Send, Shield, ShieldOff, ShieldCheck, Sparkles, Info, Menu, Settings, Bell, Sun, Moon, PieChart as PieChartIcon, BookOpen, Layers, Zap, Undo2 } from 'lucide-react';
+import { Users, User, UserX, PlusCircle, Clock, Calendar as CalendarIcon, CheckCircle2, XCircle, AlertCircle, History, Trash2, Edit2, ChevronRight, ChevronLeft, ChevronDown, ArrowLeft, UserPlus, Tag, LayoutDashboard, CalendarDays, ExternalLink, Link as LinkIcon, Phone, Mail, GraduationCap, Briefcase, Plus, Filter, Search, Check, X, List, LayoutGrid, Download, RefreshCw, BarChart3, AlertTriangle, CheckSquare, ArrowDownUp, Folder, FolderKanban, Send, Shield, ShieldOff, ShieldCheck, Sparkles, Info, Menu, Settings, Bell, Sun, Moon, PieChart as PieChartIcon, BookOpen, Layers, Zap, Undo2, Lock } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -27,7 +27,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, 
 import { ChartContainer } from './components/ChartContainer';
 import { safeFormatDate } from './utils/dateUtils';
 import { usePermissions, getEffectiveRole, ROLE_LABELS, MASTER_COORDINATOR_EMAIL, SUPER_ADMIN_EMAILS, UserRole } from './hooks/usePermissions';
-import { getStudentApprovedHours, isStudentFinished, normalizeStudentProfiles, mergeStudentRecords, matchesStudentCategories, reconcileCategorySelection } from './utils/studentData';
+import { getStudentApprovedHours, isStudentFinished, normalizeStudentProfiles, mergeStudentRecords, matchesStudentCategories, reconcileCategorySelection, formatSkillLabel } from './utils/studentData';
 
 const CustomXAxisTick = ({ x, y, payload, isDarkMode, isMobile }: any) => {
   if (!payload || !payload.value) return null;
@@ -60,6 +60,7 @@ import { exportToGoogleSheets, StudentExportData } from './services/googleSheets
 import { GoogleTasksView } from './components/GoogleTasksView';
 import { GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { TaskWorkspace } from './components/TaskWorkspace/TaskWorkspace';
+import { BackToTopButton } from './components/BackToTopButton';
 
 import { ProfileSkillMap } from './components/ProfileSkillMap';
 import { dedupeById } from './utils/dedupe';
@@ -688,12 +689,16 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
     student?.role === 'master_coordinator'
   ) && userRole !== 'student_coordinator' && student?.role !== 'student_coordinator';
 
-  const studentProjectIds = isPureCoordinator
-    ? (projects.length > 0 ? projects.map((p: any) => p.id) : ['p-general'])
-    : (student 
-        ? Array.from(new Set(((student.projectIds && student.projectIds.length > 0) ? student.projectIds : ['p-general']) as string[]))
-            .filter(Boolean)
-        : ['p-general']);
+  const studentProjectIdsKey = isPureCoordinator
+    ? (projects.length > 0 ? projects.map((p: any) => p.id).filter(Boolean).join(',') : 'p-general')
+    : (student?.projectIds && student.projectIds.length > 0
+        ? (student.projectIds as string[]).filter(Boolean).join(',')
+        : 'p-general');
+
+  const studentProjectIds = useMemo<string[]>(() => {
+    const ids = Array.from(new Set<string>(studentProjectIdsKey.split(',').filter(Boolean)));
+    return ids.length > 0 ? ids : ['p-general'];
+  }, [studentProjectIdsKey]);
   
   const projectStats = useMemo(() => {
     if (!student) return [];
@@ -748,9 +753,56 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
   const [tagInput, setTagInput] = useState('');
   const [activeTagProject, setActiveTagProject] = useState<string | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
-  const [sessionRegisterMode, setSessionRegisterMode] = useState<'clock' | 'manual'>('clock');
+  const [sessionRegisterMode, setSessionRegisterMode] = useState<'clock' | 'manual'>('manual');
+  const [activeMeetings, setActiveMeetings] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'pending'>('desc');
+  const [historySearch, setHistorySearch] = useState('');
+
+  // Sincronizar reuniones activas para habilitar / deshabilitar Clock In / Out
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    const unsub = onSnapshot(collection(db, 'active_meetings'), (snap) => {
+      const meetings = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setActiveMeetings(meetings);
+    }, (err) => {
+      console.warn("Error sincronizando reuniones activas:", err);
+    });
+    return () => unsub();
+  }, []);
+
+  // Verificar si hay una reunión presencial o virtual activa iniciada por un coordinador
+  const currentActiveMeeting = useMemo(() => {
+    return activeMeetings.find((m: any) => {
+      if (!m.isActive) return false;
+      const matchesProject = !m.projectId || m.projectId === form.projectId || studentProjectIds.includes(m.projectId);
+      const isPresOrVirt = m.isPresencial || m.isVirtual || 
+        (m.category || '').toLowerCase().includes('presencial') || 
+        (m.category || '').toLowerCase().includes('virtual') || 
+        (m.category || '').toLowerCase().includes('reunión') || 
+        (m.category || '').toLowerCase().includes('reunion');
+      return matchesProject && isPresOrVirt;
+    });
+  }, [activeMeetings, form.projectId, studentProjectIds]);
+
+  const isClockInOutAvailable = Boolean(currentActiveMeeting);
+
+  // Si se finaliza la reunión activa y el alumno estaba en reloj checador, regresar a manual
+  useEffect(() => {
+    if (sessionRegisterMode === 'clock' && !isClockInOutAvailable) {
+      setSessionRegisterMode('manual');
+    }
+  }, [sessionRegisterMode, isClockInOutAvailable]);
+
+  // Ajuste rápido de duración flexible
+  const setQuickDuration = (hours: number) => {
+    const [sh, sm] = (form.startTime || '09:00').split(':').map(Number);
+    const totalMinutes = (sh || 9) * 60 + (sm || 0) + Math.round(hours * 60);
+    const endH = Math.min(23, Math.floor(totalMinutes / 60));
+    const endM = totalMinutes % 60;
+    const endStr = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+    setForm(prev => ({ ...prev, endTime: endStr }));
+  };
 
   const totalHours = useMemo(() => {
     const calculated = (student?.records || []).reduce((acc: number, r: any) => {
@@ -905,9 +957,45 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
       setIsSubmitting(true);
       const sessionRef = doc(db, 'sesiones', newRecordId);
       await setDoc(sessionRef, sessionData, { merge: true });
+
+      // Publicar automáticamente en Recursos del proyecto para todxs si se incluye URL de evidencia
+      if (form.evidenceLink && form.evidenceLink.trim().length > 5 && form.projectId) {
+        try {
+          const rawUrl = form.evidenceLink.trim();
+          let resType: 'drive' | 'canva' | 'onedrive' | 'youtube' | 'link' = 'link';
+          if (rawUrl.includes('drive.google.com') || rawUrl.includes('docs.google.com')) resType = 'drive';
+          else if (rawUrl.includes('canva.com')) resType = 'canva';
+          else if (rawUrl.includes('onedrive') || rawUrl.includes('1drv.ms') || rawUrl.includes('sharepoint.com')) resType = 'onedrive';
+          else if (rawUrl.includes('youtube.com') || rawUrl.includes('youtu.be')) resType = 'youtube';
+
+          const authorName = student?.name || getDisplayName(student) || auth.currentUser?.displayName || 'Alumno';
+          const resourceName = form.description?.trim() 
+            ? `Evidencia: ${form.description.trim().slice(0, 45)}`
+            : `Evidencia sesión (${form.date}) - ${authorName}`;
+
+          await addDoc(collection(db, 'projects', form.projectId, 'resources'), {
+            name: resourceName,
+            description: `Evidencia de sesión del ${form.date} (${form.startTime} - ${form.endTime}, ${Number(calcHours.toFixed(1))}h) registrada por ${authorName}.`,
+            url: rawUrl,
+            type: resType,
+            icon: null,
+            addedBy: student?.id || student?.uid || auth.currentUser?.uid || 'user',
+            addedByName: authorName,
+            createdAt: new Date().toISOString(),
+            lastAccessed: null,
+            order: Date.now()
+          });
+        } catch (resErr) {
+          console.warn("No se pudo publicar la evidencia en recursos del proyecto:", resErr);
+        }
+      }
       
       toast.dismiss(loadingToast);
-      showSuccessToast(editingRecordId ? "Registro actualizado exitosamente" : "Registro enviado para revisión exitosamente");
+      showSuccessToast(
+        form.evidenceLink && form.evidenceLink.trim().length > 5
+          ? "Registro enviado y evidencia agregada a Recursos del proyecto"
+          : (editingRecordId ? "Registro actualizado exitosamente" : "Registro enviado para revisión exitosamente")
+      );
       
       setForm({
         date: getCDMXDateString(),
@@ -1021,49 +1109,84 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
   const [loadingTasks, setLoadingTasks] = useState(true);
 
   useEffect(() => {
-    if (!student?.id || !studentProjectIds.length) {
+    const studentId = student?.id;
+    const studentUid = student?.uid;
+    if ((!studentId && !studentUid) || !studentProjectIds.length) {
+      setAssignedTasks([]);
       setLoadingTasks(false);
       return;
     }
 
-    const unsubscribes: (() => void)[] = [];
-    let projectsLoaded = 0;
+    let isCancelled = false;
+    const candidateIds = new Set([studentId, studentUid].filter(Boolean));
+    const allowedProjects = new Set(studentProjectIds);
 
-    studentProjectIds.forEach((pid: string) => {
-      const q = query(
-        collection(db, 'projects', pid, 'tasks'),
-        where('assignedTo', '==', student?.id),
-        where('deletedAt', '==', null)
-      );
+    const isTaskAssignedToStudent = (data: any) => {
+      if (data.deletedAt || data.isDeleted) return false;
+      if (data.assignedTo && candidateIds.has(data.assignedTo)) return true;
+      if (data.leadAssigneeId && candidateIds.has(data.leadAssigneeId)) return true;
+      if (Array.isArray(data.assigneeIds) && data.assigneeIds.some((id: string) => candidateIds.has(id))) return true;
+      if (Array.isArray(data.assignedUsers) && data.assignedUsers.some((id: string) => candidateIds.has(id))) return true;
+      return false;
+    };
 
-      const unsub = onSnapshot(q, (snapshot) => {
-        const projectTasks = snapshot.docs.map(doc => ({
-          id: doc.id,
-          projectId: pid,
-          ...doc.data()
-        }));
-        
-        setAssignedTasks(prev => {
-          const otherTasks = prev.filter(t => t.projectId !== pid);
-          return [...otherTasks, ...projectTasks];
-        });
-        
-        projectsLoaded++;
-        if (projectsLoaded >= studentProjectIds.length) {
-          setLoadingTasks(false);
+    let rootTasksList: any[] = [];
+    let subTasksList: any[] = [];
+
+    const updateMergedTasks = () => {
+      if (isCancelled) return;
+      const mergedMap = new Map<string, any>();
+      subTasksList.forEach(t => mergedMap.set(t.id, t));
+      rootTasksList.forEach(t => mergedMap.set(t.id, t));
+      setAssignedTasks(Array.from(mergedMap.values()));
+      setLoadingTasks(false);
+    };
+
+    const unsubRoot = onSnapshot(
+      collection(db, 'tasks'),
+      (snapshot) => {
+        if (isCancelled) return;
+        rootTasksList = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as any))
+          .filter(t => (!t.projectId || allowedProjects.has(t.projectId)) && isTaskAssignedToStudent(t));
+        updateMergedTasks();
+      },
+      (err) => {
+        console.warn('Error fetching root tasks in UserDashboard:', err);
+        if (!isCancelled) setLoadingTasks(false);
+      }
+    );
+
+    const fetchLegacySubtasks = async () => {
+      try {
+        const results = await Promise.all(
+          studentProjectIds.map(async (pid: string) => {
+            try {
+              const snap = await getDocs(collection(db, 'projects', pid, 'tasks'));
+              return snap.docs
+                .map(d => ({ id: d.id, projectId: pid, ...d.data() } as any))
+                .filter(isTaskAssignedToStudent);
+            } catch {
+              return [];
+            }
+          })
+        );
+        if (!isCancelled) {
+          subTasksList = results.flat();
+          updateMergedTasks();
         }
-      }, (err) => {
-        console.error(`Error fetching tasks for project ${pid}:`, err);
-        projectsLoaded++;
-        if (projectsLoaded >= studentProjectIds.length) {
-          setLoadingTasks(false);
-        }
-      });
-      unsubscribes.push(unsub);
-    });
+      } catch (err) {
+        console.warn('Error fetching legacy subtasks in UserDashboard:', err);
+      }
+    };
 
-    return () => unsubscribes.forEach(unsub => unsub());
-  }, [student?.id, studentProjectIds]);
+    fetchLegacySubtasks();
+
+    return () => {
+      isCancelled = true;
+      unsubRoot();
+    };
+  }, [student?.id, student?.uid, studentProjectIdsKey]);
 
   const pendingRecords = useMemo(() => {
     return (student?.records || []).filter((r: any) => r.validationStatus === 'pendiente');
@@ -1183,8 +1306,8 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                 </div>
               </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-8 items-start max-w-7xl mx-auto">
-        <div className="grid grid-cols-1 gap-8 items-start">
+      <div className="flex flex-col gap-8 w-full max-w-7xl mx-auto">
+        <div className="flex flex-col gap-8 w-full">
           <div className="bg-white p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] border border-slate-200 shadow-sm space-y-6 sm:space-y-8">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
@@ -1192,25 +1315,14 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                   <PlusCircle className="text-indigo-600" size={24} /> Registrar Sesión
                 </h3>
                 <p className="text-xs text-slate-500 font-medium mt-1">
-                  {sessionRegisterMode === 'clock' && !editingRecordId
-                    ? 'Registro digital con reloj checador (requiere validación del coordinador)'
-                    : 'Registro manual tradicional de horas y actividades'}
+                  {sessionRegisterMode === 'manual' || editingRecordId
+                    ? 'Registro manual de actividades, horas y evidencias'
+                    : 'Reloj checador digital (activo durante reunión de coordinación)'}
                 </p>
               </div>
 
               {!editingRecordId && (
-                <div className="flex p-1 rounded-2xl bg-slate-100 border border-slate-200 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setSessionRegisterMode('clock')}
-                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all ${
-                      sessionRegisterMode === 'clock'
-                        ? 'bg-white text-indigo-600 shadow-sm'
-                        : 'text-slate-500 hover:text-slate-900'
-                    }`}
-                  >
-                    <Clock size={14} /> Clock In / Out
-                  </button>
+                <div className="flex p-1 rounded-2xl bg-slate-100 border border-slate-200 shrink-0 items-center">
                   <button
                     type="button"
                     onClick={() => setSessionRegisterMode('manual')}
@@ -1222,9 +1334,64 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                   >
                     <Edit2 size={14} /> Manual
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isClockInOutAvailable) {
+                        showErrorToast(
+                          "Clock In / Out sólo se habilita durante una reunión presencial o virtual iniciada por un coordinador desde el menú de Sesión."
+                        );
+                        return;
+                      }
+                      setSessionRegisterMode('clock');
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-2 transition-all ${
+                      sessionRegisterMode === 'clock'
+                        ? 'bg-white text-indigo-600 shadow-sm'
+                        : isClockInOutAvailable
+                        ? 'text-slate-700 hover:text-slate-900'
+                        : 'text-slate-400 hover:text-slate-500 cursor-not-allowed opacity-75'
+                    }`}
+                    title={
+                      isClockInOutAvailable
+                        ? `Reunión activa: ${currentActiveMeeting?.projectName || currentActiveMeeting?.category || 'Presencial/Virtual'}`
+                        : "Requiere que un coordinador inicie la reunión presencial o virtual desde el menú de Sesión"
+                    }
+                  >
+                    {isClockInOutAvailable ? (
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                      </span>
+                    ) : (
+                      <Lock size={13} className="text-slate-400" />
+                    )}
+                    <Clock size={14} /> Clock In / Out
+                  </button>
                 </div>
               )}
             </div>
+
+            {isClockInOutAvailable && (
+              <div className="p-3.5 bg-emerald-50 text-emerald-800 rounded-2xl border border-emerald-200 flex items-center justify-between gap-3 text-xs font-bold">
+                <div className="flex items-center gap-2.5">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                  </span>
+                  <span>Reunión de coordinación activa: <strong>{currentActiveMeeting?.projectName || currentActiveMeeting?.category || 'Sesión en curso'}</strong></span>
+                </div>
+                {sessionRegisterMode === 'manual' && (
+                  <button
+                    type="button"
+                    onClick={() => setSessionRegisterMode('clock')}
+                    className="px-3 py-1 bg-emerald-600 text-white rounded-lg text-[11px] font-black uppercase hover:bg-emerald-700 transition-all shrink-0"
+                  >
+                    Usar Reloj
+                  </button>
+                )}
+              </div>
+            )}
 
             {errorMessage && (
               <div className="p-4 bg-red-50 text-red-700 rounded-2xl border-2 border-red-100 flex items-center gap-3 font-bold text-xs uppercase animate-pulse shadow-sm">
@@ -1232,7 +1399,7 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
               </div>
             )}
             
-            {sessionRegisterMode === 'clock' && !editingRecordId ? (
+            {sessionRegisterMode === 'clock' && !editingRecordId && isClockInOutAvailable ? (
               <ClockInOutWidget
                 student={student}
                 projects={projects}
@@ -1242,27 +1409,51 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
             ) : (
               <div className="space-y-6">
                 {/* Row 1: Time tracking */}
-                <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3 gap-4">
-                  <div className="space-y-2 min-w-0">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">FECHA</label>
-                    <div className="relative">
-                      <input type="date" className="w-full pl-3 pr-8 py-4 bg-slate-50 border-none rounded-2xl text-[11px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.date} onChange={e => setForm({...form, date: e.target.value})} />
-                      <CalendarIcon className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 gap-4">
+                    <div className="space-y-2 min-w-0">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">FECHA</label>
+                      <div className="relative">
+                        <input type="date" className="w-full pl-3 pr-8 py-4 bg-slate-50 border-none rounded-2xl text-[11px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.date} onChange={e => setForm({...form, date: e.target.value})} />
+                        <CalendarIcon className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                      </div>
+                    </div>
+                    <div className="space-y-2 min-w-0">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ENTRADA (24H)</label>
+                      <div className="relative">
+                        <input type="time" className="w-full pl-3 pr-8 py-4 bg-slate-50 border-none rounded-2xl text-[11px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.startTime} onChange={e => setForm({...form, startTime: e.target.value})} />
+                        <Clock className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                      </div>
+                    </div>
+                    <div className="space-y-2 min-w-0">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">SALIDA (24H)</label>
+                      <div className="relative">
+                        <input type="time" className="w-full pl-3 pr-8 py-4 bg-slate-50 border-none rounded-2xl text-[11px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.endTime} onChange={e => setForm({...form, endTime: e.target.value})} />
+                        <Clock className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                      </div>
                     </div>
                   </div>
-                  <div className="space-y-2 min-w-0">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">ENTRADA (24H)</label>
-                    <div className="relative">
-                      <input type="time" className="w-full pl-3 pr-8 py-4 bg-slate-50 border-none rounded-2xl text-[11px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.startTime} onChange={e => setForm({...form, startTime: e.target.value})} />
-                      <Clock className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+
+                  {/* Duración flexible: no forzosamente 4 horas */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-1 pt-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Duración rápida:</span>
+                      {[1, 2, 3, 4, 6].map((h) => (
+                        <button
+                          key={h}
+                          type="button"
+                          onClick={() => setQuickDuration(h)}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all ${
+                            Math.abs(calcHours - h) < 0.05
+                              ? 'bg-indigo-600 text-white shadow-sm'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                          }`}
+                        >
+                          {h}h
+                        </button>
+                      ))}
                     </div>
-                  </div>
-                  <div className="space-y-2 min-w-0">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">SALIDA (24H)</label>
-                    <div className="relative">
-                      <input type="time" className="w-full pl-3 pr-8 py-4 bg-slate-50 border-none rounded-2xl text-[11px] sm:text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all appearance-none cursor-pointer" value={form.endTime} onChange={e => setForm({...form, endTime: e.target.value})} />
-                      <Clock className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
-                    </div>
+                    <span className="text-[10px] text-slate-400 font-medium">Horario flexible y personalizable</span>
                   </div>
                 </div>
 
@@ -1273,7 +1464,7 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                 </div>
 
                 {/* Row 2: Classification */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4">
                   <div className="space-y-2 min-w-0">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-2">PROYECTO</label>
                     <div className="relative">
@@ -1310,34 +1501,46 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                   </div>
                 </div>
 
-                {/* Resumen Automático y Evidencia por Coordinación */}
-                <div className="p-5 bg-indigo-50/70 border border-indigo-100 rounded-3xl space-y-3">
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 bg-indigo-100 text-indigo-600 rounded-xl shrink-0 mt-0.5">
-                      <Sparkles size={16} />
-                    </div>
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-wider text-slate-900">
-                        Descripción generada automáticamente
-                      </p>
-                      <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-0.5">
-                        Al enviar la sesión, se generará automáticamente la breve descripción del turno ({form.startTime} a {form.endTime}) con {Number(calcHours.toFixed(1))} horas para el proyecto y categoría seleccionados.
-                      </p>
-                    </div>
+                {/* Descripción de la actividad realizada */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center px-2">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                      <Edit2 size={12} className="text-indigo-600" /> DESCRIPCIÓN DE LA ACTIVIDAD QUE SE REALIZÓ *
+                    </label>
+                    <span className="text-[10px] text-slate-400 font-medium">Detalle del trabajo y avances</span>
                   </div>
-                  <div className="flex items-start gap-3 pt-2.5 border-t border-indigo-100/70">
-                    <div className="p-2 bg-amber-100 text-amber-600 rounded-xl shrink-0 mt-0.5">
-                      <Info size={16} />
-                    </div>
-                    <div>
-                      <p className="text-xs font-black uppercase tracking-wider text-slate-900">
-                        Evidencia y Validación
-                      </p>
-                      <p className="text-[11px] text-slate-500 font-medium leading-relaxed mt-0.5">
-                        El enlace de evidencia institucional será incorporado por tu coordinador(a) al momento de revisar y validar las horas de tu sesión.
-                      </p>
-                    </div>
+                  <textarea
+                    rows={3}
+                    placeholder="Describe detalladamente las tareas, actividades, documentación o entregables desarrollados durante la sesión..."
+                    className="w-full p-4 bg-slate-50 border-none rounded-2xl text-xs sm:text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all resize-none text-slate-800 placeholder:text-slate-400"
+                    value={form.description}
+                    onChange={e => setForm({ ...form, description: e.target.value })}
+                  />
+                </div>
+
+                {/* URL de Evidencia con sincronización automática a Recursos */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center px-2">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                      <LinkIcon size={12} className="text-indigo-600" /> URL DE EVIDENCIA
+                    </label>
+                    <span className="text-[10px] text-indigo-600 font-bold bg-indigo-50 px-2.5 py-1 rounded-full">
+                      Aparecerá en Recursos para todxs
+                    </span>
                   </div>
+                  <div className="relative">
+                    <input
+                      type="url"
+                      placeholder="https://drive.google.com/... o enlace de Canva, Figma, OneDrive, etc."
+                      className="w-full pl-4 pr-10 py-4 bg-slate-50 border-none rounded-2xl text-xs sm:text-sm font-medium outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all text-slate-800 placeholder:text-slate-400"
+                      value={form.evidenceLink}
+                      onChange={e => setForm({ ...form, evidenceLink: e.target.value })}
+                    />
+                    <ExternalLink className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                  </div>
+                  <p className="text-[11px] text-slate-500 font-medium px-2 leading-relaxed">
+                    Al guardar, este enlace se incorporará automáticamente a la pestaña de <strong>Recursos</strong> del proyecto seleccionado, quedando disponible y accesible para todxs los participantes.
+                  </p>
                 </div>
 
                 {/* Buttons */}
@@ -1494,8 +1697,8 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
               <PieChartIcon className="text-indigo-600 w-6 h-6 sm:w-7 sm:h-7" /> Distribución por Categoría
             </h3>
             
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-              <div className="min-h-[350px] h-[350px] w-full flex items-center justify-center relative">
+            <div className="grid grid-cols-1 gap-8 items-center">
+              <div className="min-h-[280px] h-[280px] w-full flex items-center justify-center relative">
                 <div className="relative w-64 h-64">
                   <svg viewBox="0 0 42 42" className="w-full h-full -rotate-90">
                     {categoryStats.reduce((acc: number, curr: any) => acc + curr.value, 0) > 0 ? (
@@ -1573,7 +1776,7 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
             <h3 className="text-xl sm:text-2xl font-black text-slate-900 flex items-center gap-3">
               <Users className="text-indigo-600" size={24} /> Compañeros de Proyecto
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+            <div className="grid grid-cols-1 gap-4 sm:gap-6">
               {collaborators.map((collab: any) => {
                 const records = collab.records || [];
                 const latestRecord = records[records.length - 1];
@@ -1642,13 +1845,13 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
           </div>
         </div>
 
-        <div className="space-y-8">
+        <div className="flex flex-col gap-8 w-full">
           {(() => {
             const currentEffectiveRole = getEffectiveRole(student?.email, student?.role || userRole);
             const isCoord = currentEffectiveRole === 'coordinator' || currentEffectiveRole === 'super_coordinator' || currentEffectiveRole === 'master_coordinator';
             
             return isCoord ? (
-              <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-4">
+              <div className="w-full bg-white p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] border border-slate-200 shadow-sm space-y-4">
                 <div className="flex justify-between items-center">
                   <div className="flex flex-col">
                     <span className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em] bg-emerald-50 px-3 py-1 rounded-full shadow-sm border border-emerald-100 w-fit flex items-center gap-1.5">
@@ -1669,7 +1872,7 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
                 </div>
               </div>
             ) : (
-              <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm">
+              <div className="w-full bg-white p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center mb-6">
                     <div className="flex flex-col">
                       <span className="text-[10px] font-black text-indigo-600 uppercase tracking-[0.2em] bg-indigo-50 px-3 py-1 rounded-full shadow-sm border border-indigo-100 w-fit">Progreso General</span>
@@ -1697,125 +1900,179 @@ const UserDashboard = ({ student, setStudents, userRole, categories, setCategori
             );
           })()}
 
-          <div className="bg-white p-10 rounded-[3rem] border border-slate-200 shadow-sm space-y-6">
+          <div className="w-full bg-white p-6 sm:p-10 rounded-[2rem] sm:rounded-[3rem] border border-slate-200 shadow-sm space-y-6">
             <div className="flex flex-col gap-4">
-              <h3 className="text-xl font-black text-slate-900 flex items-center gap-3">
-                <History className="text-slate-400" size={24} /> Recientes
-              </h3>
-              <div className="flex gap-2 overflow-x-auto hide-scrollbar snap-x snap-mandatory w-full pb-2">
-                {selectedRecords.length > 0 && (
-                  <>
-                    <button onClick={handleDeleteSelectedLocal} className="p-2 bg-rose-100 text-rose-600 rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm shrink-0 snap-center" title="Borrar Seleccionados">
-                      <Trash2 size={18} />
-                    </button>
-                    <button onClick={downloadCSV} className="p-2 bg-indigo-100 text-indigo-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm shrink-0 snap-center" title="Descargar Seleccionados">
-                      <Download size={18} />
-                    </button>
-                  </>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <h3 className="text-xl font-black text-slate-900 flex items-center gap-3">
+                  <History className="text-slate-400" size={24} /> Bitácora Histórica
+                </h3>
+                <div className="flex gap-2 overflow-x-auto hide-scrollbar snap-x snap-mandatory pb-1">
+                  {selectedRecords.length > 0 && (
+                    <>
+                      <button onClick={handleDeleteSelectedLocal} className="p-2 bg-rose-100 text-rose-600 rounded-xl hover:bg-rose-600 hover:text-white transition-all shadow-sm shrink-0 snap-center" title="Borrar Seleccionados">
+                        <Trash2 size={18} />
+                      </button>
+                      <button onClick={downloadCSV} className="p-2 bg-indigo-100 text-indigo-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all shadow-sm shrink-0 snap-center" title="Descargar Seleccionados">
+                        <Download size={18} />
+                      </button>
+                    </>
+                  )}
+                  <button 
+                    onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : prev === 'asc' ? 'pending' : 'desc')}
+                    className="p-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-all shadow-sm flex items-center justify-center shrink-0 snap-center"
+                    title={sortOrder === 'desc' ? 'Ordenar Ascendente' : sortOrder === 'asc' ? 'Pendientes Primero' : 'Ordenar Descendente'}
+                  >
+                    {sortOrder === 'pending' ? <Clock size={18} className="text-amber-600" /> : <ArrowDownUp size={18} className={sortOrder === 'asc' ? 'rotate-180 transition-transform' : 'transition-transform'} />}
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const records = student?.records || [];
+                      if (selectedRecords.length === records.length) setSelectedRecords([]);
+                      else setSelectedRecords(records.map((r: any) => r.id));
+                    }}
+                    className={`p-2 rounded-xl transition-all shadow-sm flex items-center justify-center shrink-0 snap-center ${selectedRecords.length > 0 && selectedRecords.length === (student?.records || []).length ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                    title={selectedRecords.length > 0 && selectedRecords.length === (student?.records || []).length ? 'Deseleccionar Todo' : 'Seleccionar Todo'}
+                  >
+                    {selectedRecords.length > 0 && selectedRecords.length === (student?.records || []).length ? <X size={18} /> : <CheckSquare size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="relative w-full">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                <input
+                  type="text"
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  placeholder="Buscar sesión por descripción o nombre de proyecto..."
+                  className="w-full pl-11 pr-10 py-3.5 bg-slate-50 border border-slate-100 rounded-2xl text-xs sm:text-sm font-bold text-slate-800 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300 transition-all"
+                />
+                {historySearch && (
+                  <button
+                    type="button"
+                    onClick={() => setHistorySearch('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
+                    title="Limpiar búsqueda"
+                  >
+                    <X size={14} />
+                  </button>
                 )}
-                <button 
-                  onClick={() => setSortOrder(prev => prev === 'desc' ? 'asc' : prev === 'asc' ? 'pending' : 'desc')}
-                  className="p-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 transition-all shadow-sm flex items-center justify-center shrink-0 snap-center"
-                  title={sortOrder === 'desc' ? 'Ordenar Ascendente' : sortOrder === 'asc' ? 'Pendientes Primero' : 'Ordenar Descendente'}
-                >
-                  {sortOrder === 'pending' ? <Clock size={18} className="text-amber-600" /> : <ArrowDownUp size={18} className={sortOrder === 'asc' ? 'rotate-180 transition-transform' : 'transition-transform'} />}
-                </button>
-                <button 
-                  onClick={() => {
-                    const records = student?.records || [];
-                    if (selectedRecords.length === records.length) setSelectedRecords([]);
-                    else setSelectedRecords(records.map((r: any) => r.id));
-                  }}
-                  className={`p-2 rounded-xl transition-all shadow-sm flex items-center justify-center shrink-0 snap-center ${selectedRecords.length > 0 && selectedRecords.length === (student?.records || []).length ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                  title={selectedRecords.length > 0 && selectedRecords.length === (student?.records || []).length ? 'Deseleccionar Todo' : 'Seleccionar Todo'}
-                >
-                  {selectedRecords.length > 0 && selectedRecords.length === (student?.records || []).length ? <X size={18} /> : <CheckSquare size={18} />}
-                </button>
               </div>
             </div>
             <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-                {(student?.records || []).slice().sort((a: any, b: any) => {
-                  if (sortOrder === 'pending') {
-                    if (a.validationStatus === 'pendiente' && b.validationStatus !== 'pendiente') return -1;
-                    if (a.validationStatus !== 'pendiente' && b.validationStatus === 'pendiente') return 1;
-                  }
-                  const dateA = new Date(`${a.date}T${a.startTime || '00:00'}`).getTime();
-                  const dateB = new Date(`${b.date}T${b.startTime || '00:00'}`).getTime();
-                  return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
-                }).map((r: any) => {
-                  const cat = categories.find((c: any) => c.id === r.categoryId);
-                  const isSelected = selectedRecords.includes(r.id);
-                  return (
-                    <div 
-                      key={r.id} 
-                      onClick={() => {
-                        setSelectedRecords(prev => isSelected ? prev.filter(id => id !== r.id) : [...prev, r.id]);
-                      }}
-                      className={`group p-6 border rounded-[2rem] transition-all relative cursor-pointer ${isSelected ? 'border-indigo-500 bg-indigo-50/50 shadow-md' : 'border-slate-100 hover:border-indigo-100 hover:bg-indigo-50/30'}`}
-                    >
-                      <div className="flex justify-between items-start mb-2 gap-4 pr-16">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-slate-200'}`}>
-                              {isSelected && <Check size={12} className="text-white" />}
-                            </div>
-                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest truncate">{r.date}</span>
-                          </div>
-                          <span className="text-sm font-black text-indigo-600 shrink-0">{Number(r.hours.toFixed(2))}h</span>
+                {(() => {
+                  const queryText = historySearch.trim().toLowerCase();
+                  const filteredRecords = (student?.records || [])
+                    .filter((r: any) => {
+                      if (!queryText) return true;
+                      const proj = projects.find((p: any) => p.id === r.projectId);
+                      const projName = (proj?.name || r.projectName || r.projectId || '').toLowerCase();
+                      const desc = (r.description || '').toLowerCase();
+                      return desc.includes(queryText) || projName.includes(queryText);
+                    })
+                    .sort((a: any, b: any) => {
+                      if (sortOrder === 'pending') {
+                        if (a.validationStatus === 'pendiente' && b.validationStatus !== 'pendiente') return -1;
+                        if (a.validationStatus !== 'pendiente' && b.validationStatus === 'pendiente') return 1;
+                      }
+                      const dateA = new Date(`${a.date}T${a.startTime || '00:00'}`).getTime();
+                      const dateB = new Date(`${b.date}T${b.startTime || '00:00'}`).getTime();
+                      return sortOrder === 'asc' ? dateA - dateB : dateB - dateA;
+                    });
+
+                  if ((student?.records || []).length === 0) {
+                    return (
+                      <div className="text-center py-10">
+                        <p className="text-slate-300 font-black uppercase tracking-widest text-[10px]">No hay registros aún</p>
                       </div>
-                        <p className="font-bold text-slate-800 text-sm leading-tight mb-3 break-words">{r.description || 'Sin descripción'}</p>
-                        <div className="flex flex-wrap items-center gap-4 mt-3">
-                          <div className="flex items-center gap-2 shrink-0">
-                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cat?.color || '#cbd5e1' }}></div>
-                            <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">{cat?.name || 'Otra'}</span>
-                          </div>
-                          {r.validationStatus && (
-                            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-[8px] font-black uppercase tracking-widest shrink-0 ${(VALIDATION_STATUS as any)[r.validationStatus]?.color || 'bg-slate-50 text-slate-400 border-slate-100'}`}>
-                              {(() => {
-                                const Icon = (VALIDATION_STATUS as any)[r.validationStatus]?.icon || Clock;
-                                return <Icon size={10} />;
-                              })()}
-                              {(VALIDATION_STATUS as any)[r.validationStatus]?.label || 'Pendiente'}
+                    );
+                  }
+
+                  if (filteredRecords.length === 0) {
+                    return (
+                      <div className="text-center py-10">
+                        <p className="text-slate-400 font-black uppercase tracking-widest text-[10px]">No se encontraron sesiones para "{historySearch}"</p>
+                      </div>
+                    );
+                  }
+
+                  return filteredRecords.map((r: any) => {
+                    const cat = categories.find((c: any) => c.id === r.categoryId);
+                    const proj = projects.find((p: any) => p.id === r.projectId);
+                    const isSelected = selectedRecords.includes(r.id);
+                    return (
+                      <div 
+                        key={r.id} 
+                        onClick={() => {
+                          setSelectedRecords(prev => isSelected ? prev.filter(id => id !== r.id) : [...prev, r.id]);
+                        }}
+                        className={`group p-6 border rounded-[2rem] transition-all relative cursor-pointer ${isSelected ? 'border-indigo-500 bg-indigo-50/50 shadow-md' : 'border-slate-100 hover:border-indigo-100 hover:bg-indigo-50/30'}`}
+                      >
+                        <div className="flex justify-between items-start mb-2 gap-4 pr-16">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600' : 'border-slate-200'}`}>
+                                {isSelected && <Check size={12} className="text-white" />}
+                              </div>
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest truncate">{r.date}</span>
                             </div>
-                          )}
-                          {r.validationStatus === 'rechazado' && (
-                            <button 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDisputeModal({ isOpen: true, recordId: r.id });
-                              }}
-                              className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-600 text-[8px] font-black uppercase tracking-widest hover:bg-amber-100 transition-all shrink-0"
-                            >
-                              <AlertTriangle size={10} />
-                              Disputar
-                            </button>
-                          )}
+                            <span className="text-sm font-black text-indigo-600 shrink-0">{Number(r.hours.toFixed(2))}h</span>
                         </div>
-                        {r.createdBy !== 'admin' && (
-                            <div className="absolute top-4 right-4 flex gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all">
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); handleEditTask(r); }} 
-                                  className="p-2 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-                                  title="Editar"
-                                >
-                                    <Edit2 size={16} />
-                                </button>
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); showConfirmToast("¿Eliminar este registro?", () => handleDeleteTask(r.id)); }} 
-                                  className="p-2 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-                                  title="Eliminar"
-                                >
-                                    <Trash2 size={16} />
-                                </button>
+                          <p className="font-bold text-slate-800 text-sm leading-tight mb-3 break-words">{r.description || 'Sin descripción'}</p>
+                          <div className="flex flex-wrap items-center gap-3 mt-3">
+                            {(proj || r.projectName) && (
+                              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 shrink-0">
+                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: proj?.color || '#6366f1' }}></div>
+                                <span className="text-[9px] font-black uppercase tracking-widest">{proj?.name || r.projectName}</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cat?.color || '#cbd5e1' }}></div>
+                              <span className="text-[9px] font-black uppercase text-slate-400 tracking-widest">{cat?.name || 'Otra'}</span>
                             </div>
-                        )}
-                    </div>
-                  );
-                })}
-                {(student?.records || []).length === 0 && (
-                  <div className="text-center py-10">
-                    <p className="text-slate-300 font-black uppercase tracking-widest text-[10px]">No hay registros aún</p>
-                  </div>
-                )}
+                            {r.validationStatus && (
+                              <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-[8px] font-black uppercase tracking-widest shrink-0 ${(VALIDATION_STATUS as any)[r.validationStatus]?.color || 'bg-slate-50 text-slate-400 border-slate-100'}`}>
+                                {(() => {
+                                  const Icon = (VALIDATION_STATUS as any)[r.validationStatus]?.icon || Clock;
+                                  return <Icon size={10} />;
+                                })()}
+                                {(VALIDATION_STATUS as any)[r.validationStatus]?.label || 'Pendiente'}
+                              </div>
+                            )}
+                            {r.validationStatus === 'rechazado' && (
+                              <button 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDisputeModal({ isOpen: true, recordId: r.id });
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-600 text-[8px] font-black uppercase tracking-widest hover:bg-amber-100 transition-all shrink-0"
+                              >
+                                <AlertTriangle size={10} />
+                                Disputar
+                              </button>
+                            )}
+                          </div>
+                          {r.createdBy !== 'admin' && (
+                              <div className="absolute top-4 right-4 flex gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-all">
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); handleEditTask(r); }} 
+                                    className="p-2 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                    title="Editar"
+                                  >
+                                      <Edit2 size={16} />
+                                  </button>
+                                  <button 
+                                    onClick={(e) => { e.stopPropagation(); showConfirmToast("¿Eliminar este registro?", () => handleDeleteTask(r.id)); }} 
+                                    className="p-2 flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+                                    title="Eliminar"
+                                  >
+                                      <Trash2 size={16} />
+                                  </button>
+                              </div>
+                          )}
+                      </div>
+                    );
+                  });
+                })()}
             </div>
           </div>
         </div>
@@ -2088,7 +2345,7 @@ const App = () => {
     setIsMobileMenuOpen(false);
   };
 
-  const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification, clearAll } = useNotifications(user?.uid);
+  const { notifications, unreadCount, markAsRead, markAllAsRead, deleteNotification, clearAll } = useNotifications(loading ? undefined : user?.uid);
   const initialViewRef = useRef(false);
 
   useEffect(() => {
@@ -2455,12 +2712,14 @@ const App = () => {
     }
   }, [studentsWithRecords, userRole]);
 
+  const isRegularUser = userRole === 'user';
+
   useEffect(() => {
-    if (loading || !user) return;
+    if (loading || !user?.uid) return;
     let active = true;
     let previousSessionIds = new Set<string>();
     setRemovedSessionIds([]);
-    const sessionsQuery = userRole === 'user'
+    const sessionsQuery = isRegularUser
       ? query(collection(db, 'sesiones'), or(where('userId', '==', user.uid), where('studentId', '==', user.uid)))
       : collection(db, 'sesiones');
     const unsubscribe = onSnapshot(sessionsQuery, snapshot => {
@@ -2478,7 +2737,7 @@ const App = () => {
       setDataErrors(prev => ({ ...prev, sessions: 'No se pudieron cargar los registros de asistencia.' }));
     });
     return () => { active = false; unsubscribe(); };
-  }, [user?.uid, userRole, loading]);
+  }, [user?.uid, isRegularUser, loading]);
 
   useEffect(() => {
     if (loading || !user) return;
@@ -2514,7 +2773,7 @@ const App = () => {
     if (loading || !user) return;
     let active = true;
     setIsLoadingStudents(true);
-    const directory = userRole === 'user' ? 'public_profiles' : 'users';
+    const directory = isRegularUser ? 'public_profiles' : 'users';
     const unsubscribe = onSnapshot(collection(db, directory), snapshot => {
       if (!active) return;
       setStudents(normalizeStudentProfiles(snapshot.docs.map(profile => ({ id: profile.id, data: profile.data() }))));
@@ -2528,7 +2787,7 @@ const App = () => {
       setIsLoadingStudents(false);
     });
     return () => { active = false; unsubscribe(); };
-  }, [user?.uid, userRole, loading]);
+  }, [user?.uid, isRegularUser, loading]);
 
   const [showNewCatInput, setShowNewCatInput] = useState(false);
   const [newInlineCat, setNewInlineCat] = useState({ name: '', color: '#6366f1' });
@@ -2834,19 +3093,33 @@ const App = () => {
     return dedupeById(flat);
   }, [studentsWithRecords, userRole, currentUserId, user?.uid, calendarFilterAll, calendarStudentFilter]);
 
+  const [bitacoraSearch, setBitacoraSearch] = useState('');
+
+  const filteredStudentSessions = useMemo(() => {
+    if (!selectedStudent) return [];
+    const q = bitacoraSearch.trim().toLowerCase();
+    return (selectedStudent.records || []).filter((r: any) => {
+      if (!q) return true;
+      const proj = projects.find(p => p.id === r.projectId);
+      const projName = (proj?.name || r.projectName || r.projectId || '').toLowerCase();
+      const desc = (r.description || '').toLowerCase();
+      return desc.includes(q) || projName.includes(q);
+    });
+  }, [selectedStudent, bitacoraSearch, projects]);
+
   const paginatedSessions = useMemo(() => {
     if (!selectedStudent) return [];
     const startIndex = (sessionPage - 1) * sessionsPerPage;
-    const sortedRecords = [...(selectedStudent.records || [])].sort((a: any, b: any) => {
+    const sortedRecords = [...filteredStudentSessions].sort((a: any, b: any) => {
       const dateA = new Date(`${a.date}T${a.startTime || '00:00'}`).getTime();
       const dateB = new Date(`${b.date}T${b.startTime || '00:00'}`).getTime();
       return sessionSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
     });
     return sortedRecords.slice(startIndex, startIndex + sessionsPerPage);
-  }, [selectedStudent, sessionPage, sessionSortOrder]);
+  }, [selectedStudent, filteredStudentSessions, sessionPage, sessionSortOrder]);
 
-  const totalSessionPages = selectedStudent ? Math.ceil((selectedStudent.records || []).length / sessionsPerPage) : 0;
-  useEffect(() => { setSessionPage(1); }, [selectedStudentId]);
+  const totalSessionPages = selectedStudent ? Math.ceil(filteredStudentSessions.length / sessionsPerPage) : 0;
+  useEffect(() => { setSessionPage(1); }, [selectedStudentId, bitacoraSearch]);
   useEffect(() => {
     setSessionPage(page => Math.max(1, Math.min(page, totalSessionPages || 1)));
   }, [totalSessionPages]);
@@ -3135,6 +3408,12 @@ const App = () => {
                 type: 'project_assigned',
                 projectId: pid,
                 projectName: p.name,
+                taskId: null,
+                taskTitle: null,
+                triggeredBy: user?.uid || 'admin',
+                triggeredByName: user?.displayName || 'Coordinador',
+                priority: 'medium',
+                actionUrl: null,
               });
             }
           }
@@ -5111,8 +5390,8 @@ const App = () => {
             isLoadingStudents ? (
               <div className="space-y-8 animate-pulse">
                 <div className="h-12 bg-slate-100 rounded-2xl w-1/4"></div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-                  <div className="md:col-span-2 h-96 bg-slate-50 rounded-[3rem]"></div>
+                <div className="grid grid-cols-1 gap-8">
+                  <div className="h-96 bg-slate-50 rounded-[3rem]"></div>
                   <div className="h-96 bg-slate-50 rounded-[3rem]"></div>
                 </div>
               </div>
@@ -5158,6 +5437,10 @@ const App = () => {
                   setSelectedProjectId(id);
                   setView('project-workspace');
                 }}
+                onStartSession={(id: string) => {
+                  setSelectedProjectId(id);
+                  setView('session');
+                }}
                 isDarkMode={isDarkMode}
               />
             )
@@ -5183,24 +5466,69 @@ const App = () => {
               />
             )
           )}
-          {view === 'project-workspace' && selectedProjectId && (
-            <ProjectWorkspace
-              projectId={selectedProjectId}
-              project={projects.find(p => p.id === selectedProjectId)}
-              userRole={userRole}
-              currentUser={user}
-              students={studentsWithRecords}
-              initialTaskId={selectedTaskId}
-              onBack={() => {
-                setSelectedProjectId(null);
-                setSelectedTaskId(null);
-                setView('project-directory');
-              }}
-              isDarkMode={isDarkMode}
-              onOpenNotifications={() => setIsNotificationCenterOpen(true)}
-              unreadNotifications={unreadCount}
-            />
-          )}
+          {view === 'project-workspace' && selectedProjectId && (() => {
+            const currentStudentObj = getStudentData(currentUserId || user?.uid || '');
+            const enrolledIds = Array.from(new Set<string>([
+              ...(userProfile?.projectIds || []),
+              ...(currentStudentObj?.projectIds || [])
+            ].filter(Boolean)));
+            const targetProject = projects.find(p => p.id === selectedProjectId);
+            const canAccessProject =
+              permissions.isCoordinator ||
+              enrolledIds.includes(selectedProjectId) ||
+              (Array.isArray(targetProject?.coordinatorIds) && targetProject.coordinatorIds.includes(user?.uid));
+
+            if (!canAccessProject) {
+              return (
+                <div className="p-8 sm:p-14 rounded-3xl border text-center max-w-2xl mx-auto my-8 space-y-5 shadow-sm bg-white dark:bg-[#18181b] border-slate-200 dark:border-white/10">
+                  <div className="w-16 h-16 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto">
+                    <Lock size={28} />
+                  </div>
+                  <div className="space-y-2">
+                    <h2 className="text-xl sm:text-2xl font-black tracking-tight text-slate-900 dark:text-white">
+                      Acceso restringido al proyecto
+                    </h2>
+                    <p className="text-xs sm:text-sm max-w-md mx-auto leading-relaxed text-slate-500 dark:text-slate-400">
+                      No estás enrolado en este proyecto. Solo los integrantes asignados o coordinadores pueden visualizar su información y tareas.
+                    </p>
+                  </div>
+                  <div className="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedProjectId(null);
+                        setSelectedTaskId(null);
+                        setView('project-directory');
+                      }}
+                      className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs uppercase tracking-widest shadow-lg shadow-indigo-600/20 transition-all active:scale-95 cursor-pointer"
+                    >
+                      <Briefcase size={16} />
+                      <span>Volver al Directorio de Proyectos</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <ProjectWorkspace
+                projectId={selectedProjectId}
+                project={targetProject}
+                userRole={userRole}
+                currentUser={user}
+                students={studentsWithRecords}
+                initialTaskId={selectedTaskId}
+                onBack={() => {
+                  setSelectedProjectId(null);
+                  setSelectedTaskId(null);
+                  setView('project-directory');
+                }}
+                isDarkMode={isDarkMode}
+                onOpenNotifications={() => setIsNotificationCenterOpen(true)}
+                unreadNotifications={unreadCount}
+              />
+            );
+          })()}
           {view === 'skills' && (
             <SkillsView 
               users={activeEnrolledStudents}
@@ -5210,48 +5538,67 @@ const App = () => {
               isDarkMode={isDarkMode}
             />
           )}
-          {view === 'task-board' && (
-            <TaskWorkspace
-              initialProjectId={selectedProjectId || undefined}
-              projects={projects}
-              students={studentsWithRecords}
-              currentUserId={user?.uid || ''}
-              currentUserName={userProfile ? `${userProfile.firstName || ''} ${userProfile.lastNamePaterno || ''}`.trim() : (user?.displayName || 'Usuario')}
-              currentUserRole={userRole}
-              isDarkMode={isDarkMode}
-              onLogHoursForTask={async (task) => {
-                const currentUid = user?.uid || '';
-                const currentStudent = students.find((s: any) => s.id === currentUid);
-                const studentName = currentStudent?.name || user?.displayName || 'Alumno';
-                const hoursNum = 4;
-                const nowIso = new Date().toISOString();
+          {view === 'task-board' && (() => {
+            const currentStudentObj = getStudentData(currentUserId || user?.uid || '');
+            const enrolledIds = Array.from(new Set<string>([
+              ...(userProfile?.projectIds || []),
+              ...(currentStudentObj?.projectIds || [])
+            ].filter(Boolean)));
+            const accessibleProjects = permissions.isCoordinator
+              ? projects
+              : projects.filter(p =>
+                  enrolledIds.includes(p.id) ||
+                  (Array.isArray(p.coordinatorIds) && p.coordinatorIds.includes(user?.uid))
+                );
 
-                try {
-                  await addDoc(collection(db, 'sesiones'), {
-                    userId: currentUid,
-                    studentId: currentUid,
-                    studentName: studentName,
-                    date: getCDMXDateString(),
-                    startTime: '09:00',
-                    endTime: '13:00',
-                    hours: hoursNum,
-                    horasCalculadas: hoursNum,
-                    categoryId: categories[0]?.id || 'cat-1',
-                    description: `Tarea completada: ${task.title}${task.description ? ' - ' + task.description : ''}`,
-                    projectId: task.projectId,
-                    status: 'A',
-                    estado: userRole === 'user' ? 'pendiente' : 'aprobado',
-                    validationStatus: userRole === 'user' ? 'pendiente' : 'aprobado',
-                    createdAt: nowIso,
-                    createdBy: currentUid
-                  });
-                  toast.success(`Horas de "${task.title}" asentadas exitosamente en tu bitácora`);
-                } catch (err) {
-                  toast.error('Error al asentar horas en la bitácora');
-                }
-              }}
-            />
-          )}
+            return (
+              <TaskWorkspace
+                initialProjectId={selectedProjectId || undefined}
+                projects={accessibleProjects}
+                enrolledProjectIds={enrolledIds}
+                onOpenProjectDirectory={() => {
+                  setSelectedProjectId(null);
+                  setView('project-directory');
+                }}
+                students={studentsWithRecords}
+                currentUserId={user?.uid || ''}
+                currentUserName={userProfile ? `${userProfile.firstName || ''} ${userProfile.lastNamePaterno || ''}`.trim() : (user?.displayName || 'Usuario')}
+                currentUserRole={userRole}
+                isDarkMode={isDarkMode}
+                onLogHoursForTask={async (task) => {
+                  const currentUid = user?.uid || '';
+                  const currentStudent = students.find((s: any) => s.id === currentUid);
+                  const studentName = currentStudent?.name || user?.displayName || 'Alumno';
+                  const hoursNum = 4;
+                  const nowIso = new Date().toISOString();
+
+                  try {
+                    await addDoc(collection(db, 'sesiones'), {
+                      userId: currentUid,
+                      studentId: currentUid,
+                      studentName: studentName,
+                      date: getCDMXDateString(),
+                      startTime: '09:00',
+                      endTime: '13:00',
+                      hours: hoursNum,
+                      horasCalculadas: hoursNum,
+                      categoryId: categories[0]?.id || 'cat-1',
+                      description: `Tarea completada: ${task.title}${task.description ? ' - ' + task.description : ''}`,
+                      projectId: task.projectId,
+                      status: 'A',
+                      estado: userRole === 'user' ? 'pendiente' : 'aprobado',
+                      validationStatus: userRole === 'user' ? 'pendiente' : 'aprobado',
+                      createdAt: nowIso,
+                      createdBy: currentUid
+                    });
+                    toast.success(`Horas de "${task.title}" asentadas exitosamente en tu bitácora`);
+                  } catch (err) {
+                    toast.error('Error al asentar horas en la bitácora');
+                  }
+                }}
+              />
+            );
+          })()}
           {view === 'session' && (
             permissions.isCoordinator ? (
               <SessionWorkspace
@@ -5260,6 +5607,12 @@ const App = () => {
                 categories={categories}
                 userRole={userRole}
                 currentUser={user}
+                initialProjectId={selectedProjectId || undefined}
+                onOpenProjectDirectory={() => setView('project-directory')}
+                onOpenProjectWorkspace={(projectId: string) => {
+                  setSelectedProjectId(projectId);
+                  setView('project-workspace');
+                }}
                 onBack={() => setView('dashboard')}
                 isDarkMode={isDarkMode}
               />
@@ -6111,11 +6464,15 @@ const App = () => {
                                    <span className={`font-black text-[9px] sm:text-[10px] uppercase tracking-tight ${isDarkMode ? 'text-emerald-400' : 'text-emerald-700'}`}>Habilidades</span>
                                  </div>
                                  <div className="flex flex-wrap gap-1 pl-1">
-                                   {student.skills.map((skill: any, i: number) => (
-                                     <span key={`${typeof skill === 'string' ? skill : (skill.id || skill.name || 'skill')}-${i}`} className={`text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-lg border shadow-sm ${isDarkMode ? 'text-emerald-400 bg-black/20 border-emerald-500/30' : 'text-emerald-800 bg-white border-emerald-100'}`}>
-                                       {typeof skill === 'string' ? skill : (skill.name || skill.id || 'Skill')}
-                                     </span>
-                                   ))}
+                                   {student.skills.map((skill: any, i: number) => {
+                                     const label = formatSkillLabel(skill);
+                                     if (!label) return null;
+                                     return (
+                                       <span key={`${label}-${i}`} className={`text-[8px] sm:text-[9px] font-bold px-1.5 py-0.5 rounded-lg border shadow-sm ${isDarkMode ? 'text-emerald-400 bg-black/20 border-emerald-500/30' : 'text-emerald-800 bg-white border-emerald-100'}`}>
+                                         {label}
+                                       </span>
+                                     );
+                                   })}
                                  </div>
                                </div>
                              )}
@@ -6406,9 +6763,13 @@ const App = () => {
                                 <div className={`w-8 h-1 ${isDarkMode ? 'bg-emerald-500/40' : 'bg-emerald-100'}`}></div> Habilidades
                             </div>
                             <div className="flex flex-wrap gap-2 sm:gap-3">
-                                {(selectedStudent.skills || []).map((skill: string, i: number) => (
-                                    <span key={`${skill}-${i}`} className={`px-4 py-2 rounded-xl text-[10px] sm:text-[11px] font-black uppercase shadow-sm border ${isDarkMode ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-emerald-50 text-emerald-700 border-emerald-100'}`}>{skill}</span>
-                                ))}
+                                {(selectedStudent.skills || []).map((skill: any, i: number) => {
+                                    const label = formatSkillLabel(skill);
+                                    if (!label) return null;
+                                    return (
+                                        <span key={`${label}-${i}`} className={`px-4 py-2 rounded-xl text-[10px] sm:text-[11px] font-black uppercase shadow-sm border ${isDarkMode ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-emerald-50 text-emerald-700 border-emerald-100'}`}>{label}</span>
+                                    );
+                                })}
                                 {(selectedStudent.skills || []).length === 0 && (
                                     <div className={`w-full p-8 text-center border-2 border-dashed rounded-[2rem] font-black uppercase text-[10px] tracking-widest ${isDarkMode ? 'border-emerald-500/10 text-emerald-500/20' : 'border-emerald-50 text-emerald-200'}`}>Sin habilidades registradas</div>
                                 )}
@@ -6543,7 +6904,33 @@ const App = () => {
               {/* Bitácora Histórica */}
               <div className={`rounded-[3rem] sm:rounded-[5rem] border shadow-sm overflow-hidden ${isDarkMode ? 'bg-[#1a1a1a] border-white/10' : 'bg-white border-slate-200'}`}>
                 <div className={`p-6 sm:p-12 border-b font-black flex flex-col gap-6 text-[10px] sm:text-xs uppercase tracking-[0.3em] shadow-sm ${isDarkMode ? 'bg-white/2 border-white/5 text-gray-400' : 'bg-slate-50 border-slate-100 text-slate-500'}`}>
-                   <span className="flex items-center gap-4"><History size={28} className="text-indigo-500" /> Cronología de Sesiones</span>
+                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                     <span className="flex items-center gap-4"><History size={28} className="text-indigo-500" /> Cronología de Sesiones</span>
+                     <div className="relative w-full sm:w-80">
+                       <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={16} />
+                       <input
+                         type="text"
+                         value={bitacoraSearch}
+                         onChange={(e) => setBitacoraSearch(e.target.value)}
+                         placeholder="Buscar por descripción o proyecto..."
+                         className={`w-full pl-11 pr-9 py-3 rounded-2xl border text-xs font-bold normal-case tracking-normal outline-none transition-all ${
+                           isDarkMode
+                             ? 'bg-black/30 border-white/10 text-white placeholder:text-gray-500 focus:border-indigo-500'
+                             : 'bg-white border-slate-200 text-slate-800 placeholder:text-slate-400 focus:border-indigo-400'
+                         }`}
+                       />
+                       {bitacoraSearch && (
+                         <button
+                           type="button"
+                           onClick={() => setBitacoraSearch('')}
+                           className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                           title="Limpiar búsqueda"
+                         >
+                           <X size={14} />
+                         </button>
+                       )}
+                     </div>
+                   </div>
                    <div className="flex items-center gap-4 overflow-x-auto hide-scrollbar snap-x snap-mandatory w-full pb-2">
                      {selectedRecords.length > 0 && (
                        <>
@@ -9279,6 +9666,8 @@ const App = () => {
         clearAll={clearAll}
         isDarkMode={isDarkMode}
       />
+
+      <BackToTopButton isDarkMode={isDarkMode} />
     </ErrorBoundary>
   );
 };

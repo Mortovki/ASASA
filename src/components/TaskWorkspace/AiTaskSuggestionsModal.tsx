@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { X, Sparkles, Check, Plus, Loader2 } from 'lucide-react';
-import { GoogleGenAI, Type } from '@google/genai';
-import { ProjectTask, TaskPriority, TaskStatus } from '../../types/tasks';
+import { ProjectTask, TaskStarPriority, TaskStatus, mapLegacyPriority } from '../../types/tasks';
 import { createTask } from '../../services/taskService';
 import toast from 'react-hot-toast';
 
@@ -18,7 +17,7 @@ interface AiTaskSuggestionsModalProps {
 interface SuggestedTask {
   title: string;
   description: string;
-  priority: TaskPriority;
+  priority: TaskStarPriority;
   groupName: string;
   daysEstimate: number;
   selected: boolean;
@@ -51,48 +50,29 @@ export const AiTaskSuggestionsModal: React.FC<AiTaskSuggestionsModalProps> = ({
     setSuggestions([]);
 
     try {
-      const ai = new GoogleGenAI({});
-      const prompt = `Eres un coordinador experto en proyectos comunitarios, arquitectura, urbanismo y servicio social de la UNAM.
-Genera un listado de entre 4 y 7 tareas claras, operativas y bien estructuradas para el siguiente proyecto:
-Proyecto: "${projectName}"
-Objetivo / Etapa: "${objective}"
-Fase: "${stage}"
-
-Para cada tarea proporciona:
-- title: Nombre conciso y accionable de la tarea (máx 10 palabras)
-- description: Breve descripción de qué debe entregar o realizar el prestador
-- priority: 'baja', 'media' o 'alta'
-- groupName: 'Pendientes' o fase sugerida
-- daysEstimate: Días estimados de duración (ej. 3, 5, 7)`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.ARRAY,
-            description: 'Lista de tareas sugeridas',
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING },
-                description: { type: Type.STRING },
-                priority: { type: Type.STRING, enum: ['baja', 'media', 'alta'] },
-                groupName: { type: Type.STRING },
-                daysEstimate: { type: Type.NUMBER }
-              },
-              required: ['title', 'description', 'priority', 'groupName', 'daysEstimate']
-            }
-          }
-        }
+      const response = await fetch('/api/gemini/task-suggestions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          projectName,
+          objective,
+          stage,
+        }),
       });
 
-      const parsed = JSON.parse(response.text || '[]');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Error del servidor (${response.status})`);
+      }
+
+      const data = await response.json();
+      const parsed = data.tasks || [];
       const formatted: SuggestedTask[] = (parsed || []).map((t: any) => ({
         title: t.title || 'Nueva tarea',
         description: t.description || '',
-        priority: (['baja', 'media', 'alta'].includes(t.priority) ? t.priority : 'media') as TaskPriority,
+        priority: mapLegacyPriority(t.priority),
         groupName: t.groupName || 'Pendientes',
         daysEstimate: Number(t.daysEstimate) || 3,
         selected: true
@@ -134,7 +114,7 @@ Para cada tarea proporciona:
           title: item.title,
           description: item.description,
           assigneeIds: [],
-          status: 'no_iniciado',
+          status: 'todo',
           priority: item.priority,
           startDate: startStr,
           endDate: dueStr,

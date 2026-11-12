@@ -49,26 +49,32 @@ export const useTasks = (projectId: string | null, userRole: string = 'user') =>
 
     setLoading(true);
     const tasksRef = collection(db, 'projects', projectId, 'tasks');
-    
-    // Filter tasks based on role:
-    // Admins see all tasks.
-    // Users see all tasks EXCEPT pending_approval tasks that aren't theirs.
-    // However, Firestore query limitations might make this tricky with a single 'where'.
-    // Let's fetch all and filter in memory for now, or use a better query if possible.
-    // Actually, the requirement says: "El prestador SOLO puede ver sus propias tareas en estado pending_approval"
-    // And "El status 'pending_approval' NUNCA aparece en el Gantt ni en SprintTable" (handled in those components)
-    
-    const q = query(tasksRef, where('deletedAt', '==', null));
+    const rootTasksQuery = query(collection(db, 'tasks'), where('projectId', '==', projectId));
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const tasksData = snapshot.docs.map(doc => ({
-        ...doc.data(),
-        id: doc.id
-      })) as Task[];
-      
-      // Memory filtering for security/privacy as requested
-      // (In a real app, this should be handled by security rules + composite queries)
-      const filteredTasks = dedupeById(tasksData).filter(task => {
+    let subTasksList: Task[] = [];
+    let rootTasksList: Task[] = [];
+
+    const recompute = () => {
+      const mergedMap = new Map<string, Task>();
+      subTasksList.forEach(t => mergedMap.set(t.id, t));
+      rootTasksList.forEach(t => {
+        const existing = mergedMap.get(t.id);
+        if (existing) {
+          mergedMap.set(t.id, {
+            ...existing,
+            ...t,
+            assignedTo: (t as any).assignedTo || (t as any).leadAssigneeId || (t as any).assigneeIds?.[0] || existing.assignedTo
+          });
+        } else {
+          mergedMap.set(t.id, {
+            ...t,
+            assignedTo: (t as any).assignedTo || (t as any).leadAssigneeId || (t as any).assigneeIds?.[0] || ''
+          });
+        }
+      });
+
+      const allActive = Array.from(mergedMap.values()).filter((task: any) => {
+        if (task.isDeleted || task.deletedAt) return false;
         if (task.status === 'pending_approval') {
           return userRole === 'admin' || task.createdBy === auth.currentUser?.uid;
         }
@@ -78,17 +84,35 @@ export const useTasks = (projectId: string | null, userRole: string = 'user') =>
         return true;
       });
 
-      setTasks(filteredTasks);
+      setTasks(dedupeById(allActive));
       setLoading(false);
+    };
+
+    const unsubscribeSub = onSnapshot(tasksRef, (snapshot) => {
+      subTasksList = snapshot.docs.map(d => ({
+        ...d.data(),
+        id: d.id
+      })) as Task[];
+      recompute();
     }, (err) => {
       console.error('Error fetching tasks:', err);
       setError(err);
       setLoading(false);
-      toast.error('Error al sincronizar tareas en tiempo real');
       handleFirestoreError(err, OperationType.GET, `projects/${projectId}/tasks`);
     });
 
-    return () => unsubscribe();
+    const unsubscribeRoot = onSnapshot(rootTasksQuery, (snapshot) => {
+      rootTasksList = snapshot.docs.map(d => ({
+        ...d.data(),
+        id: d.id
+      })) as Task[];
+      recompute();
+    }, () => {});
+
+    return () => {
+      unsubscribeSub();
+      unsubscribeRoot();
+    };
   }, [projectId, userRole]);
 
   useEffect(() => {
@@ -242,6 +266,14 @@ export const useTasks = (projectId: string | null, userRole: string = 'user') =>
       [field]: newValue === undefined ? deleteField() : newValue
     };
 
+    if (field === 'assignedTo') {
+      const ids = newValue ? [newValue] : [];
+      updates.leadAssigneeId = newValue || null;
+      updates.assigneeIds = ids;
+      updates.assignedUsers = ids;
+      updates.assignees = ids;
+    }
+
     if (field === 'status') {
       if (newValue === 'done' && oldValue !== 'done') {
         updates.completedAt = new Date().toISOString();
@@ -250,7 +282,8 @@ export const useTasks = (projectId: string | null, userRole: string = 'user') =>
       }
     }
 
-    batch.update(taskRef, updates);
+    batch.set(taskRef, updates, { merge: true });
+    batch.set(doc(db, 'tasks', taskId), { ...updates, projectId, updatedAt: new Date().toISOString() }, { merge: true });
 
     await logActivity(batch, taskId, {
       type: 'field_update',
@@ -273,7 +306,7 @@ export const useTasks = (projectId: string | null, userRole: string = 'user') =>
 
       const task = tasks.find(t => t.id === taskId);
       if (task) {
-        if (field === 'assignedTo' && newValue && newValue !== oldValue) {
+        if (field === 'assignedTo' && newValue && newValue !== oldValue && newValue !== currentUser.uid) {
           await notifyTaskAssigned(newValue, task, currentUser);
         } else if (field === 'status' && newValue === 'pending_approval' && oldValue !== 'pending_approval') {
           const admins = await getProjectAdmins(projectId);
@@ -311,7 +344,17 @@ export const useTasks = (projectId: string | null, userRole: string = 'user') =>
       });
     }
 
-    batch.update(taskRef, updates);
+    if ('assignedTo' in fieldUpdates) {
+      const assignedVal = fieldUpdates.assignedTo;
+      const ids = assignedVal ? [assignedVal] : [];
+      updates.leadAssigneeId = assignedVal || null;
+      updates.assigneeIds = ids;
+      updates.assignedUsers = ids;
+      updates.assignees = ids;
+    }
+
+    batch.set(taskRef, updates, { merge: true });
+    batch.set(doc(db, 'tasks', taskId), { ...updates, projectId, updatedAt: new Date().toISOString() }, { merge: true });
 
     try {
       await batch.commit();
@@ -325,7 +368,7 @@ export const useTasks = (projectId: string | null, userRole: string = 'user') =>
 
       const task = tasks.find(t => t.id === taskId);
       if (task) {
-        if (fieldUpdates.assignedTo && fieldUpdates.assignedTo !== oldValues.assignedTo) {
+        if (fieldUpdates.assignedTo && fieldUpdates.assignedTo !== oldValues.assignedTo && fieldUpdates.assignedTo !== currentUser.uid) {
           await notifyTaskAssigned(fieldUpdates.assignedTo, task, currentUser);
         }
       }

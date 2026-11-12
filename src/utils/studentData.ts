@@ -1,7 +1,13 @@
 type Data = Record<string, any>;
 
 const text = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
-const uniqueIds = (values: unknown[]): string[] => [...new Set(values.map(text).filter(Boolean))];
+const uniqueIds = (values: unknown[]): string[] => [
+  ...new Set(
+    values
+      .map(text)
+      .filter(v => Boolean(v) && v !== 'undefined' && v !== 'null')
+  )
+];
 
 export function normalizeAttendanceRecord(record: Data): Data {
   const rawStatus = text(record.estado || record.validationStatus || record.validation_status).toLowerCase();
@@ -98,4 +104,20 @@ export function matchesStudentCategories(student: Data, selected: string[], cate
 export function reconcileCategorySelection(selected: string[], previous: string[], current: string[]): string[] {
   const allSelected = previous.length === selected.length && previous.every(id => selected.includes(id));
   return allSelected ? current : selected.filter(id => current.includes(id));
+}
+
+/** Formats a skill that can be a string or an object with { id, level } or { name } into a safe readable label. */
+export function formatSkillLabel(skill: unknown): string {
+  if (typeof skill === 'string') return skill.trim();
+  if (!skill || typeof skill !== 'object') return '';
+  const s = skill as Record<string, any>;
+  if (s.name && typeof s.name === 'string') return s.name.trim();
+  if (s.id && typeof s.id === 'string') {
+    const id = s.id.trim();
+    if (s.level && typeof s.level === 'number') {
+      return `${id} (Nivel ${s.level})`;
+    }
+    return id;
+  }
+  return '';
 }

@@ -12,8 +12,13 @@ export const useNotifications = (userId: string | undefined) => {
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
 
+    let active = true;
     const q = query(
       collection(db, 'users', userId, 'notifications'),
       orderBy('createdAt', 'desc'),
@@ -21,6 +26,7 @@ export const useNotifications = (userId: string | undefined) => {
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (!active) return;
       const notifs = snapshot.docs
         .map(doc => {
           const data = doc.data();
@@ -36,9 +42,15 @@ export const useNotifications = (userId: string | undefined) => {
       
       setNotifications(dedupeById(notifs));
       setUnreadCount(notifs.filter(n => !n.read).length);
+    }, (error) => {
+      if (!active) return;
+      console.warn('Error listening to notifications:', error);
     });
 
-    return () => unsubscribe();
+    return () => {
+      active = false;
+      unsubscribe();
+    };
   }, [userId]);
 
   const grouped = useMemo(() => {

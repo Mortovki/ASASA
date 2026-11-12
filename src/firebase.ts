@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { initializeFirestore, setLogLevel } from "firebase/firestore";
+import { initializeFirestore, memoryLocalCache, memoryLruGarbageCollector, setLogLevel } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 import firebaseConfig from '../firebase-applet-config.json';
 
@@ -12,12 +12,19 @@ googleProvider.setCustomParameters({ prompt: 'select_account' });
 // Avoid noisy logs on transient connection re-negotiations
 setLogLevel('error');
 
-// Use initializeFirestore with experimentalForceLongPolling to ensure rock-solid
-// connectivity in iframe and Cloud Run environments where streaming WebChannels may be interrupted
-const firestoreDatabaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || (firebaseConfig as any).firestoreDatabaseId || 'ai-studio-b67305f5-5703-4b56-b34e-a97c8b8e5544';
-export const db = initializeFirestore(app, {
+// Use initializeFirestore with experimentalForceLongPolling and LRU memoryLocalCache
+// to prevent watch stream target version assertion errors (ID: ca9 / b815) in Firestore 12.x.
+const firestoreDatabaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || (firebaseConfig as any).firestoreDatabaseId;
+const firestoreSettings = {
   experimentalForceLongPolling: true,
-}, firestoreDatabaseId);
+  localCache: memoryLocalCache({
+    garbageCollector: memoryLruGarbageCollector()
+  }),
+};
+
+export const db = firestoreDatabaseId
+  ? initializeFirestore(app, firestoreSettings, firestoreDatabaseId)
+  : initializeFirestore(app, firestoreSettings);
 
 export const storage = getStorage(app);
 

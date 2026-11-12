@@ -10,35 +10,57 @@ export async function createNotification(
   recipientUid: string,
   data: Omit<Notification, 'id' | 'read' | 'readAt' | 'createdAt' | 'userId'>
 ): Promise<void> {
+  if (!recipientUid || !data?.type) return;
   const ref = collection(db, 'users', recipientUid, 'notifications');
+  const safeTaskId = data.taskId ?? null;
   
-  // Evitar duplicados en las últimas 24 horas
-  try {
-    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const q = query(
-      ref,
-      where('type', '==', data.type),
-      where('taskId', '==', data.taskId),
-      where('createdAt', '>', oneDayAgo)
-    );
-    
-    const snapshot = await getDocs(q);
-    if (!snapshot.empty) {
-      return; // Ya existe una notificación similar reciente
+  // Evitar duplicados en las últimas 24 horas (excepto en asignaciones directas de tareas)
+  if (data.type !== 'task_assigned') {
+    try {
+      const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const q = safeTaskId
+        ? query(
+            ref,
+            where('type', '==', data.type),
+            where('taskId', '==', safeTaskId),
+            where('createdAt', '>', oneDayAgo)
+          )
+        : query(
+            ref,
+            where('type', '==', data.type),
+            where('createdAt', '>', oneDayAgo)
+          );
+      
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        return; // Ya existe una notificación similar reciente
+      }
+    } catch (error) {
+      // Si no tenemos permiso para leer (ej: un usuario notificando a un admin), 
+      // simplemente procedemos con la creación sin el check de duplicados.
+      console.warn("No se pudo verificar duplicados de notificación (permisos insuficientes), procediendo...");
     }
-  } catch (error) {
-    // Si no tenemos permiso para leer (ej: un usuario notificando a un admin), 
-    // simplemente procedemos con la creación sin el check de duplicados.
-    console.warn("No se pudo verificar duplicados de notificación (permisos insuficientes), procediendo...");
   }
 
-  await addDoc(ref, {
-    ...data,
-    userId: recipientUid,
-    read: false,
-    readAt: null,
-    createdAt: new Date().toISOString(),
-  });
+  const sanitizedData = Object.fromEntries(
+    Object.entries({
+      ...data,
+      projectId: data.projectId ?? null,
+      projectName: data.projectName ?? null,
+      taskId: safeTaskId,
+      taskTitle: data.taskTitle ?? null,
+      triggeredBy: data.triggeredBy ?? 'system',
+      triggeredByName: data.triggeredByName ?? 'Sistema',
+      priority: data.priority ?? 'medium',
+      actionUrl: data.actionUrl ?? null,
+      userId: recipientUid,
+      read: false,
+      readAt: null,
+      createdAt: new Date().toISOString(),
+    }).filter(([_, v]) => v !== undefined)
+  );
+
+  await addDoc(ref, sanitizedData);
 }
 
 export async function getProjectAdmins(projectId: string) {
@@ -116,18 +138,28 @@ export async function notifyTaskAssigned(
   task: any,
   assignedBy: any
 ) {
+  const senderUid = assignedBy?.uid || assignedBy?.id || 'system';
+  // Excepción: No enviar notificación cuando el mismo coordinador/usuario se asigna a sí mismo
+  if (!recipientUid || recipientUid === senderUid || recipientUid.startsWith('u-')) {
+    return;
+  }
+
+  const senderName = assignedBy?.firstName
+    ? formatName(assignedBy.firstName, assignedBy.lastNamePaterno)
+    : (assignedBy?.name || assignedBy?.displayName || 'Coordinación');
+
   await createNotification(recipientUid, {
     type: 'task_assigned',
     title: 'Nueva tarea asignada',
-    message: `${formatName(assignedBy.firstName, assignedBy.lastNamePaterno)} te asignó la tarea "${task.title}"${task.projectName ? ` en ${task.projectName}` : ''}`,
-    projectId: task.projectId,
+    message: `${senderName} te asignó la tarea "${task.title || 'Sin título'}"${task.projectName ? ` en ${task.projectName}` : ''}`,
+    projectId: task.projectId ?? null,
     projectName: task.projectName ?? null,
     taskId: task.id,
-    taskTitle: task.title,
-    triggeredBy: assignedBy.uid,
-    triggeredByName: formatName(assignedBy.firstName, assignedBy.lastNamePaterno),
+    taskTitle: task.title || 'Tarea',
+    triggeredBy: senderUid,
+    triggeredByName: senderName,
     priority: 'medium',
-    actionUrl: `/project/${task.projectId}?tab=kanban&taskId=${task.id}`,
+    actionUrl: task.projectId ? `/project/${task.projectId}?tab=kanban&taskId=${task.id}` : null,
   });
 }
 

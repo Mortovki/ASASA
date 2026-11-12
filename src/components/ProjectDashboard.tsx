@@ -27,15 +27,37 @@ const STATUS_LABELS: Record<string, string> = {
   done: 'Completado',
 };
 
-const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, userRole }: any) => {
+interface ProjectDashboardProps {
+  tasks: any[];
+  projectId: string;
+  project: any;
+  students: any[];
+  isDarkMode: boolean;
+  userRole: string;
+  onNavigateToTasks?: (filter: { stageId?: string; status?: string; assigneeId?: string; isCritical?: boolean }) => void;
+  onNavigateToPlanning?: (tool: 'sprints' | 'stages' | 'cpm' | 'gantt') => void;
+}
+
+const ProjectDashboard = ({ 
+  tasks, 
+  projectId, 
+  project, 
+  students, 
+  isDarkMode, 
+  userRole,
+  onNavigateToTasks,
+  onNavigateToPlanning
+}: ProjectDashboardProps) => {
   const [selectedStageId, setSelectedStageId] = useState<string>(
     project?.stages?.[project?.currentStageIndex || 0]?.id || 'all'
   );
+  const [workloadUnit, setWorkloadUnit] = useState<'tasks' | 'hours' | 'points'>('tasks');
   const [projectNotes, setProjectNotes] = useState<any[]>([]);
 
   useEffect(() => {
     if (!projectId) return;
 
+    let isCancelled = false;
     let unsubscribeFallback: (() => void) | null = null;
 
     // Fetch all notes for this project using collectionGroup
@@ -48,25 +70,33 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
     );
 
     const unsubscribe = onSnapshot(notesQuery, (snapshot) => {
+      if (isCancelled) return;
       const notesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setProjectNotes(dedupeById(notesData));
     }, (error) => {
       console.error("Error fetching project notes:", error);
-      // Fallback: fetch without ordering if index is missing
-      const fallbackQuery = query(
-        collectionGroup(db, 'notes'),
-        where('projectId', '==', projectId)
-      );
-      unsubscribeFallback = onSnapshot(fallbackQuery, (snapshot) => {
-        const notesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        const sorted = notesData.sort((a: any, b: any) => 
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        ).slice(0, 50);
-        setProjectNotes(dedupeById(sorted));
-      });
+      // Defer fallback registration out of onWatchStreamChange target iteration
+      setTimeout(() => {
+        if (isCancelled) return;
+        const fallbackQuery = query(
+          collectionGroup(db, 'notes'),
+          where('projectId', '==', projectId)
+        );
+        unsubscribeFallback = onSnapshot(fallbackQuery, (snapshot) => {
+          if (isCancelled) return;
+          const notesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          const sorted = notesData.sort((a: any, b: any) => 
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          ).slice(0, 50);
+          setProjectNotes(dedupeById(sorted));
+        }, (fallbackErr) => {
+          console.warn("Error in fallback project notes listener:", fallbackErr);
+        });
+      }, 0);
     });
 
     return () => {
+      isCancelled = true;
       unsubscribe();
       if (unsubscribeFallback) unsubscribeFallback();
     };
@@ -136,6 +166,7 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
       counts[t.status] = (counts[t.status] || 0) + 1;
     });
     return Object.entries(counts).map(([status, count]) => ({
+      statusKey: status,
       name: STATUS_LABELS[status] || status,
       value: count,
       color: STATUS_COLORS[status] || '#94a3b8'
@@ -145,18 +176,26 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
   const userLoadData = useMemo(() => {
     const load: Record<string, number> = {};
     filteredTasks.forEach((t: any) => {
-      if (t.assignedTo && t.status !== 'done') {
-        load[t.assignedTo] = (load[t.assignedTo] || 0) + (t.effort || 1);
+      const assignee = t.assignedTo || (t.assigneeIds && t.assigneeIds[0]);
+      if (assignee && t.status !== 'done') {
+        let valueToAdd = 1;
+        if (workloadUnit === 'points') {
+          valueToAdd = Number(t.estimatedSP) || Number(t.effort) || 1;
+        } else if (workloadUnit === 'hours') {
+          valueToAdd = Number(t.estimatedHours) || Number(t.hours) || 2;
+        }
+        load[assignee] = (load[assignee] || 0) + valueToAdd;
       }
     });
-    return Object.entries(load).map(([uid, effort]) => {
+    return Object.entries(load).map(([uid, val]) => {
       const student = students.find((s: any) => s.id === uid);
       return {
+        userId: uid,
         name: student ? formatName(student.firstName, student.lastNamePaterno) : 'Sin Asignar',
-        esfuerzo: effort
+        esfuerzo: Number(val.toFixed(1))
       };
     }).sort((a, b) => b.esfuerzo - a.esfuerzo);
-  }, [filteredTasks, students]);
+  }, [filteredTasks, students, workloadUnit]);
 
   const burndownData = useMemo(() => {
     const stage = project?.stages?.find((s: any) => s.id === selectedStageId);
@@ -292,42 +331,105 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
         </div>
       </div>
 
-      {/* Metric Cards */}
+      {/* Metric Cards - Interactive Drill-down to Tareas */}
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
-        <div className={`p-4 sm:p-6 rounded-2xl shadow-sm border flex items-center gap-3 sm:gap-4 ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-100'}`}>
-          <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
+        {/* Tareas Card */}
+        <div 
+          onClick={() => onNavigateToTasks?.({ stageId: selectedStageId })}
+          className={`p-4 sm:p-6 rounded-2xl shadow-sm border flex items-center gap-3 sm:gap-4 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] group ${
+            isDarkMode ? 'bg-[#1a1a1a] border-white/5 hover:border-indigo-500/40' : 'bg-white border-slate-100 hover:border-indigo-300'
+          }`}
+          title="Ver tareas en la vista interactiva"
+        >
+          <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+            isDarkMode ? 'bg-indigo-500/10 text-indigo-400 group-hover:bg-indigo-500/20' : 'bg-indigo-50 text-indigo-600 group-hover:bg-indigo-100'
+          }`}>
             <LayoutGrid size={20} className="sm:w-6 sm:h-6" />
           </div>
           <div className="min-w-0">
-            <p className={`text-[10px] font-black uppercase tracking-widest truncate ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Tareas</p>
+            <div className="flex items-center gap-1.5">
+              <p className={`text-[10px] font-black uppercase tracking-widest truncate ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Tareas</p>
+              <ChevronRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity text-indigo-500" />
+            </div>
             <p className={`text-lg sm:text-2xl font-black ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{stats.total}</p>
+            <p className="text-[10px] text-slate-400 font-medium">En este alcance</p>
           </div>
         </div>
-        <div className={`p-4 sm:p-6 rounded-2xl shadow-sm border flex items-center gap-3 sm:gap-4 ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-100'}`}>
-          <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+
+        {/* Progreso Card */}
+        <div 
+          onClick={() => onNavigateToTasks?.({ stageId: selectedStageId, status: 'done' })}
+          className={`p-4 sm:p-6 rounded-2xl shadow-sm border flex items-center gap-3 sm:gap-4 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] group ${
+            isDarkMode ? 'bg-[#1a1a1a] border-white/5 hover:border-emerald-500/40' : 'bg-white border-slate-100 hover:border-emerald-300'
+          }`}
+          title="Ver tareas finalizadas"
+        >
+          <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+            isDarkMode ? 'bg-emerald-500/10 text-emerald-400 group-hover:bg-emerald-500/20' : 'bg-emerald-50 text-emerald-600 group-hover:bg-emerald-100'
+          }`}>
             <CheckCircle2 size={20} className="sm:w-6 sm:h-6" />
           </div>
           <div className="min-w-0">
-            <p className={`text-[10px] font-black uppercase tracking-widest truncate ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Progreso</p>
-            <p className={`text-lg sm:text-2xl font-black ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{stats.progress}%</p>
+            <div className="flex items-center gap-1.5">
+              <p className={`text-[10px] font-black uppercase tracking-widest truncate ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Progreso</p>
+              <ChevronRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity text-emerald-500" />
+            </div>
+            {stats.total > 0 ? (
+              <>
+                <p className={`text-lg sm:text-2xl font-black ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{stats.progress}%</p>
+                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold">{stats.done} de {stats.total} finalizadas</p>
+              </>
+            ) : (
+              <p className="text-xs font-bold text-slate-400 italic">Sin tareas para calcular</p>
+            )}
           </div>
         </div>
-        <div className={`p-4 sm:p-6 rounded-2xl shadow-sm border flex items-center gap-3 sm:gap-4 ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-100'}`}>
-          <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-amber-500/10 text-amber-400' : 'bg-amber-50 text-amber-600'}`}>
+
+        {/* Puntos de Esfuerzo Card */}
+        <div 
+          onClick={() => onNavigateToTasks?.({ stageId: selectedStageId })}
+          className={`p-4 sm:p-6 rounded-2xl shadow-sm border flex items-center gap-3 sm:gap-4 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] group ${
+            isDarkMode ? 'bg-[#1a1a1a] border-white/5 hover:border-amber-500/40' : 'bg-white border-slate-100 hover:border-amber-300'
+          }`}
+          title="Ver estimación de puntos de historia"
+        >
+          <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+            isDarkMode ? 'bg-amber-500/10 text-amber-400 group-hover:bg-amber-500/20' : 'bg-amber-50 text-amber-600 group-hover:bg-amber-100'
+          }`}>
             <Target size={20} className="sm:w-6 sm:h-6" />
           </div>
           <div className="min-w-0">
-            <p className={`text-[10px] font-black uppercase tracking-widest truncate ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Puntos</p>
-            <p className={`text-lg sm:text-2xl font-black truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{stats.doneSP}/{stats.totalSP}</p>
+            <div className="flex items-center gap-1.5">
+              <p className={`text-[10px] font-black uppercase tracking-widest truncate ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Puntos (Story Points)</p>
+              <ChevronRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity text-amber-500" />
+            </div>
+            <p className={`text-lg sm:text-2xl font-black truncate ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>
+              {stats.doneSP} / {stats.totalSP}
+            </p>
+            <p className="text-[10px] text-slate-400 font-medium">Completados / Totales</p>
           </div>
         </div>
-        <div className={`p-4 sm:p-6 rounded-2xl shadow-sm border flex items-center gap-3 sm:gap-4 ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-100'}`}>
-          <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 ${isDarkMode ? 'bg-red-500/10 text-red-400' : 'bg-red-50 text-red-600'}`}>
+
+        {/* Críticas Card */}
+        <div 
+          onClick={() => onNavigateToTasks?.({ stageId: selectedStageId, isCritical: true })}
+          className={`p-4 sm:p-6 rounded-2xl shadow-sm border flex items-center gap-3 sm:gap-4 cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] group ${
+            isDarkMode ? 'bg-[#1a1a1a] border-white/5 hover:border-rose-500/40' : 'bg-white border-slate-100 hover:border-rose-300'
+          }`}
+          title="Ver tareas críticas en ruta de dependencias"
+        >
+          <div className={`w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center shrink-0 transition-colors ${
+            isDarkMode ? 'bg-red-500/10 text-red-400 group-hover:bg-red-500/20' : 'bg-red-50 text-red-600 group-hover:bg-red-100'
+          }`}>
             <AlertTriangle size={20} className="sm:w-6 sm:h-6" />
           </div>
           <div className="min-w-0">
-            <p className={`text-[10px] font-black uppercase tracking-widest truncate ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Críticas</p>
+            <div className="flex items-center gap-1.5">
+              <p className={`text-[10px] font-black uppercase tracking-widest truncate ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Ruta Crítica</p>
+              <ChevronRight size={12} className="opacity-0 group-hover:opacity-100 transition-opacity text-rose-500" />
+            </div>
             <p className={`text-lg sm:text-2xl font-black ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>{stats.critical}</p>
+            <p className="text-[10px] text-slate-400 font-medium">Sin holgura (Riesgo)</p>
           </div>
         </div>
       </div>
@@ -340,85 +442,177 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
               <PieChartIcon size={18} className="text-indigo-500" />
               <h3 className={`text-lg font-black ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Estado de Tareas</h3>
             </div>
-            <div className={`text-xs font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Distribución</div>
+            <div className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
+              Clic para filtrar tareas
+            </div>
           </div>
-          <div className="h-64 flex flex-col">
-            <ChartContainer height={256} minHeight={240} isDarkMode={isDarkMode}>
-              <PieChart>
-                <Pie
-                  data={statusData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={5}
-                  dataKey="value"
-                >
-                  {statusData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: isDarkMode ? '#1a1a1a' : '#fff',
-                    borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
-                    borderRadius: '12px',
-                    color: isDarkMode ? '#fff' : '#000',
-                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                  }}
-                  itemStyle={{ color: isDarkMode ? '#fff' : '#000' }}
-                />
-                <Legend />
-              </PieChart>
-            </ChartContainer>
+          <div className="h-64 flex flex-col justify-center">
+            {statusData.length > 0 ? (
+              <ChartContainer height={256} minHeight={240} isDarkMode={isDarkMode}>
+                <PieChart>
+                  <Pie
+                    data={statusData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={55}
+                    outerRadius={80}
+                    paddingAngle={5}
+                    dataKey="value"
+                    onClick={(entry: any) => {
+                      if (entry && entry.statusKey) {
+                        onNavigateToTasks?.({ stageId: selectedStageId, status: entry.statusKey });
+                      }
+                    }}
+                    cursor="pointer"
+                  >
+                    {statusData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: isDarkMode ? '#1a1a1a' : '#fff',
+                      borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
+                      borderRadius: '12px',
+                      color: isDarkMode ? '#fff' : '#000',
+                      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                    }}
+                    itemStyle={{ color: isDarkMode ? '#fff' : '#000' }}
+                  />
+                  <Legend 
+                    onClick={(entry: any) => {
+                      const matched = statusData.find(s => s.name === entry.value);
+                      if (matched) {
+                        onNavigateToTasks?.({ stageId: selectedStageId, status: matched.statusKey });
+                      }
+                    }}
+                    wrapperStyle={{ cursor: 'pointer' }}
+                  />
+                </PieChart>
+              </ChartContainer>
+            ) : (
+              <div className="text-center py-12 text-slate-400 text-xs font-medium">
+                Sin tareas en esta etapa para mostrar distribución de estados.
+              </div>
+            )}
           </div>
         </div>
 
-        {/* User Load Chart */}
+        {/* User Load Chart with Unit Selector */}
         <div className={`p-6 rounded-2xl shadow-sm border ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-100'}`}>
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
             <div className="flex items-center gap-2">
               <Users size={18} className="text-indigo-500" />
-              <h3 className={`text-lg font-black ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Carga por Usuario</h3>
+              <div>
+                <h3 className={`text-lg font-black ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Carga por Usuario</h3>
+                <p className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
+                  {workloadUnit === 'tasks' ? 'Midiendo número de tareas activas' : workloadUnit === 'hours' ? 'Midiendo horas estimadas' : 'Midiendo Story Points'}
+                </p>
+              </div>
             </div>
-            <div className={`text-xs font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Esfuerzo Activo</div>
+
+            {/* Selector de Unidad */}
+            <div className={`p-1 rounded-xl flex items-center gap-1 border shrink-0 ${
+              isDarkMode ? 'bg-white/5 border-white/10' : 'bg-slate-100 border-slate-200'
+            }`}>
+              <button
+                type="button"
+                onClick={() => setWorkloadUnit('tasks')}
+                className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-lg transition-colors ${
+                  workloadUnit === 'tasks'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Tareas
+              </button>
+              <button
+                type="button"
+                onClick={() => setWorkloadUnit('hours')}
+                className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-lg transition-colors ${
+                  workloadUnit === 'hours'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Horas
+              </button>
+              <button
+                type="button"
+                onClick={() => setWorkloadUnit('points')}
+                className={`px-2.5 py-1 text-[10px] font-black uppercase rounded-lg transition-colors ${
+                  workloadUnit === 'points'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Puntos
+              </button>
+            </div>
           </div>
-          <div className="h-64 flex flex-col">
-            <ChartContainer height={256} minHeight={240} isDarkMode={isDarkMode}>
-              <BarChart data={userLoadData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={isDarkMode ? 'rgba(255,255,255,0.05)' : '#e2e8f0'} />
-                <XAxis type="number" tick={{ fill: isDarkMode ? '#64748b' : '#94a3b8' }} />
-                <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 12, fontWeight: 'bold', fill: isDarkMode ? '#64748b' : '#94a3b8' }} />
-                <Tooltip 
-                  contentStyle={{ 
-                    backgroundColor: isDarkMode ? '#1a1a1a' : '#fff',
-                    borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
-                    borderRadius: '12px',
-                    color: isDarkMode ? '#fff' : '#000',
-                    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
-                  }}
-                  itemStyle={{ color: isDarkMode ? '#fff' : '#000' }}
-                />
-                <Bar dataKey="esfuerzo" fill="#6366f1" radius={[0, 4, 4, 0]} />
-              </BarChart>
-            </ChartContainer>
+
+          <div className="h-64 flex flex-col justify-center">
+            {userLoadData.length > 0 ? (
+              <ChartContainer height={256} minHeight={240} isDarkMode={isDarkMode}>
+                <BarChart data={userLoadData} layout="vertical" margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke={isDarkMode ? 'rgba(255,255,255,0.05)' : '#e2e8f0'} />
+                  <XAxis type="number" tick={{ fill: isDarkMode ? '#64748b' : '#94a3b8' }} />
+                  <YAxis 
+                    dataKey="name" 
+                    type="category" 
+                    width={110} 
+                    tick={{ fontSize: 11, fontWeight: 'bold', fill: isDarkMode ? '#64748b' : '#94a3b8' }} 
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: isDarkMode ? '#1a1a1a' : '#fff',
+                      borderColor: isDarkMode ? 'rgba(255,255,255,0.1)' : '#e2e8f0',
+                      borderRadius: '12px',
+                      color: isDarkMode ? '#fff' : '#000',
+                      boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)'
+                    }}
+                    itemStyle={{ color: isDarkMode ? '#fff' : '#000' }}
+                  />
+                  <Bar 
+                    dataKey="esfuerzo" 
+                    fill="#6366f1" 
+                    radius={[0, 4, 4, 0]} 
+                    cursor="pointer"
+                    onClick={(entry: any) => {
+                      if (entry && entry.userId) {
+                        onNavigateToTasks?.({ stageId: selectedStageId, assigneeId: entry.userId });
+                      }
+                    }}
+                  />
+                </BarChart>
+              </ChartContainer>
+            ) : (
+              <div className="text-center py-12 text-slate-400 text-xs font-medium">
+                Sin prestadores con tareas activas asignadas en esta etapa.
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Burndown Chart */}
       <div className={`p-6 rounded-2xl shadow-sm border ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-100'}`}>
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-6">
           <div className="flex items-center gap-2">
             <Activity size={18} className="text-indigo-500" />
-            <h3 className={`text-lg font-black ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Burndown Chart</h3>
+            <div>
+              <h3 className={`text-lg font-black ${isDarkMode ? 'text-white' : 'text-slate-800'}`}>Burndown Chart</h3>
+              <p className={`text-[10px] font-bold uppercase tracking-wider ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
+                Unidad: Story Points (SP) · Alcance: {selectedStageId === 'all' ? 'Proyecto Completo' : (project?.stages?.find((s: any) => s.id === selectedStageId)?.name || 'Etapa')}
+              </p>
+            </div>
           </div>
           <div className={`flex items-center gap-2 text-xs font-bold uppercase tracking-widest ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>
             <Calendar size={14} />
-            {selectedStageId === 'all' ? 'Proyecto Completo' : 'Etapa Seleccionada'}
+            <span>Evolución ideal vs. restante</span>
           </div>
         </div>
-        <div className="h-72 flex flex-col">
+        <div className="h-72 flex flex-col justify-center">
           {burndownData.length > 0 ? (
             <ChartContainer height={288} minHeight={260} isDarkMode={isDarkMode}>
               <LineChart data={burndownData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
@@ -436,14 +630,18 @@ const ProjectDashboard = ({ tasks, projectId, project, students, isDarkMode, use
                   itemStyle={{ color: isDarkMode ? '#fff' : '#000' }}
                 />
                 <Legend />
-                <Line type="monotone" dataKey="ideal" stroke="#94a3b8" strokeDasharray="5 5" name="Ideal" dot={false} />
-                <Line type="monotone" dataKey="actual" stroke="#3b82f6" strokeWidth={3} name="Restante" dot={{ r: 4 }} />
+                <Line type="monotone" dataKey="ideal" stroke="#94a3b8" strokeDasharray="5 5" name="Ritmo Ideal" dot={false} />
+                <Line type="monotone" dataKey="actual" stroke="#3b82f6" strokeWidth={3} name="Restante Real" dot={{ r: 4 }} />
               </LineChart>
             </ChartContainer>
           ) : (
-            <div className={`flex flex-col items-center justify-center h-full font-medium gap-2 ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>
-              <Clock size={48} className="opacity-20" />
-              <p>Selecciona una etapa para ver el burndown detallado.</p>
+            <div className={`flex flex-col items-center justify-center h-full font-medium gap-2 py-12 ${isDarkMode ? 'text-gray-600' : 'text-slate-400'}`}>
+              <Clock size={40} className="opacity-20" />
+              <p className="text-xs">
+                {selectedStageId === 'all' 
+                  ? 'Selecciona una etapa específica arriba para calcular la curva de burndown con sus fechas de inicio y fin.' 
+                  : 'Esta etapa no cuenta con fechas de inicio y fin configuradas o no tiene tareas con Story Points.'}
+              </p>
             </div>
           )}
         </div>

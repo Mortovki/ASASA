@@ -5,6 +5,7 @@ import { doc, setDoc } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 import { handleFirestoreError, OperationType } from '../firebase';
 import { usePermissions } from '../hooks/usePermissions';
+import { formatSkillLabel } from '../utils/studentData';
 
 interface UserProfile {
   id: string;
@@ -70,7 +71,7 @@ const SkillsView = ({ users, currentUserRole, currentUserId, projects, isDarkMod
 
   const handleStartEdit = (user: UserProfile) => {
     setEditingUserId(user.id);
-    setEditingSkills(user.skills.map((s: any) => typeof s === 'string' ? s : (s.name || s.id || JSON.stringify(s))));
+    setEditingSkills(user.skills.map((s: any) => formatSkillLabel(s)).filter(Boolean));
   };
 
   const handleSaveSkills = async (user: UserProfile) => {
@@ -215,7 +216,8 @@ const SkillsView = ({ users, currentUserRole, currentUserId, projects, isDarkMod
                   ) : (
                     <>
                       {user.skills.length > 0 ? user.skills.map((skill: any, idx: number) => {
-                        const skillName = typeof skill === 'string' ? skill : (skill.name || skill.id || JSON.stringify(skill));
+                        const skillName = formatSkillLabel(skill);
+                        if (!skillName) return null;
                         return (
                           <span key={`${skillName}-${idx}`} className={`border px-3 py-1 rounded-lg text-[10px] font-black uppercase shadow-sm flex items-center gap-1.5 ${isDarkMode ? 'bg-white/5 border-white/5 text-gray-300' : 'bg-white border-slate-200 text-slate-600'}`}>
                             <Tag size={10} className="text-indigo-400" /> {skillName}

@@ -2,13 +2,13 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Folder, FileText, ExternalLink, Plus, Edit2, Save, Trash2, X, PlayCircle, ChevronRight, Search, MoreHorizontal, Copy, Download, Pencil, AlertTriangle, Sparkles, Layers, Play } from 'lucide-react';
 import { ConfirmModal } from './ui/ConfirmModal';
 import { db } from '../firebase';
-import { doc, setDoc, collection, getDocs, collectionGroup } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs, collectionGroup, onSnapshot } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 import { motion, AnimatePresence } from 'motion/react';
 import { useBreakpoint } from '../hooks/useBreakpoint';
 import { handleFirestoreError, OperationType } from '../firebase';
 
-const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, userProfile, onUpdateProfile, onOpenWorkspace, onDeleteProject, isDarkMode }: any) => {
+const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, userProfile, onUpdateProfile, onOpenWorkspace, onStartSession, onDeleteProject, isDarkMode }: any) => {
   const [editingProjectId, setEditingProjectId] = useState<string | null>(null);
   const [editData, setEditData] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -20,27 +20,58 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
   const { isMobile, isTablet } = useBreakpoint();
 
   useEffect(() => {
-    const fetchTasks = async () => {
+    let rootTasksMap: Record<string, any> = {};
+    let groupTasksMap: Record<string, any> = {};
+
+    const recomputeTasksByProject = () => {
+      const combined = { ...groupTasksMap, ...rootTasksMap };
+      const tasksByProject: { [key: string]: any[] } = {};
+      Object.values(combined).forEach((task: any) => {
+        const projectId = task.projectId;
+        if (projectId) {
+          if (!tasksByProject[projectId]) {
+            tasksByProject[projectId] = [];
+          }
+          tasksByProject[projectId].push(task);
+        }
+      });
+      setProjectTasks(tasksByProject);
+    };
+
+    const unsubRoot = onSnapshot(
+      collection(db, 'tasks'),
+      (snap) => {
+        const next: Record<string, any> = {};
+        snap.forEach((d) => {
+          next[d.id] = { id: d.id, ...d.data() };
+        });
+        rootTasksMap = next;
+        recomputeTasksByProject();
+      },
+      (error) => {
+        console.error("Error listening to root tasks:", error);
+      }
+    );
+
+    const fetchSubcollectionTasks = async () => {
       try {
         const tasksSnapshot = await getDocs(collectionGroup(db, 'tasks'));
-        const tasksByProject: { [key: string]: any[] } = {};
-        tasksSnapshot.forEach(doc => {
-          const task = doc.data();
-          const projectId = task.projectId;
-          if (projectId) {
-            if (!tasksByProject[projectId]) {
-              tasksByProject[projectId] = [];
-            }
-            tasksByProject[projectId].push(task);
-          }
+        const next: Record<string, any> = {};
+        tasksSnapshot.forEach(d => {
+          next[d.id] = { id: d.id, ...d.data() };
         });
-        setProjectTasks(tasksByProject);
+        groupTasksMap = next;
+        recomputeTasksByProject();
       } catch (error) {
         console.error("Error fetching tasks for projects:", error);
         handleFirestoreError(error, OperationType.GET, 'collectionGroup/tasks');
       }
     };
-    fetchTasks();
+    fetchSubcollectionTasks();
+
+    return () => {
+      unsubRoot();
+    };
   }, []);
 
   useEffect(() => {
@@ -61,12 +92,14 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
 
   const enrolledProjectIds = userProfile?.projectIds || [];
   const isCoordinatorRole = 
-    userRole === 'admin' || 
-    userRole === 'master_coordinator' || 
-    userRole === 'super_coordinator' || 
-    userRole === 'coordinator' || 
-    userRole === 'student_coordinator' ||
-    Boolean(userProfile?.role && ['admin', 'master_coordinator', 'super_coordinator', 'coordinator', 'student_coordinator'].includes(userProfile.role));
+    userRole !== 'user' && (
+      userRole === 'admin' || 
+      userRole === 'master_coordinator' || 
+      userRole === 'super_coordinator' || 
+      userRole === 'coordinator' || 
+      userRole === 'student_coordinator' ||
+      Boolean(userProfile?.role && ['admin', 'master_coordinator', 'super_coordinator', 'coordinator', 'student_coordinator'].includes(userProfile.role))
+    );
 
   // Filtrar únicamente los documentos donde isDeleted no sea verdadero (excluir isDeleted === true)
   // Para todos los tipos de coordinadores, se muestran todos los proyectos activos
@@ -118,7 +151,6 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
     } catch (error) {
       console.error("Error updating project:", error);
       toast.error('Error al actualizar proyecto');
-      const { handleFirestoreError, OperationType } = await import('../firebase');
       handleFirestoreError(error, OperationType.UPDATE, `projects/${editingProjectId}`);
     }
   };
@@ -126,6 +158,10 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
   const [isLoadingExample, setIsLoadingExample] = useState(false);
 
   const loadExampleProject = async () => {
+    if (!isCoordinatorRole) {
+      toast.error('Esta función solo está disponible para coordinadores');
+      return;
+    }
     setIsLoadingExample(true);
     const toastId = toast.loading('Cargando proyecto completo de 6 fases...');
     try {
@@ -171,14 +207,16 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
               className={`w-full pl-12 pr-4 py-3 border rounded-2xl focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none text-sm font-bold transition-all ${isDarkMode ? 'bg-white/5 border-white/10 text-white placeholder:text-gray-600' : 'bg-white border-slate-200 text-slate-900 shadow-sm'}`}
             />
           </div>
-          <button 
-            onClick={loadExampleProject}
-            disabled={isLoadingExample}
-            className="w-full sm:w-auto bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white px-5 py-3 rounded-2xl flex items-center justify-center gap-2 font-black text-[10px] sm:text-xs uppercase tracking-widest shadow-xl shadow-indigo-600/30 transition-all active:scale-95 whitespace-nowrap disabled:opacity-50"
-            title="Cargar proyecto completo de 6 fases con interdependencias, barras resumen en Gantt y ruta crítica"
-          >
-            <Sparkles size={18} /> <span>Cargar Ejemplo (6 Fases)</span>
-          </button>
+          {isCoordinatorRole && (
+            <button 
+              onClick={loadExampleProject}
+              disabled={isLoadingExample}
+              className="w-full sm:w-auto bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white px-5 py-3 rounded-2xl flex items-center justify-center gap-2 font-black text-[10px] sm:text-xs uppercase tracking-widest shadow-xl shadow-indigo-600/30 transition-all active:scale-95 whitespace-nowrap disabled:opacity-50"
+              title="Cargar proyecto completo de 6 fases con interdependencias, barras resumen en Gantt y ruta crítica"
+            >
+              <Sparkles size={18} /> <span>Cargar Ejemplo (6 Fases)</span>
+            </button>
+          )}
           {isCoordinatorRole && (
             <button 
               onClick={() => {
@@ -206,34 +244,36 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
         </div>
       </div>
 
-      {/* Banner destacado para visualizar interdependencia de fases */}
-      <div className={`p-4 sm:p-5 rounded-3xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${isDarkMode ? 'bg-gradient-to-r from-indigo-950/40 via-purple-950/20 to-slate-900 border-indigo-500/20' : 'bg-gradient-to-r from-indigo-50 via-purple-50 to-blue-50 border-indigo-200/70 shadow-sm'}`}>
-        <div className="flex items-start sm:items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/30">
-            <Layers size={24} />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className={`text-sm sm:text-base font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
-                Proyecto de Ejemplo: Complejo Bioclimático y Regeneración Urbana
-              </h3>
-              <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-500/10 text-indigo-500 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
-                6 Fases Interdependientes • CPM • Gantt
-              </span>
+      {/* Banner destacado para visualizar interdependencia de fases (Exclusivo para Coordinadores) */}
+      {isCoordinatorRole && (
+        <div className={`p-4 sm:p-5 rounded-3xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 ${isDarkMode ? 'bg-gradient-to-r from-indigo-950/40 via-purple-950/20 to-slate-900 border-indigo-500/20' : 'bg-gradient-to-r from-indigo-50 via-purple-50 to-blue-50 border-indigo-200/70 shadow-sm'}`}>
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-indigo-500/30">
+              <Layers size={24} />
             </div>
-            <p className={`text-xs mt-1 max-w-3xl ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
-              Demuestra la interdependencia total entre fases: desde estudios preliminares hasta certificación y entrega. Incluye barras resumen en Gantt, cálculo de Ruta Crítica (CPM) de etapas y tareas, y holguras.
-            </p>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className={`text-sm sm:text-base font-black ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                  Proyecto de Ejemplo: Complejo Bioclimático y Regeneración Urbana
+                </h3>
+                <span className="text-[10px] font-black uppercase tracking-wider bg-indigo-500/10 text-indigo-500 px-2.5 py-0.5 rounded-full border border-indigo-500/20">
+                  6 Fases Interdependientes • CPM • Gantt
+                </span>
+              </div>
+              <p className={`text-xs mt-1 max-w-3xl ${isDarkMode ? 'text-slate-400' : 'text-slate-600'}`}>
+                Demuestra la interdependencia total entre fases: desde estudios preliminares hasta certificación y entrega. Incluye barras resumen en Gantt, cálculo de Ruta Crítica (CPM) de etapas y tareas, y holguras.
+              </p>
+            </div>
           </div>
+          <button
+            onClick={loadExampleProject}
+            disabled={isLoadingExample}
+            className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/20 transition-all active:scale-95 shrink-0 whitespace-nowrap disabled:opacity-50"
+          >
+            <Play size={16} /> Cargar Proyecto Completo
+          </button>
         </div>
-        <button
-          onClick={loadExampleProject}
-          disabled={isLoadingExample}
-          className="w-full md:w-auto bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-3 rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-widest flex items-center justify-center gap-2 shadow-xl shadow-indigo-600/20 transition-all active:scale-95 shrink-0 whitespace-nowrap disabled:opacity-50"
-        >
-          <Play size={16} /> Cargar Proyecto Completo
-        </button>
-      </div>
+      )}
       {displayProjects.length === 0 ? (
         <div className={`text-center py-10 rounded-2xl border ${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-white border-slate-100'}`}>
           <p className={`font-medium ${isDarkMode ? 'text-gray-500' : 'text-slate-500'}`}>
@@ -394,6 +434,19 @@ const ProjectDirectory = ({ projects, setProjects, userRole, selectedProjectId, 
                       Espacio de Trabajo 
                       <ChevronRight size={16} className="group-hover:translate-x-1 transition-transform" />
                     </button>
+                    {isCoordinatorRole && onStartSession && (
+                      <button
+                        onClick={() => onStartSession(project.id)}
+                        title="Abrir Sesión de Trabajo vinculada a este proyecto"
+                        className={`px-3.5 py-3 rounded-xl font-black text-[10px] sm:text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-1.5 border ${
+                          isDarkMode
+                            ? 'bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border-emerald-500/30'
+                            : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border-emerald-200 shadow-xs'
+                        }`}
+                      >
+                        <PlayCircle size={15} /> Sesión
+                      </button>
+                    )}
                   </div>
                 </>
               )}

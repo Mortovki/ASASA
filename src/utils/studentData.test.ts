@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   normalizeStudentProfiles, mergeStudentRecords, getStudentApprovedHours,
   isStudentFinished, matchesStudentCategories, reconcileCategorySelection,
+  formatSkillLabel,
 } from './studentData';
 
 test('empty and subsequent snapshots never retain sample, cached, or removed profiles', () => {
@@ -95,4 +96,16 @@ test('category updates preserve the all-categories selection and include student
   assert.deepEqual(reconcileCategorySelection(['one'], ['one', 'two'], ['one', 'two', 'three']), ['one']);
   assert.equal(matchesStudentCategories({ records: [] }, ['one'], [{ id: 'one' }, { id: 'two' }]), false);
   assert.equal(matchesStudentCategories({ records: [] }, [], [{ id: 'one' }]), false);
+});
+
+test('formatSkillLabel safely converts string or object skills with id and level into strings', () => {
+  assert.equal(formatSkillLabel('AutoCAD'), 'AutoCAD');
+  assert.equal(formatSkillLabel('  Revit  '), 'Revit');
+  assert.equal(formatSkillLabel({ id: 'arq_ts1', level: 3 }), 'arq_ts1 (Nivel 3)');
+  assert.equal(formatSkillLabel({ id: 'arq_ts2' }), 'arq_ts2');
+  assert.equal(formatSkillLabel({ name: 'Diseño' }), 'Diseño');
+  assert.equal(formatSkillLabel({ name: 'Normativa', level: 2 }), 'Normativa');
+  assert.equal(formatSkillLabel(null), '');
+  assert.equal(formatSkillLabel(undefined), '');
+  assert.equal(formatSkillLabel({}), '');
 });

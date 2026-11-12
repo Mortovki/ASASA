@@ -215,6 +215,12 @@ service cloud.firestore {
       allow create, update, delete: if isAuthenticated() && (request.auth.uid == uid || isAtLeastCoordinator());
     }
 
+    // Active Meetings Collection (Sincronización de reuniones activas por proyecto)
+    match /active_meetings/{meetingId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if canValidateHours();
+    }
+
     // Public Profiles Collection
     match /public_profiles/{uid} {
       allow read: if isAuthenticated();
@@ -251,15 +257,15 @@ service cloud.firestore {
       match /tasks/{taskId} {
         function isValidTask(data) {
           return data.projectId is string &&
-                 data.title is string && data.title.size() > 0 && data.title.size() < 200 &&
-                 data.status in ['pending_approval', 'todo', 'working_on_it', 'waiting_review', 'stuck', 'done', 'rejected'] &&
-                 data.priority in [1, 2, 3, 4, 5];
+                 data.title is string && data.title.size() > 0 && data.title.size() <= 500 &&
+                 data.status in ['pending_approval', 'todo', 'in_progress', 'in_review', 'blocked', 'working_on_it', 'waiting_review', 'stuck', 'done', 'rejected'] &&
+                 data.priority in [0, 1, 2, 3, 4, 5];
         }
 
         function canCreateTask(data) {
           return isAuthenticated() && (
-            isAtLeastCoordinator() || 
-            (isValidTask(data) && data.status == 'pending_approval')
+            canValidateHours() || 
+            (isValidTask(data) && data.status in ['pending_approval', 'todo'])
           );
         }
 

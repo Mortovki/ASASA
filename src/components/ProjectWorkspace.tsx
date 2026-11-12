@@ -1,37 +1,29 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   GanttChartSquare, 
-  Columns, 
   Table2, 
   LayoutDashboard, 
   ArrowLeft, 
-  Activity, 
   RefreshCw, 
-  MoreHorizontal, 
+  CheckCircle2, 
+  Trash2, 
+  GitBranch, 
+  Settings2, 
+  Flag, 
+  Zap, 
+  Layers,
   Link as LinkIcon,
-  ChevronDown,
-  CheckCircle2,
-  Trash2,
-  GitBranch,
-  Columns2,
-  LucideIcon,
-  Settings2,
-  ChevronRight,
-  Flag,
-  Bell,
-  Share2,
-  Search,
-  User,
-  Zap,
-  Layers
+  Calendar,
+  Users,
+  Check,
+  AlertCircle
 } from 'lucide-react';
-import { db } from '../firebase';
+import { db, handleFirestoreError, OperationType } from '../firebase';
 import { doc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { Stage } from '../types/stage';
 import { StageEditor } from './StageEditor';
 import toast from 'react-hot-toast';
 import GanttView from './GanttView';
-import KanbanBoard from './KanbanBoard';
 import SprintTable from './SprintTable';
 import ProjectDashboard from './ProjectDashboard';
 import { CriticalPathAnalysis } from './CriticalPathAnalysis';
@@ -40,35 +32,42 @@ import { ProjectResources } from './ProjectResources';
 import { useTasks } from '../hooks/useTasks';
 import { useSprints } from '../hooks/useSprints';
 import { usePermissions } from '../hooks/usePermissions';
-import { motion, AnimatePresence } from 'motion/react';
-import { useBreakpoint } from '../hooks/useBreakpoint';
-import { BottomSheet } from './ui/BottomSheet';
 import { SprintConfigModal } from './sprints/SprintConfigModal';
 import { TaskWorkspace } from './TaskWorkspace/TaskWorkspace';
 
-interface Tab {
-  id: string;
-  label: string;
-  shortLabel: string;
-  icon: LucideIcon;
-  adminOnly?: boolean;
-  coordinatorOnly?: boolean;
+type MainTab = 'resumen' | 'tareas' | 'planificacion' | 'recursos' | 'configuracion';
+type PlanningSubTab = 'sprints' | 'stages' | 'cpm' | 'gantt';
+type ConfigSubTab = 'general' | 'stages' | 'trash';
+
+interface TaskDrillFilter {
+  stageId?: string;
+  status?: string;
+  assigneeId?: string;
+  isCritical?: boolean;
 }
 
-const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, students, initialTaskId, isDarkMode, onOpenNotifications, unreadNotifications }: any) => {
+const ProjectWorkspace = ({ 
+  projectId, 
+  project, 
+  userRole, 
+  currentUser, 
+  onBack, 
+  students, 
+  initialTaskId, 
+  isDarkMode 
+}: any) => {
   const [currentProject, setCurrentProject] = useState<any>(project);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(initialTaskId || null);
-  const [selectedAssignee, setSelectedAssignee] = useState<string>('all');
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const [showStageEditor, setShowStageEditor] = useState(false);
+  
+  // 4-level navigation state: Default landing view is 'resumen'
+  const [activeTab, setActiveTab] = useState<MainTab>('resumen');
+  const [planningSubTab, setPlanningSubTab] = useState<PlanningSubTab>('sprints');
+  const [configSubTab, setConfigSubTab] = useState<ConfigSubTab>('general');
   const [showSprintModal, setShowSprintModal] = useState(false);
-  const moreButtonRef = useRef<HTMLButtonElement>(null);
-  const moreMenuRef = useRef<HTMLDivElement>(null);
-  const { isMobile, width, breakpoint } = useBreakpoint();
-  const isTablet = breakpoint === 'tablet';
+  
+  // Drill-down filter passed when clicking KPI/charts in Resumen
+  const [drillFilter, setDrillFilter] = useState<TaskDrillFilter | null>(null);
 
-  const { sprints, loading: sprintsLoading, addSprint, updateSprint, deleteSprint } = useSprints(projectId);
+  const { sprints, addSprint, updateSprint, deleteSprint } = useSprints(projectId);
 
   useEffect(() => {
     if (project) {
@@ -90,63 +89,9 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
 
   useEffect(() => {
     if (initialTaskId) {
-      setActiveTab('kanban');
-      setSelectedTaskId(initialTaskId);
+      setActiveTab('tareas');
     }
   }, [initialTaskId]);
-
-  // Cerrar al hacer clic fuera (solo escritorio/tablet)
-  useEffect(() => {
-    if (isMobile || !moreMenuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (
-        moreMenuRef.current &&
-        !moreMenuRef.current.contains(e.target as Node) &&
-        !moreButtonRef.current?.contains(e.target as Node)
-      ) {
-        setMoreMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [moreMenuOpen, isMobile]);
-
-  // Cerrar al presionar Escape
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMoreMenuOpen(false);
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, []);
-
-  // Navegación por teclado en el menú (solo escritorio/tablet)
-  useEffect(() => {
-    if (!moreMenuOpen || isMobile) return;
-    const handler = (e: KeyboardEvent) => {
-      const menuItems = moreMenuRef.current?.querySelectorAll('[role="menuitem"]') as NodeListOf<HTMLButtonElement>;
-      if (!menuItems?.length) return;
-
-      const currentIndex = Array.from(menuItems).indexOf(document.activeElement as HTMLButtonElement);
-
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        const nextIndex = (currentIndex + 1) % menuItems.length;
-        menuItems[nextIndex].focus();
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        const prevIndex = (currentIndex - 1 + menuItems.length) % menuItems.length;
-        menuItems[prevIndex].focus();
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [moreMenuOpen, isMobile]);
-
-  // Cerrar el menú al cambiar de pestaña
-  useEffect(() => {
-    setMoreMenuOpen(false);
-  }, [activeTab]);
 
   const { 
     tasks, 
@@ -163,12 +108,6 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
   
   const permissions = usePermissions(userRole);
 
-  const filteredTasks = tasks.filter((task: any) => {
-    if (selectedAssignee === 'all') return true;
-    if (selectedAssignee === 'unassigned') return !task.assignedTo;
-    return task.assignedTo === selectedAssignee;
-  });
-
   const handleSaveStages = async (stages: Stage[], startDate?: string | null, endDate?: string | null) => {
     try {
       const projectRef = doc(db, 'projects', projectId);
@@ -181,441 +120,467 @@ const ProjectWorkspace = ({ projectId, project, userRole, currentUser, onBack, s
     } catch (error) {
       console.error("Error updating stages:", error);
       toast.error('Error al actualizar la configuración');
-      const { handleFirestoreError, OperationType } = await import('../firebase');
       handleFirestoreError(error, OperationType.UPDATE, `projects/${projectId}`);
       throw error;
     }
   };
 
-  const handleSetStage = async (index: number) => {
-    if (!permissions.isCoordinator) return;
-    try {
-      const projectRef = doc(db, 'projects', projectId);
-      await updateDoc(projectRef, { currentStageIndex: index });
-      toast.success(`Etapa cambiada a: ${currentProject?.stages?.[index]?.name || ('Etapa ' + (index + 1))}`);
-    } catch (error) {
-      console.error("Error setting stage:", error);
-      toast.error('Error al cambiar de etapa');
-      const { handleFirestoreError, OperationType } = await import('../firebase');
-      handleFirestoreError(error, OperationType.UPDATE, `projects/${projectId}`);
-    }
+  // Callback from Resumen when user clicks a KPI, stage, status, or workload bar
+  const handleDrillDownToTasks = (filter: TaskDrillFilter) => {
+    setDrillFilter(filter);
+    setActiveTab('tareas');
   };
 
-  const ALL_TABS: Tab[] = [
-    { id: 'dashboard', label: 'Dashboard', shortLabel: 'Panel', icon: LayoutDashboard },
-    { id: 'task-workspace', label: 'Tablero Monday', shortLabel: 'Tareas', icon: Layers },
-    { id: 'kanban', label: 'Tablero', shortLabel: 'Tablero', icon: Columns2 },
-    { id: 'gantt', label: 'Gantt', shortLabel: 'Gantt', icon: GanttChartSquare },
-    { id: 'sprints', label: 'Sprints', shortLabel: 'Sprints', icon: Table2 },
-    { id: 'stages', label: 'Etapas', shortLabel: 'Etapas', icon: Flag, coordinatorOnly: true },
-    { id: 'resources', label: 'Recursos', shortLabel: 'Recursos', icon: LinkIcon },
-    { id: 'cpm', label: 'Ruta Crítica', shortLabel: 'Ruta', icon: GitBranch },
-    { id: 'trash', label: 'Papelera', shortLabel: 'Papelera', icon: Trash2, coordinatorOnly: true },
+  // Callback from Resumen to jump directly into planning tools
+  const handleNavigateToPlanning = (tool: 'sprints' | 'stages' | 'cpm' | 'gantt') => {
+    setPlanningSubTab(tool);
+    setActiveTab('planificacion');
+  };
+
+  const MAIN_NAV_ITEMS = [
+    { id: 'resumen', label: 'Resumen', icon: LayoutDashboard },
+    { id: 'tareas', label: 'Tareas', icon: Layers },
+    { id: 'planificacion', label: 'Planificación', icon: Calendar },
+    { id: 'recursos', label: 'Recursos', icon: LinkIcon },
+    { id: 'configuracion', label: 'Configuración', icon: Settings2 },
   ];
 
-  const filteredAllTabs = ALL_TABS.filter(t => !t.coordinatorOnly || permissions.isCoordinator);
-  const visibleTabs = filteredAllTabs.filter(t => t.id !== 'cpm' && t.id !== 'trash' && t.id !== 'stages');
-  const overflowTabs = filteredAllTabs.filter(t => t.id === 'cpm' || t.id === 'trash' || t.id === 'stages');
-
-  const hasOverflow = overflowTabs.length > 0;
-  const activeIsInOverflow = overflowTabs.some(t => t.id === activeTab);
-
-  const [showLeftArrow, setShowLeftArrow] = useState(false);
-  const [showRightArrow, setShowRightArrow] = useState(true);
-  const tabsScrollRef = React.useRef<HTMLDivElement>(null);
-
-  const handleTabsScroll = () => {
-    if (tabsScrollRef.current) {
-      const { scrollLeft, scrollWidth, clientWidth } = tabsScrollRef.current;
-      setShowLeftArrow(scrollLeft > 0);
-      setShowRightArrow(scrollLeft < scrollWidth - clientWidth - 5);
-    }
-  };
-
-  useEffect(() => {
-    const ref = tabsScrollRef.current;
-    if (ref) {
-      ref.addEventListener('scroll', handleTabsScroll);
-      const timeoutId = setTimeout(handleTabsScroll, 100);
-      const resizeObserver = new ResizeObserver(() => handleTabsScroll());
-      resizeObserver.observe(ref);
-
-      return () => {
-        ref.removeEventListener('scroll', handleTabsScroll);
-        clearTimeout(timeoutId);
-        resizeObserver.disconnect();
-      };
-    }
-  }, [filteredAllTabs]);
-
-  const scrollTabs = (direction: 'left' | 'right') => {
-    if (tabsScrollRef.current) {
-      const scrollAmount = 200;
-      tabsScrollRef.current.scrollBy({
-        left: direction === 'left' ? -scrollAmount : scrollAmount,
-        behavior: 'smooth'
-      });
-    }
-  };
-
-  const renderTab = (tab: Tab) => {
-    const Icon = tab.icon;
-    const isActive = activeTab === tab.id;
-    const pendingCount = tab.id === 'kanban' && userRole === 'admin' 
-      ? tasks.filter((t: any) => t.status === 'pending_approval').length 
-      : 0;
-
-    return (
-      <button
-        key={tab.id}
-        onClick={() => {
-          setActiveTab(tab.id);
-          setMoreMenuOpen(false);
-        }}
-        className={`
-          flex items-center gap-2 px-3 sm:px-4 py-2.5 rounded-xl 
-          text-sm font-bold transition-all whitespace-nowrap relative shrink-0 
-          ${isMobile || isTablet ? 'snap-center' : ''} 
-          ${isActive 
-            ? (isDarkMode ? 'bg-white/10 text-white shadow-sm ring-1 ring-white/10' : 'bg-white text-indigo-600 shadow-sm ring-1 ring-slate-200/50') 
-            : (isDarkMode ? 'text-gray-400 hover:text-white hover:bg-white/5' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50')}
-        `}
-        title={isMobile || isTablet ? tab.label : undefined}
-      >
-        <Icon size={18} />
-        {!isMobile && !isTablet && (
-          <span>{tab.label}</span>
-        )}
-        {pendingCount > 0 && (
-          <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[8px] font-black flex items-center justify-center rounded-full border-2 border-white shadow-sm animate-pulse">
-            {pendingCount}
-          </span>
-        )}
-      </button>
-    );
-  };
-
   return (
-    <div className={`flex flex-col h-full ${isDarkMode ? 'bg-[#0a0a0a]' : 'bg-slate-50'}`}>
-      {/* Header Section */}
-      <div className={`border-b z-20 relative shadow-sm ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-200'}`}>
-        {/* Top Row: Project Info */}
-        <div className={`px-4 sm:px-8 py-3 flex flex-col sm:flex-row sm:items-center justify-between border-b gap-3 ${isDarkMode ? 'bg-[#1a1a1a] border-white/5' : 'bg-white border-slate-100'} ${isTablet ? 'h-14' : ''}`}>
-          <div className="flex flex-col gap-3 w-full sm:w-auto">
-            <div className="flex items-center justify-between w-full">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <button onClick={onBack} className={`p-2 rounded-xl transition-colors ${isDarkMode ? 'text-gray-400 hover:text-white hover:bg-white/5' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'}`}>
-                  <ArrowLeft size={18} />
-                </button>
-                <div>
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <h2 className={`font-black tracking-tight truncate ${isDarkMode ? 'text-white' : 'text-slate-900'} ${isTablet ? 'text-lg max-w-[150px]' : 'text-base sm:text-2xl max-w-[140px] sm:max-w-md xl:max-w-xl'}`}>
-                      {currentProject?.name || project?.name || 'Proyecto'}
-                    </h2>
-                    <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border shadow-sm shrink-0 ${isDarkMode ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-green-50 text-green-700 border-green-200/60'}`}>
-                      <motion.div 
-                        animate={{ opacity: [1, 0.4, 1] }}
-                        transition={{ duration: 2, repeat: Infinity }}
-                        className="w-1 h-1 sm:w-1.5 sm:h-1.5 bg-green-500 rounded-full"
-                      />
-                      <span className="text-[8px] sm:text-[9px] font-bold uppercase tracking-widest">En vivo</span>
-                    </div>
-                  </div>
-                  {!isTablet && <p className={`text-[8px] sm:text-[10px] font-bold uppercase tracking-widest mt-0.5 ${isDarkMode ? 'text-gray-500' : 'text-slate-400'}`}>Espacio de Trabajo</p>}
-                </div>
-              </div>
+    <div className={`flex flex-col h-full ${isDarkMode ? 'bg-[#0f172a]' : 'bg-slate-50'}`}>
+      {/* =========================================================================
+          NIVEL 1: Encabezado del Proyecto (Breadcrumbs, Conexión/Guardado, Acciones)
+          ========================================================================= */}
+      <div className={`border-b z-20 relative shrink-0 ${isDarkMode ? 'bg-[#1e293b] border-slate-800' : 'bg-white border-slate-200'}`}>
+        <div className="px-4 sm:px-8 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          {/* Breadcrumbs */}
+          <div className="flex items-center gap-3 min-w-0">
+            <button 
+              onClick={onBack} 
+              className={`p-2 rounded-xl transition-colors shrink-0 ${
+                isDarkMode ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+              title="Volver a Proyectos"
+            >
+              <ArrowLeft size={18} />
+            </button>
+            <div className="flex items-center gap-2 text-xs sm:text-sm font-semibold min-w-0">
+              <button 
+                onClick={onBack} 
+                className="text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors shrink-0"
+              >
+                Proyectos
+              </button>
+              <span className="text-slate-300 dark:text-slate-600 font-normal shrink-0">/</span>
+              <span className={`font-black tracking-tight truncate max-w-xs sm:max-w-md ${isDarkMode ? 'text-white' : 'text-slate-900'}`}>
+                {currentProject?.name || project?.name || 'Proyecto'}
+              </span>
+            </div>
+          </div>
 
-              <div className="flex items-center gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setShowSprintModal(true)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-xl border text-xs font-bold transition-all shadow-xs cursor-pointer ${
-                    isDarkMode 
-                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20' 
-                      : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
-                  }`}
-                  title="Configurar Sprints"
-                >
-                  <Zap size={14} className="text-amber-500 fill-amber-500" />
-                  <span className="text-[11px] font-black">Sprints</span>
-                  {sprints.length > 0 && (
-                    <span className={`text-[9px] px-1 rounded-full font-black ${
-                      isDarkMode ? 'bg-amber-500/20 text-amber-200' : 'bg-amber-200 text-amber-800'
-                    }`}>
-                      {sprints.length}
-                    </span>
-                  )}
-                </button>
-
-                {isMobile && permissions.isCoordinator && (
-                  <button 
-                    onClick={() => setActiveTab('stages')}
-                    className={`p-1.5 transition-colors ${isDarkMode ? 'text-gray-500 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
-                    title="Configuración de Etapas"
-                  >
-                    <Settings2 size={18} />
-                  </button>
-                )}
-              </div>
+          {/* Estado de sincronización y Acciones rápidas */}
+          <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-auto">
+            {/* Indicador de Guardado idéntico al diseño objetivo de Tareas */}
+            <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold shadow-xs ${
+              isDarkMode 
+                ? 'bg-emerald-950/60 text-emerald-400 border border-emerald-800/80' 
+                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+            }`}>
+              <CheckCircle2 size={14} className="text-emerald-500" />
+              <span>Guardado</span>
             </div>
 
-            {/* Mobile Assignee Selector - Specifically for Kanban/Sprints */}
-            {isMobile && (activeTab === 'kanban' || activeTab === 'sprints') && (
-              <div className="relative flex items-center w-full">
-                <select
-                  value={selectedAssignee}
-                  onChange={(e) => setSelectedAssignee(e.target.value)}
-                  className={`appearance-none pl-8 pr-8 py-2 text-xs font-medium rounded-xl border shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/50 w-full ${
-                    isDarkMode 
-                      ? 'bg-[#2a2a2a] border-white/10 text-white hover:bg-[#333]' 
-                      : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+            {/* Botón de configuración de Sprints */}
+            <button
+              type="button"
+              onClick={() => setShowSprintModal(true)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-xs cursor-pointer ${
+                isDarkMode 
+                  ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20' 
+                  : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+              }`}
+              title="Configuración de Ciclos y Sprints"
+            >
+              <Zap size={14} className="text-amber-500 fill-amber-500" />
+              <span>Sprints</span>
+              {sprints.length > 0 && (
+                <span className={`text-[10px] px-1.5 rounded-full font-black ${
+                  isDarkMode ? 'bg-amber-500/20 text-amber-200' : 'bg-amber-200 text-amber-800'
+                }`}>
+                  {sprints.length}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* =========================================================================
+            NIVEL 2: Navegación Principal (Resumen · Tareas · Planificación · Recursos · Configuración)
+            ========================================================================= */}
+        <div className="px-4 sm:px-8 flex items-center border-t border-slate-100 dark:border-slate-800/80 overflow-x-auto hide-scrollbar">
+          <div className="flex items-center gap-6 sm:gap-8">
+            {MAIN_NAV_ITEMS.map(tab => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setActiveTab(tab.id as MainTab);
+                  }}
+                  className={`py-3 px-1 font-bold text-xs sm:text-sm flex items-center gap-2 border-b-2 transition-all whitespace-nowrap cursor-pointer ${
+                    isActive
+                      ? (isDarkMode 
+                          ? 'border-indigo-500 text-white font-black' 
+                          : 'border-indigo-600 text-indigo-600 font-black')
+                      : (isDarkMode 
+                          ? 'border-transparent text-slate-400 hover:text-white' 
+                          : 'border-transparent text-slate-500 hover:text-slate-900')
                   }`}
                 >
-                  <option value="all">Todos los prestadores</option>
-                  <option value="unassigned">Sin asignar</option>
-                  {students?.map((s: any, idx: number) => (
-                    <option key={`${s.id || 'student'}-${idx}`} value={s.id}>
-                      {s.firstName} {s.lastNamePaterno || ''}
-                    </option>
-                  ))}
-                </select>
-                <div className="absolute left-2.5 pointer-events-none">
-                  <User size={14} className={isDarkMode ? 'text-gray-400' : 'text-slate-400'} />
-                </div>
-                <div className="absolute right-2.5 pointer-events-none">
-                  <ChevronDown size={14} className={isDarkMode ? 'text-gray-400' : 'text-slate-400'} />
-                </div>
-              </div>
-            )}
+                  <Icon size={16} className={isActive ? (isDarkMode ? 'text-indigo-400' : 'text-indigo-600') : 'text-slate-400'} />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
           </div>
-          
-          {/* Desktop/Tablet Assignee Selector */}
-          {!isMobile && (
-            <div className="flex items-center gap-2">
-              {(activeTab === 'kanban' || activeTab === 'sprints') && (
-                <div className="relative flex items-center mr-2">
-                  <select
-                    value={selectedAssignee}
-                    onChange={(e) => setSelectedAssignee(e.target.value)}
-                    className={`appearance-none pl-8 pr-8 py-1.5 sm:py-2 text-xs sm:text-sm font-medium rounded-xl border shadow-sm transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500/50 w-full ${
-                      isDarkMode 
-                        ? 'bg-[#2a2a2a] border-white/10 text-white hover:bg-[#333]' 
-                        : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    <option value="all">Todos los prestadores</option>
-                    <option value="unassigned">Sin asignar</option>
-                    {students?.map((s: any, idx: number) => (
-                      <option key={`${s.id || 'student'}-${idx}`} value={s.id}>
-                        {s.firstName} {s.lastNamePaterno || ''}
-                      </option>
-                    ))}
-                  </select>
-                  <div className="absolute left-2.5 pointer-events-none">
-                    <User size={14} className={isDarkMode ? 'text-gray-400' : 'text-slate-400'} />
-                  </div>
-                  <div className="absolute right-2.5 pointer-events-none">
-                    <ChevronDown size={14} className={isDarkMode ? 'text-gray-400' : 'text-slate-400'} />
-                  </div>
-                </div>
-              )}
+        </div>
+      </div>
 
+      {/* =========================================================================
+          NIVEL 3 & 4: Controles de Contexto y Área de Trabajo
+          ========================================================================= */}
+      <div className="flex-1 overflow-auto flex flex-col">
+        {/* VISTA 1: RESUMEN (Dashboard con KPIs clicables hacia Tareas) */}
+        {activeTab === 'resumen' && (
+          <div className="p-4 sm:p-6 flex-1">
+            <ProjectDashboard 
+              tasks={tasks} 
+              projectId={projectId} 
+              project={currentProject}
+              students={students} 
+              isDarkMode={isDarkMode}
+              userRole={userRole}
+              onNavigateToTasks={handleDrillDownToTasks}
+              onNavigateToPlanning={handleNavigateToPlanning}
+            />
+          </div>
+        )}
+
+        {/* VISTA 2: TAREAS (Tabla interactiva estilo Monday, Kanban, Gantt, Calendario) */}
+        {activeTab === 'tareas' && (
+          <div className="flex-1 p-4 sm:p-6 flex flex-col">
+            <TaskWorkspace
+              initialProjectId={projectId}
+              projects={currentProject ? [currentProject] : []}
+              enrolledProjectIds={projectId ? [projectId] : undefined}
+              students={students}
+              currentUserId={currentUser?.uid || ''}
+              currentUserName={currentUser?.displayName || 'Usuario'}
+              currentUserRole={userRole}
+              isDarkMode={isDarkMode}
+              stages={currentProject?.stages || []}
+              sprints={sprints}
+              initialGrouping="stage"
+              initialStageFilter={drillFilter?.stageId || 'all'}
+              initialStatusFilter={drillFilter?.status || 'all'}
+              initialAssigneeFilter={drillFilter?.assigneeId || 'all'}
+              initialIsCriticalFilter={drillFilter?.isCritical || false}
+              onOpenSprintConfig={() => setShowSprintModal(true)}
+              onNavigateToPlanning={handleNavigateToPlanning}
+            />
+          </div>
+        )}
+
+        {/* VISTA 3: PLANIFICACIÓN (Herramientas especializadas con sub-pestañas) */}
+        {activeTab === 'planificacion' && (
+          <div className="flex-1 flex flex-col p-4 sm:p-6">
+            {/* Level 3: Sub-navigation bar for Planificación */}
+            <div className="flex items-center gap-2 mb-4 p-1 rounded-2xl bg-slate-200/60 dark:bg-slate-800/60 self-start border border-slate-300/40 dark:border-slate-700/50">
               <button
                 type="button"
-                onClick={() => setShowSprintModal(true)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 sm:py-2 text-xs sm:text-sm font-bold rounded-xl border shadow-xs transition-all cursor-pointer ${
-                  isDarkMode 
-                    ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20' 
-                    : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                onClick={() => setPlanningSubTab('sprints')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  planningSubTab === 'sprints'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
-                title="Configuración de Sprints y Ciclos de Trabajo"
               >
-                <Zap size={15} className="text-amber-500 fill-amber-500" />
-                <span>Configurar Sprints</span>
-                {sprints.length > 0 && (
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-black ${
-                    isDarkMode ? 'bg-amber-500/20 text-amber-200' : 'bg-amber-200 text-amber-800'
-                  }`}>
-                    {sprints.length}
-                  </span>
-                )}
+                Sprints y Ciclos
               </button>
+              <button
+                type="button"
+                onClick={() => setPlanningSubTab('stages')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  planningSubTab === 'stages'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Etapas del Proyecto
+              </button>
+              <button
+                type="button"
+                onClick={() => setPlanningSubTab('cpm')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  planningSubTab === 'cpm'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Ruta Crítica (CPM)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPlanningSubTab('gantt')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  planningSubTab === 'gantt'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Cronograma Gantt
+              </button>
+            </div>
 
+            {/* Sub-view Area */}
+            <div className="flex-1 min-h-0">
+              {planningSubTab === 'sprints' && (
+                <SprintTable 
+                  tasks={tasks} 
+                  projectId={projectId} 
+                  project={currentProject}
+                  userRole={userRole} 
+                  currentUser={currentUser} 
+                  students={students}
+                  sprints={sprints}
+                  onOpenSprintConfig={() => setShowSprintModal(true)}
+                  updateTaskStatus={updateTaskStatus}
+                  updateTaskField={updateTaskField}
+                  updateTaskFields={updateTaskFields}
+                  deleteTask={deleteTask}
+                  addTask={addTask}
+                  permissions={permissions}
+                  isDarkMode={isDarkMode}
+                />
+              )}
+
+              {planningSubTab === 'stages' && (
+                <StageEditor
+                  project={currentProject}
+                  tasks={tasks}
+                  onSave={handleSaveStages}
+                  isDarkMode={isDarkMode}
+                  addTask={addTask}
+                  updateTaskStatus={updateTaskStatus}
+                  updateTaskField={updateTaskField}
+                  deleteTask={deleteTask}
+                  students={students}
+                  currentUser={currentUser}
+                  userRole={userRole}
+                  permissions={permissions}
+                  onSelectTask={() => {
+                    setActiveTab('tareas');
+                  }}
+                />
+              )}
+
+              {planningSubTab === 'cpm' && (
+                <CriticalPathAnalysis 
+                  tasks={tasks as any} 
+                  stages={currentProject?.stages || []} 
+                  isDarkMode={isDarkMode} 
+                />
+              )}
+
+              {planningSubTab === 'gantt' && (
+                <GanttView 
+                  tasks={tasks} 
+                  projectId={projectId} 
+                  project={currentProject} 
+                  userRole={userRole} 
+                  currentUser={currentUser} 
+                  students={students}
+                  sprints={sprints}
+                  addTask={addTask}
+                  updateTaskStatus={updateTaskStatus}
+                  updateTaskField={updateTaskField}
+                  updateTaskFields={updateTaskFields}
+                  updateTaskDates={updateTaskDates}
+                  onSaveStages={handleSaveStages}
+                  deleteTask={deleteTask}
+                  permissions={permissions}
+                  isDarkMode={isDarkMode}
+                />
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* VISTA 4: RECURSOS (Materiales, Enlaces y Documentación) */}
+        {activeTab === 'recursos' && (
+          <div className="p-4 sm:p-6 flex-1">
+            <ProjectResources 
+              projectId={projectId}
+              permissions={permissions}
+              isDarkMode={isDarkMode}
+            />
+          </div>
+        )}
+
+        {/* VISTA 5: CONFIGURACIÓN (General, Etapas y Papelera integrada) */}
+        {activeTab === 'configuracion' && (
+          <div className="p-4 sm:p-6 flex-1 flex flex-col space-y-4">
+            {/* Level 3: Sub-navigation bar for Configuración */}
+            <div className="flex items-center gap-2 p-1 rounded-2xl bg-slate-200/60 dark:bg-slate-800/60 self-start border border-slate-300/40 dark:border-slate-700/50">
+              <button
+                type="button"
+                onClick={() => setConfigSubTab('general')}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  configSubTab === 'general'
+                    ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                Información General
+              </button>
               {permissions.isCoordinator && (
-                <button 
-                  onClick={() => setActiveTab('stages')}
-                  className={`p-1.5 sm:p-2 transition-colors ${isDarkMode ? 'text-gray-500 hover:text-white' : 'text-slate-400 hover:text-slate-600'}`}
-                  title="Configuración de Etapas"
+                <button
+                  type="button"
+                  onClick={() => setConfigSubTab('stages')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    configSubTab === 'stages'
+                      ? 'bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
                 >
-                  <Settings2 size={18} />
+                  Etapas y Fechas
+                </button>
+              )}
+              {permissions.isCoordinator && (
+                <button
+                  type="button"
+                  onClick={() => setConfigSubTab('trash')}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                    configSubTab === 'trash'
+                      ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400'
+                  }`}
+                >
+                  <Trash2 size={13} />
+                  <span>Papelera de Tareas</span>
                 </button>
               )}
             </div>
-          )}
-        </div>
 
-        {/* Bottom Row: Navigation Tabs */}
-        <div className="px-2 sm:px-8 py-2 flex items-center justify-center w-full overflow-hidden">
-          <div className="flex items-center gap-1 w-full lg:w-auto min-w-0">
-            <button 
-              onClick={() => scrollTabs('left')} 
-              className={`shrink-0 p-1.5 rounded-full shadow-sm border transition-all ${!showLeftArrow ? 'opacity-0 pointer-events-none' : ''} ${isDarkMode ? 'bg-slate-800 text-white border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-              aria-hidden={!showLeftArrow}
-            >
-              <ChevronRight size={16} className="rotate-180" />
-            </button>
-            <div className={`p-1 rounded-2xl w-full lg:w-auto relative border shadow-inner flex justify-center flex-1 min-w-0 ${isDarkMode ? 'bg-white/5 border-white/5' : 'bg-slate-100/80 border-slate-200/50'}`}>
-              <div ref={tabsScrollRef} className={`flex gap-1 overflow-x-auto hide-scrollbar flex-1 lg:flex-none justify-start lg:justify-center w-full ${isMobile || isTablet ? 'snap-x snap-mandatory' : ''}`} style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                {filteredAllTabs.map(renderTab)}
-              </div>
+            {/* Config Sub-view Content */}
+            <div className="flex-1">
+              {configSubTab === 'general' && (
+                <div className={`p-6 rounded-2xl border space-y-6 max-w-3xl ${
+                  isDarkMode ? 'bg-[#1e293b] border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900'
+                }`}>
+                  <div>
+                    <h3 className="text-base font-black">Configuración del Proyecto</h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Identificador, fechas maestras y descripción general del proyecto.
+                    </p>
+                  </div>
+
+                  <div className="space-y-4 text-xs font-bold">
+                    <div>
+                      <label className="text-slate-400 uppercase text-[10px] tracking-wider block mb-1">
+                        Nombre del Proyecto
+                      </label>
+                      <input 
+                        type="text"
+                        disabled
+                        value={currentProject?.name || ''}
+                        className={`w-full px-3 py-2 rounded-xl border opacity-80 ${
+                          isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-slate-100 border-slate-200 text-slate-900'
+                        }`}
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-slate-400 uppercase text-[10px] tracking-wider block mb-1">
+                          Fecha de Inicio
+                        </label>
+                        <input 
+                          type="date"
+                          disabled
+                          value={currentProject?.startDate || ''}
+                          className={`w-full px-3 py-2 rounded-xl border opacity-80 ${
+                            isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-slate-100 border-slate-200 text-slate-900'
+                          }`}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-slate-400 uppercase text-[10px] tracking-wider block mb-1">
+                          Fecha de Conclusión
+                        </label>
+                        <input 
+                          type="date"
+                          disabled
+                          value={currentProject?.endDate || ''}
+                          className={`w-full px-3 py-2 rounded-xl border opacity-80 ${
+                            isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-slate-100 border-slate-200 text-slate-900'
+                          }`}
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="text-slate-400 uppercase text-[10px] tracking-wider block mb-1">
+                        Descripción
+                      </label>
+                      <textarea 
+                        rows={3}
+                        disabled
+                        value={currentProject?.description || 'Sin descripción detallada.'}
+                        className={`w-full p-3 rounded-xl border opacity-80 resize-none ${
+                          isDarkMode ? 'bg-slate-900 border-slate-800 text-white' : 'bg-slate-100 border-slate-200 text-slate-900'
+                        }`}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {configSubTab === 'stages' && permissions.isCoordinator && (
+                <StageEditor
+                  project={currentProject}
+                  tasks={tasks}
+                  onSave={handleSaveStages}
+                  isDarkMode={isDarkMode}
+                  addTask={addTask}
+                  updateTaskStatus={updateTaskStatus}
+                  updateTaskField={updateTaskField}
+                  deleteTask={deleteTask}
+                  students={students}
+                  currentUser={currentUser}
+                  userRole={userRole}
+                  permissions={permissions}
+                  onSelectTask={() => {
+                    setActiveTab('tareas');
+                  }}
+                />
+              )}
+
+              {configSubTab === 'trash' && permissions.isCoordinator && (
+                <DeletedTasksView 
+                  projectId={projectId} 
+                  restoreTask={restoreTask} 
+                  permanentDelete={permanentDelete}
+                  students={students}
+                  isDarkMode={isDarkMode}
+                />
+              )}
             </div>
-            <button 
-              onClick={() => scrollTabs('right')} 
-              className={`shrink-0 p-1.5 rounded-full shadow-sm border transition-all ${!showRightArrow ? 'opacity-0 pointer-events-none' : ''} ${isDarkMode ? 'bg-slate-800 text-white border-white/10 hover:bg-slate-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
-              aria-hidden={!showRightArrow}
-            >
-              <ChevronRight size={16} />
-            </button>
           </div>
-        </div>
-      </div>
-
-      <div className={`flex-1 ${activeTab === 'kanban' || activeTab === 'gantt' ? 'overflow-hidden' : 'overflow-auto'} p-4 sm:p-6 ${isDarkMode ? 'bg-[#0a0a0a]' : 'bg-slate-50'}`}>
-        {isLoading ? (
-          <div className="flex items-center justify-center h-full">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-          </div>
-        ) : (
-          <>
-            {activeTab === 'dashboard' && (
-              <ProjectDashboard 
-                tasks={tasks} 
-                projectId={projectId} 
-                project={currentProject}
-                students={students} 
-                isDarkMode={isDarkMode}
-                userRole={userRole}
-              />
-            )}
-            {activeTab === 'task-workspace' && (
-              <TaskWorkspace
-                initialProjectId={projectId}
-                projects={currentProject ? [currentProject] : []}
-                students={students}
-                currentUserId={currentUser?.uid || ''}
-                currentUserName={currentUser?.displayName || 'Usuario'}
-                currentUserRole={userRole}
-                isDarkMode={isDarkMode}
-              />
-            )}
-            {activeTab === 'kanban' && (
-              <KanbanBoard 
-                tasks={filteredTasks} 
-                projectId={projectId} 
-                project={currentProject}
-                userRole={userRole} 
-                currentUser={currentUser} 
-                students={students}
-                sprints={sprints}
-                onOpenSprintConfig={() => setShowSprintModal(true)}
-                updateTaskStatus={updateTaskStatus}
-                updateTaskField={updateTaskField}
-                updateTaskFields={updateTaskFields}
-                deleteTask={deleteTask}
-                addTask={addTask}
-                permissions={permissions}
-                initialTaskId={selectedTaskId}
-                onTaskOpened={() => setSelectedTaskId(null)}
-                isDarkMode={isDarkMode}
-              />
-            )}
-            {activeTab === 'gantt' && (
-              <GanttView 
-                tasks={tasks} 
-                projectId={projectId} 
-                project={currentProject} 
-                userRole={userRole} 
-                currentUser={currentUser} 
-                students={students}
-                sprints={sprints}
-                addTask={addTask}
-                updateTaskStatus={updateTaskStatus}
-                updateTaskField={updateTaskField}
-                updateTaskFields={updateTaskFields}
-                updateTaskDates={updateTaskDates}
-                onSaveStages={handleSaveStages}
-                deleteTask={deleteTask}
-                permissions={permissions}
-                isDarkMode={isDarkMode}
-              />
-            )}
-            {activeTab === 'sprints' && (
-              <SprintTable 
-                tasks={filteredTasks} 
-                projectId={projectId} 
-                project={currentProject}
-                userRole={userRole} 
-                currentUser={currentUser} 
-                students={students}
-                sprints={sprints}
-                onOpenSprintConfig={() => setShowSprintModal(true)}
-                updateTaskStatus={updateTaskStatus}
-                updateTaskField={updateTaskField}
-                updateTaskFields={updateTaskFields}
-                deleteTask={deleteTask}
-                addTask={addTask}
-                permissions={permissions}
-                isDarkMode={isDarkMode}
-              />
-            )}
-            {activeTab === 'stages' && (
-              <StageEditor
-                project={currentProject}
-                tasks={tasks}
-                onSave={handleSaveStages}
-                isDarkMode={isDarkMode}
-                addTask={addTask}
-                updateTaskStatus={updateTaskStatus}
-                updateTaskField={updateTaskField}
-                deleteTask={deleteTask}
-                students={students}
-                currentUser={currentUser}
-                userRole={userRole}
-                permissions={permissions}
-                onSelectTask={(id: string) => {
-                  setSelectedTaskId(id);
-                  setActiveTab('kanban');
-                }}
-              />
-            )}
-            {activeTab === 'resources' && (
-              <ProjectResources 
-                projectId={projectId}
-                permissions={permissions}
-                isDarkMode={isDarkMode}
-              />
-            )}
-            {activeTab === 'cpm' && (
-              <CriticalPathAnalysis 
-                tasks={tasks as any} 
-                stages={currentProject?.stages || []} 
-                isDarkMode={isDarkMode} 
-              />
-            )}
-            {activeTab === 'trash' && (
-              <DeletedTasksView 
-                projectId={projectId} 
-                restoreTask={restoreTask} 
-                permanentDelete={permanentDelete}
-                students={students}
-                isDarkMode={isDarkMode}
-              />
-            )}
-          </>
         )}
       </div>
 
-      {/* Sprint Configuration Modal */}
+      {/* Modal de configuración de Sprints */}
       <SprintConfigModal
         isOpen={showSprintModal}
         onClose={() => setShowSprintModal(false)}

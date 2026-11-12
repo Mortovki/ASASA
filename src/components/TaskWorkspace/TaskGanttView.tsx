@@ -57,9 +57,10 @@ export const TaskGanttView: React.FC<TaskGanttViewProps> = ({
 
   const getStatusColor = (status: TaskStatus) => {
     switch (status) {
-      case 'listo': return 'bg-emerald-500 hover:bg-emerald-600';
-      case 'en_curso': return 'bg-amber-500 hover:bg-amber-600';
-      case 'detenido': return 'bg-rose-500 hover:bg-rose-600';
+      case 'done': return 'bg-emerald-500 hover:bg-emerald-600';
+      case 'in_progress': return 'bg-amber-500 hover:bg-amber-600';
+      case 'in_review': return 'bg-blue-600 hover:bg-blue-700';
+      case 'blocked': return 'bg-rose-500 hover:bg-rose-600';
       default: return 'bg-slate-400 hover:bg-slate-500';
     }
   };

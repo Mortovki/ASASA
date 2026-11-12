@@ -60,9 +60,10 @@ export const TaskCalendarView: React.FC<TaskCalendarViewProps> = ({
 
   const getStatusColor = (status: TaskStatus) => {
     switch (status) {
-      case 'listo': return 'bg-emerald-500 hover:bg-emerald-600 text-white';
-      case 'en_curso': return 'bg-amber-500 hover:bg-amber-600 text-white';
-      case 'detenido': return 'bg-rose-500 hover:bg-rose-600 text-white';
+      case 'done': return 'bg-emerald-500 hover:bg-emerald-600 text-white';
+      case 'in_progress': return 'bg-amber-500 hover:bg-amber-600 text-white';
+      case 'in_review': return 'bg-blue-600 hover:bg-blue-700 text-white';
+      case 'blocked': return 'bg-rose-500 hover:bg-rose-600 text-white';
       default: return 'bg-slate-400 hover:bg-slate-500 text-white';
     }
   };

@@ -259,6 +259,26 @@
         "fecha": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "sesionId", "accion", "modificadoPor", "fecha"]
+    },
+    "ActiveMeeting": {
+      "title": "ActiveMeeting",
+      "description": "Estado de reunión activa por proyecto para habilitar registro de reloj checador",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "projectId": { "type": "string" },
+        "projectName": { "type": "string" },
+        "category": { "type": "string" },
+        "isPresencial": { "type": "boolean" },
+        "isVirtual": { "type": "boolean" },
+        "isActive": { "type": "boolean" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "startTime": { "type": "string" },
+        "coordinatorId": { "type": "string" },
+        "coordinatorName": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "projectId", "isActive"]
     }
   },
   "firestore": {
@@ -309,6 +329,10 @@
     "/logs_auditoria/{logId}": {
       "schema": "AuditLog",
       "description": "Colección de registros de auditoría"
+    },
+    "/active_meetings/{meetingId}": {
+      "schema": "ActiveMeeting",
+      "description": "Colección de reuniones activas por proyecto"
     }
   }
 }

@@ -209,12 +209,12 @@ export const syncTaskToGoogle = async (
   taskListId: string,
   task: ProjectTask
 ): Promise<string | null> => {
-  const isDone = task.status === 'listo';
+  const isDone = task.status === 'done';
   const dueRFC3339 = task.dueDate ? new Date(`${task.dueDate}T12:00:00Z`).toISOString() : undefined;
 
   const body: GoogleTaskItem = {
     title: task.title,
-    notes: `Proyecto: ${task.projectName}\nPrioridad: ${task.priority.toUpperCase()}\nEstado: ${task.status.toUpperCase()}\n${task.description || ''}`,
+    notes: `Proyecto: ${task.projectName}\nPrioridad: ${task.priority} estrellas\nEstado: ${task.status}\n${task.description || ''}`,
     status: isDone ? 'completed' : 'needsAction',
     due: dueRFC3339
   };

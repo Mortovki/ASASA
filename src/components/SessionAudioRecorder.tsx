@@ -20,6 +20,8 @@ import toast from 'react-hot-toast';
 
 interface SessionAudioRecorderProps {
   isPresencial: boolean;
+  isSessionActive?: boolean;
+  onStartSessionRequest?: () => void;
   transcription: string;
   onTranscriptionChange: (text: string) => void;
   onAudioRecorded?: (audioUrl: string | null, audioBlob: Blob | null) => void;
@@ -28,6 +30,8 @@ interface SessionAudioRecorderProps {
 
 export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
   isPresencial,
+  isSessionActive = false,
+  onStartSessionRequest,
   transcription,
   onTranscriptionChange,
   onAudioRecorded,
@@ -50,6 +54,24 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Synchronization refs to avoid stale closures in Web Speech API listeners
+  const isRecordingRef = useRef(isRecording);
+  const isPausedRef = useRef(isPaused);
+  const transcriptionRef = useRef(transcription);
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+  }, [isPaused]);
+
+  useEffect(() => {
+    transcriptionRef.current = transcription;
+  }, [transcription]);
 
   // Verificar compatibilidad de Web Speech API
   useEffect(() => {
@@ -120,7 +142,7 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
     setVolumeLevel(0);
   };
 
-  // Iniciar reconocimiento de voz continuo
+  // Iniciar reconocimiento de voz continuo en tiempo real
   const initSpeechRecognition = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return null;
@@ -128,6 +150,7 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
     const recognition = new SpeechRecognition();
     recognition.continuous = true;
     recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
     recognition.lang = 'es-MX'; // Español de México
 
     recognition.onresult = (event: any) => {
@@ -143,34 +166,42 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
         }
       }
 
-      setInterimText(interim);
+      setInterimText(interim.trim());
 
       if (finalPhrase.trim()) {
         const timestamp = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
         const cleanPhrase = finalPhrase.trim();
-        onTranscriptionChange(
-          transcription 
-            ? `${transcription.trim()}\n[${timestamp}] ${cleanPhrase}`
-            : `[${timestamp}] ${cleanPhrase}`
-        );
+        const currentText = transcriptionRef.current.trim();
+        const updated = currentText 
+          ? `${currentText}\n[${timestamp}] ${cleanPhrase}`
+          : `[${timestamp}] ${cleanPhrase}`;
+        
+        transcriptionRef.current = updated;
+        onTranscriptionChange(updated);
+        setInterimText('');
       }
     };
 
     recognition.onerror = (event: any) => {
       console.warn("Aviso en SpeechRecognition:", event.error);
-      if (event.error === 'not-allowed') {
-        toast.error('Acceso al micrófono denegado. Permite el micrófono en tu navegador.');
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        toast.error('Reconocimiento de voz no autorizado en este navegador.');
       }
     };
 
     recognition.onend = () => {
-      // Si el usuario sigue grabando y no pausó, reiniciar automáticamente
-      if (isRecording && !isPaused && recognitionRef.current) {
-        try {
-          recognitionRef.current.start();
-        } catch (e) {
-          // Ya iniciado o reiniciando
-        }
+      // Si el usuario sigue grabando y no pausó, reiniciar automáticamente sin perder el stream
+      if (isRecordingRef.current && !isPausedRef.current) {
+        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+        restartTimeoutRef.current = setTimeout(() => {
+          if (isRecordingRef.current && !isPausedRef.current && recognitionRef.current) {
+            try {
+              recognitionRef.current.start();
+            } catch (e) {
+              // Ya iniciado o ocupado
+            }
+          }
+        }, 200);
       }
     };
 
@@ -179,6 +210,40 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
 
   // Iniciar grabación de audio y transcripción
   const handleStartRecording = async () => {
+    // REGLA: No permitir iniciar grabación si la sesión no ha iniciado
+    if (!isSessionActive) {
+      toast((t) => (
+        <div className="flex flex-col gap-2 text-xs">
+          <span className="font-bold flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
+            <AlertCircle size={15} /> Sesión de trabajo no iniciada
+          </span>
+          <span className="text-slate-600 dark:text-slate-300">
+            Debes iniciar primero la sesión de trabajo con el cronómetro (botón ▶ en el panel superior) antes de poder grabar y transcribir.
+          </span>
+          {onStartSessionRequest && (
+            <button
+              onClick={() => {
+                toast.dismiss(t.id);
+                onStartSessionRequest();
+                setTimeout(() => {
+                  handleStartRecording();
+                }, 400);
+              }}
+              className="mt-1 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black text-center transition-all shadow-md active:scale-95"
+            >
+              ▶ Iniciar Sesión y Comenzar a Grabar
+            </button>
+          )}
+        </div>
+      ), { duration: 6000, id: 'session-not-active' });
+      return;
+    }
+
+    if (!navigator?.mediaDevices?.getUserMedia) {
+      toast.error('Tu navegador o el entorno actual no soporta acceso al micrófono.');
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
@@ -231,17 +296,26 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
         }
       }
 
+      isRecordingRef.current = true;
+      isPausedRef.current = false;
       setIsRecording(true);
       setIsPaused(false);
-      toast.success('Grabación de audio y transcripción en vivo iniciadas');
+      toast.success('Grabación de audio y transcripción en tiempo real iniciadas');
     } catch (err: any) {
       console.error("Error al acceder al micrófono:", err);
-      toast.error('No se pudo acceder al micrófono. Verifica los permisos de tu navegador.');
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError' || err.message?.toLowerCase().includes('permission denied')) {
+        toast.error('Permiso de micrófono denegado. Por favor concede permiso de micrófono a la aplicación en tu navegador.');
+      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+        toast.error('No se detectó ningún micrófono conectado en tu equipo.');
+      } else {
+        toast.error('No se pudo acceder al micrófono. Verifica los permisos de tu navegador.');
+      }
     }
   };
 
   // Pausar grabación
   const handlePauseRecording = () => {
+    isPausedRef.current = true;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
       mediaRecorderRef.current.pause();
     }
@@ -250,6 +324,9 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
         recognitionRef.current.stop();
       } catch (e) {}
     }
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+    }
     stopAudioVisualizer();
     setIsPaused(true);
     toast('Grabación en pausa');
@@ -257,6 +334,7 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
 
   // Reanudar grabación
   const handleResumeRecording = () => {
+    isPausedRef.current = false;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
       mediaRecorderRef.current.resume();
     }
@@ -274,6 +352,11 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
 
   // Detener grabación
   const handleStopRecording = () => {
+    isRecordingRef.current = false;
+    isPausedRef.current = false;
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+    }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
@@ -377,26 +460,38 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
       </div>
 
       {/* Barra de control y visualizador de voz */}
-      <div className={`p-3.5 rounded-2xl border flex flex-wrap items-center justify-between gap-3 ${
+      <div className={`p-3.5 sm:p-4 rounded-2xl border flex flex-wrap items-center justify-between gap-3 min-w-0 ${
         isDarkMode ? 'bg-black/30 border-white/5' : 'bg-slate-50 border-slate-200/80'
       }`}>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5 min-w-0">
           {/* Botones de control */}
           {!isRecording ? (
-            <button
-              type="button"
-              onClick={handleStartRecording}
-              className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md shadow-rose-600/20 transition-all active:scale-95"
-            >
-              <Mic size={15} /> Iniciar Grabación
-            </button>
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+              <button
+                type="button"
+                onClick={handleStartRecording}
+                className={`px-4 py-2.5 rounded-xl font-black text-xs uppercase tracking-wider flex items-center gap-2 shadow-md transition-all active:scale-95 shrink-0 ${
+                  !isSessionActive
+                    ? 'bg-slate-200 dark:bg-white/10 text-slate-400 dark:text-slate-500 hover:bg-slate-300 dark:hover:bg-white/15 cursor-not-allowed border border-slate-300/60 dark:border-white/10 shadow-none'
+                    : 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-700 hover:to-red-700 text-white shadow-rose-600/25'
+                }`}
+                title={!isSessionActive ? "Primero debes dar inicio a la sesión de trabajo arriba" : "Iniciar Grabación"}
+              >
+                <Mic size={15} /> Iniciar Grabación
+              </button>
+              {!isSessionActive && (
+                <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-1 rounded-lg flex items-center gap-1 shrink-0">
+                  <AlertCircle size={12} className="shrink-0" /> Inicia la sesión arriba (▶) para grabar
+                </span>
+              )}
+            </div>
           ) : (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 shrink-0">
               {isPaused ? (
                 <button
                   type="button"
                   onClick={handleResumeRecording}
-                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95"
+                  className="px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-sm shadow-emerald-600/20"
                   title="Reanudar Grabación"
                 >
                   <Play size={14} className="fill-current" /> Reanudar
@@ -405,7 +500,7 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
                 <button
                   type="button"
                   onClick={handlePauseRecording}
-                  className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95"
+                  className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1.5 transition-all active:scale-95 shadow-sm shadow-amber-500/20"
                   title="Pausar Grabación"
                 >
                   <Pause size={14} className="fill-current" /> Pausar
@@ -415,7 +510,7 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
               <button
                 type="button"
                 onClick={handleStopRecording}
-                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-all active:scale-95"
+                className="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-black text-xs uppercase tracking-wider flex items-center gap-1.5 shadow-sm shadow-rose-600/20 transition-all active:scale-95"
                 title="Detener y Finalizar Grabación"
               >
                 <Square size={13} className="fill-current" /> Detener
@@ -424,14 +519,14 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
           )}
 
           {/* Cronómetro de grabación */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-200/60 dark:bg-white/10 font-mono text-xs font-black">
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-200/60 dark:bg-white/10 font-mono text-xs font-black shrink-0">
             <span className={`w-2 h-2 rounded-full ${isRecording && !isPaused ? 'bg-rose-500 animate-ping' : 'bg-slate-400'}`} />
             <span>{formatTime(recordingSeconds)}</span>
           </div>
 
           {/* Visualizador de nivel de voz (barritas animadas) */}
           {isRecording && !isPaused && (
-            <div className="flex items-center gap-0.5 h-4 px-2" title="Nivel de voz en vivo">
+            <div className="hidden sm:flex items-center gap-0.5 h-4 px-2 shrink-0" title="Nivel de voz en vivo">
               {[0.4, 0.7, 1, 0.6, 0.9, 0.5, 0.8].map((mult, i) => {
                 const barHeight = Math.max(3, Math.min(16, (volumeLevel / 100) * 16 * mult));
                 return (
@@ -447,7 +542,7 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
         </div>
 
         {/* Acciones auxiliares */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           {audioUrl && (
             <a
               href={audioUrl}
@@ -488,12 +583,12 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
 
       {/* Reproductor de audio grabado si existe */}
       {audioUrl && (
-        <div className={`p-3 rounded-2xl border flex items-center gap-3 ${
+        <div className={`p-3 rounded-2xl border flex items-center gap-3 overflow-hidden ${
           isDarkMode ? 'bg-indigo-500/5 border-indigo-500/20' : 'bg-indigo-50/50 border-indigo-200/60'
         }`}>
           <Volume2 size={16} className="text-indigo-500 shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-500 mb-1">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-500 mb-1 truncate">
               Audio Grabado de la Sesión Presencial ({formatTime(recordingSeconds)})
             </p>
             <audio src={audioUrl} controls className="w-full h-8 outline-none" />
@@ -501,29 +596,34 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
         </div>
       )}
 
-      {/* Texto en vivo mientras se habla (Interim transcript) */}
+      {/* Texto en vivo mientras se habla (Interim transcript en tiempo real) */}
       {interimText && (
-        <div className={`p-2.5 rounded-xl border border-dashed flex items-center gap-2 text-xs italic ${
-          isDarkMode ? 'bg-white/5 border-rose-500/30 text-rose-300' : 'bg-rose-50 border-rose-300 text-rose-700'
+        <div className={`p-3 rounded-2xl border flex items-start gap-2.5 text-xs animate-in fade-in duration-150 overflow-hidden ${
+          isDarkMode ? 'bg-indigo-950/40 border-indigo-500/40 text-indigo-200' : 'bg-indigo-50/90 border-indigo-200 text-indigo-950'
         }`}>
-          <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping shrink-0" />
-          <span className="truncate">Escuchando: "{interimText}"</span>
+          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping shrink-0 mt-1" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[10px] text-rose-500 dark:text-rose-400 mb-0.5">
+              <Radio size={12} className="animate-pulse" /> Transcribiendo en tiempo real:
+            </div>
+            <p className="italic font-medium break-words leading-relaxed text-xs sm:text-sm">"{interimText}"</p>
+          </div>
         </div>
       )}
 
       {/* Área de Transcripción Acumulada y Editable */}
-      <div className="space-y-1.5">
+      <div className="space-y-1.5 min-w-0">
         <div className="flex justify-between items-center text-[11px] font-bold text-slate-400">
-          <label className="flex items-center gap-1.5 uppercase tracking-wider text-[10px]">
-            <FileText size={12} className="text-indigo-500" /> Transcripción Registrada (Editable)
+          <label className="flex items-center gap-1.5 uppercase tracking-wider text-[10px] truncate">
+            <FileText size={12} className="text-indigo-500 shrink-0" /> Transcripción Registrada (Editable)
           </label>
-          <span className="text-[10px]">
+          <span className="text-[10px] shrink-0">
             {transcription.trim() ? `${transcription.trim().split(/\s+/).length} palabras` : '0 palabras'}
           </span>
         </div>
 
         <textarea
-          rows={4}
+          rows={5}
           value={transcription}
           onChange={(e) => onTranscriptionChange(e.target.value)}
           placeholder={
@@ -531,19 +631,19 @@ export const SessionAudioRecorder: React.FC<SessionAudioRecorderProps> = ({
               ? "El reconocimiento automático no está soportado en este navegador. Puedes escribir o pegar la transcripción o notas de la sesión presencial aquí..."
               : "La transcripción del audio de la sesión presencial aparecerá aquí en tiempo real conforme los alumnos y el coordinador hablen. También puedes editar o agregar notas manualmente..."
           }
-          className={`w-full p-3.5 rounded-xl text-xs font-mono leading-relaxed border outline-none resize-y transition-colors ${
+          className={`w-full min-h-[140px] max-h-[360px] p-3.5 sm:p-4 rounded-2xl text-xs sm:text-sm font-mono leading-relaxed border outline-none resize-y transition-all shadow-inner box-border break-words ${
             isDarkMode 
-              ? 'bg-black/30 border-white/10 text-white focus:border-indigo-500' 
-              : 'bg-slate-50 border-slate-200 text-slate-800 focus:border-indigo-500'
+              ? 'bg-black/30 border-white/10 text-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20' 
+              : 'bg-slate-50 border-slate-200 text-slate-800 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20'
           }`}
         />
 
-        <div className="flex items-center justify-between text-[10px] text-slate-400 px-1">
-          <span className="flex items-center gap-1">
-            <Sparkles size={11} className="text-purple-400" /> Al finalizar la sesión, Gemini procesará esta transcripción para redactar la minuta completa.
+        <div className="flex flex-wrap items-center justify-between gap-1 text-[10px] text-slate-400 px-1">
+          <span className="flex items-center gap-1 truncate">
+            <Sparkles size={11} className="text-purple-400 shrink-0" /> Al finalizar la sesión, Gemini procesará esta transcripción para redactar la minuta.
           </span>
           {transcription.trim().length > 0 && (
-            <span className="text-emerald-500 font-bold">
+            <span className="text-emerald-500 font-bold shrink-0">
               ✓ Transcripción lista para minuta
             </span>
           )}

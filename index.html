@@ -7,6 +7,14 @@
     <meta name="description" content="Sistema de gestión de proyectos con tableros Kanban, diagramas de Gantt, análisis de ruta crítica y seguimiento de tareas para prestadores de servicio social." />
     <meta property="og:title" content="Asistencia Prestadores" />
     <meta property="og:description" content="Sistema de gestión de proyectos con tableros Kanban, diagramas de Gantt, análisis de ruta crítica y seguimiento de tareas para prestadores de servicio social." />
+    <script>
+      window.addEventListener('unhandledrejection', function (event) {
+        var msg = event && event.reason && (event.reason.message || String(event.reason));
+        if (typeof msg === 'string' && msg.indexOf('WebSocket closed without opened') !== -1) {
+          event.preventDefault();
+        }
+      });
+    </script>
   </head>
   <body>
     <div id="root"></div>
